@@ -1,8 +1,9 @@
 import {describe, expect, test} from 'bun:test';
 import type {HarnessListing} from '@vibesys/ipc';
 import {checkMachine} from '@vibesys/machine/testing';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
-import {effectiveHarness, type PanelEvent, panelMachine} from './panel.js';
+import {effectiveHarness, type PanelMachineEvent, panelMachine} from './panel.js';
 
 type Snapshot = ReturnType<typeof getInitialSnapshot<typeof panelMachine>>;
 
@@ -17,8 +18,8 @@ const LISTING: HarnessListing = {
 
 type Settled = {readonly type: string; readonly output?: unknown; readonly error?: unknown};
 
-function step(snapshot: Snapshot, event: PanelEvent | Settled): Snapshot {
-  return getNextSnapshot(panelMachine, snapshot, event as PanelEvent);
+function step(snapshot: Snapshot, event: PanelMachineEvent | Settled): Snapshot {
+  return getNextSnapshot(panelMachine, snapshot, event as PanelMachineEvent);
 }
 
 function opened(): Snapshot {
@@ -65,24 +66,36 @@ describe('panelMachine', () => {
 
   test('closing the panel does not end a question in flight', () => {
     let snapshot = step(opened(), {type: 'set-composer', text: 'why?'});
-    snapshot = step(snapshot, {type: 'submit', threadId: 'thread-1'});
+    snapshot = step(snapshot, {type: 'submit', requestId: 'request-1', threadId: 'thread-1'});
     snapshot = step(snapshot, {type: 'close'});
     expect(snapshot.value).toMatchObject({visibility: 'closed', chat: 'asking'});
-    expect(snapshot.context.pending).toEqual({threadId: 'thread-1', text: 'why?'});
+    expect(snapshot.context.pending).toEqual({
+      requestId: 'request-1',
+      threadId: 'thread-1',
+      text: 'why?',
+    });
   });
 
   test('a first question creates the thread with the chosen harness, then asks it', () => {
     let snapshot = step(opened(), done('loadCatalogue', LISTING));
     snapshot = step(snapshot, {type: 'new-chat'});
     snapshot = step(snapshot, {type: 'set-composer', text: ' what is best? '});
-    snapshot = step(snapshot, {type: 'submit', threadId: null});
+    snapshot = step(snapshot, {type: 'submit', requestId: 'request-1', threadId: null});
     expect(snapshot.value).toMatchObject({chat: 'creating'});
     expect(snapshot.context.composer).toBe('');
-    expect(snapshot.context.pending).toEqual({threadId: null, text: 'what is best?'});
+    expect(snapshot.context.pending).toEqual({
+      requestId: 'request-1',
+      threadId: null,
+      text: 'what is best?',
+    });
     snapshot = step(snapshot, done('createThread', {ok: true, threadId: 'thread-7'}));
     expect(snapshot.value).toMatchObject({chat: 'asking'});
     expect(snapshot.context.choice).toEqual({kind: 'thread', id: 'thread-7'});
-    expect(snapshot.context.pending).toEqual({threadId: 'thread-7', text: 'what is best?'});
+    expect(snapshot.context.pending).toEqual({
+      requestId: 'request-1',
+      threadId: 'thread-7',
+      text: 'what is best?',
+    });
     snapshot = step(snapshot, done('ask', {ok: true}));
     expect(snapshot.value).toMatchObject({chat: 'idle'});
     expect(snapshot.context.pending).toBeNull();
@@ -90,7 +103,7 @@ describe('panelMachine', () => {
 
   test('a question that failed comes back to the composer with the reason', () => {
     let snapshot = step(opened(), {type: 'set-composer', text: 'why?'});
-    snapshot = step(snapshot, {type: 'submit', threadId: 'thread-1'});
+    snapshot = step(snapshot, {type: 'submit', requestId: 'request-1', threadId: 'thread-1'});
     expect(snapshot.value).toMatchObject({chat: 'asking'});
     snapshot = step(snapshot, done('ask', {ok: false, message: 'the run is not connected'}));
     expect(snapshot.value).toMatchObject({chat: 'idle'});
@@ -118,7 +131,7 @@ describe('panelMachine', () => {
   });
 
   test('an empty composer submits nothing', () => {
-    const snapshot = step(opened(), {type: 'submit', threadId: 'thread-1'});
+    const snapshot = step(opened(), {type: 'submit', requestId: 'request-1', threadId: 'thread-1'});
     expect(snapshot.value).toMatchObject({chat: 'idle'});
     expect(snapshot.context.pending).toBeNull();
   });
@@ -128,7 +141,7 @@ describe('panelMachine', () => {
       machine: panelMachine,
       input: undefined,
       event: (random, live) =>
-        random.pick<PanelEvent | {type: string}>([
+        random.pick<PanelMachineEvent | {type: string}>([
           {type: 'toggle'},
           {type: 'open'},
           {type: 'close'},
@@ -138,7 +151,7 @@ describe('panelMachine', () => {
           {type: 'new-steer'},
           {type: 'toggle-list'},
           {type: 'toggle-picker'},
-          {type: 'submit', threadId: random.pick([null, 'a'])},
+          {type: 'submit', requestId: 'request-1', threadId: random.pick([null, 'a'])},
           ...live.operations.map(operation =>
             live.done(
               operation,
@@ -158,4 +171,26 @@ describe('panelMachine', () => {
       },
     });
   });
+});
+
+test('only close and toggle hide the panel, whatever else the user does or the operations report', () => {
+  const events: readonly PanelMachineEvent[] = [
+    {type: 'new-chat'},
+    {type: 'choose-thread', id: 'a'},
+    {type: 'choose-thread', id: 'b'},
+    {type: 'set-composer', text: 'why?'},
+    {type: 'submit', requestId: 'request-1', threadId: null},
+    {type: 'submit', requestId: 'request-2', threadId: 'a'},
+    {type: 'new-steer'},
+    {type: 'toggle-list'},
+    {type: 'toggle-picker'},
+  ];
+  for (const seed of SEEDS.slice(0, 60)) {
+    const random = new Seeded(seed);
+    let snapshot = step(opened(), {type: 'open'});
+    for (let index = 0; index < 40; index++) {
+      snapshot = step(snapshot, random.pick(events));
+      expect(snapshot.value).toMatchObject({visibility: 'open'});
+    }
+  }
 });

@@ -1,20 +1,19 @@
 /** The feature supplies session operations to its machine; the session owns wire I/O. */
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import type {GatewayReader} from '@vibesys/run-skeleton/reader';
-import {tailRecordRows} from '@vibesys/run-state/records';
+import {decodeRecordRows} from '@vibesys/run-state/records';
+import {appendNativeTranscript, emptyNativeTranscript} from '@vibesys/run-state/transcript';
 import {createActor, fromCallback, fromPromise} from 'xstate';
 import {
   type GatewayEvent,
   type GatewayInput,
   type GatewayLogInput,
-  type GatewayRecordsInput,
+  type GatewayTranscriptInput,
   gatewayRunMachine,
 } from '../../state/index.js';
 
 export interface GatewayRunPorts {
   readonly reader: GatewayReader;
-  watchSetting(listener: () => void): () => void;
-  setting(enabled: boolean | undefined): Promise<boolean>;
 }
 export function startGatewayRun(
   ports: GatewayRunPorts,
@@ -24,13 +23,20 @@ export function startGatewayRun(
   return createActor(
     gatewayRunMachine.provide({
       actors: {
-        watchSetting: fromCallback(({sendBack}) =>
-          ports.watchSetting(() => sendBack({type: 'setting-changed'})),
-        ),
-        setting: fromPromise(({input}) => ports.setting(input)),
         loader: fromCallback<GatewayEvent, {runId: string}>(({input, sendBack}) =>
-          ports.reader.watch(input.runId, (load, failed, hint) =>
-            sendBack({type: 'loaded', load, failed, ...(hint ? {hint} : {})}),
+          ports.reader.watch(
+            input.runId,
+            ({load, progress, failure, terminal, hint, fresh}) =>
+              sendBack({
+                type: 'loaded',
+                load,
+                progress,
+                failure,
+                terminal,
+                fresh,
+                ...(hint ? {hint} : {}),
+              }),
+            records => sendBack({type: 'records', rows: decodeRecordRows(records)}),
           ),
         ),
         content: fromPromise(({input, signal}) =>
@@ -45,11 +51,16 @@ export function startGatewayRun(
             if (!signal.aborted) input.receive({type: 'log-failed'});
           }
         }),
-        records: fromPromise<void, GatewayRecordsInput>(({input, signal}) =>
-          ports.reader.records(input.runId, input.fromSeq, signal, bytes =>
-            input.receive({type: 'records', rows: tailRecordRows(bytes)}),
-          ),
-        ),
+        transcript: fromPromise<void, GatewayTranscriptInput>(async ({input, signal}) => {
+          let transcript = emptyNativeTranscript();
+          await ports.reader.binary(input.runId, input.streamId, signal, bytes => {
+            if (signal.aborted) return;
+            transcript = appendNativeTranscript(transcript, bytes);
+            input.receive({type: 'transcript', spanId: input.spanId, transcript});
+          });
+          if (!signal.aborted && transcript.pending.length > 0)
+            throw new Error('Truncated transcript');
+        }),
       },
     }),
     {input, clock: clockFrom(schedule)},

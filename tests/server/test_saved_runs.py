@@ -1,4 +1,4 @@
-"""Native discovery pages preserve metadata and reuse the retained-format importer."""
+"""Native discovery pages preserve metadata and label runs kept in the old format."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ import pytest
 from tests.server.host_helper_support import fake_host
 
 from server.host_helper_os import FileProjects
-from server.host_helper_requests import answer_registered_read
+from server.host_helper_requests import registry_read_source
+from server.host_operation_reads import answer_registered_read
 from server.host_saved_runs import page_saved_runs
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
@@ -48,36 +49,26 @@ def test_discovery_fences_pages_preserves_metadata_and_reports_missing_history(
     root.mkdir()
     entries = [_run(index) for index in range(230)]
     first = page_saved_runs(
-        pb.ListSavedRunsRequest(request_id="first", project=str(root)),
-        root,
-        entries,
-        clock=ManualClock(),
-        threads=SimThreads(),
+        pb.ListSavedRunsRequest(request_id="first", project=str(root)), root, entries
     )
     assert len(first.runs) == 200
     assert first.next_offset == 200
     assert all(row.imported == pb.SavedRunImport.UNAVAILABLE for row in first.runs)
-    assert all(row.detail == "journal is missing" for row in first.runs)
+    assert all(row.detail == "old format" for row in first.runs)
     assert first.runs[0].task == "task-a"
     assert first.runs[0].display_name == "Saved run"
     request = pb.ListSavedRunsRequest(
         request_id="next", project=str(root), offset=first.next_offset, revision=first.revision
     )
-    second = page_saved_runs(request, root, entries, clock=ManualClock(), threads=SimThreads())
+    second = page_saved_runs(request, root, entries)
     assert [row.run_id for row in first.runs + second.runs] == [row.run_id for row in entries]
     assert not second.has_field("next_offset")
     assert all(row.imported == pb.SavedRunImport.AVAILABLE for row in entries)
     with pytest.raises(ValueError, match="revision"):
-        page_saved_runs(
-            request, root, [*entries, _run(999)], clock=ManualClock(), threads=SimThreads()
-        )
+        page_saved_runs(request, root, [*entries, _run(999)])
     with pytest.raises(ValueError, match="offset"):
         page_saved_runs(
-            pb.ListSavedRunsRequest(request_id="bad", project=str(root), offset=999),
-            root,
-            entries,
-            clock=ManualClock(),
-            threads=SimThreads(),
+            pb.ListSavedRunsRequest(request_id="bad", project=str(root), offset=999), root, entries
         )
 
 
@@ -90,11 +81,7 @@ def test_discovery_obeys_the_response_byte_budget(
     root.mkdir()
     entries = [_run(index, "x" * size) for index in range(200)]
     result = page_saved_runs(
-        pb.ListSavedRunsRequest(request_id="bounded", project=str(root)),
-        root,
-        entries,
-        clock=ManualClock(),
-        threads=SimThreads(),
+        pb.ListSavedRunsRequest(request_id="bounded", project=str(root)), root, entries
     )
     assert len(result.to_binary()) <= 1 << 20
     assert len(result.runs) <= 200
@@ -104,7 +91,7 @@ def test_discovery_obeys_the_response_byte_budget(
 
 
 @pytest.mark.parametrize("live", [False, True])
-def test_native_history_is_published_without_rewriting_it(
+def test_native_history_is_listed_without_any_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, live: bool
 ) -> None:
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
@@ -115,21 +102,18 @@ def test_native_history_is_published_without_rewriting_it(
     fixture = Path(__file__).resolve().parents[2] / "proto/testdata/conversion/run.log.gz"
     original = gzip.decompress(fixture.read_bytes())
     path.write_bytes(original)
+    path.with_name("run.head").write_bytes(fixture.with_name("run.head").read_bytes())
     lock = RunLock(path.parent / "run.lock") if live else None
     try:
         result = page_saved_runs(
-            pb.ListSavedRunsRequest(request_id="native", project=str(root)),
-            root,
-            [_run(1)],
-            clock=ManualClock(),
-            threads=SimThreads(),
+            pb.ListSavedRunsRequest(request_id="native", project=str(root)), root, [_run(1)]
         )
     finally:
         if lock is not None:
             lock.close()
     assert result.runs[0].imported == pb.SavedRunImport.AVAILABLE
     assert path.read_bytes() == original
-    assert (Project.indexed_run_directories()[0]).resolve() == path.parent.resolve()
+    assert Project.indexed_run_directories() == ()
 
 
 def test_discovery_includes_native_only_runs_with_no_portable_manifest(
@@ -142,6 +126,7 @@ def test_discovery_includes_native_only_runs_with_no_portable_manifest(
     path.parent.mkdir(parents=True)
     fixture = Path(__file__).resolve().parents[2] / "proto/testdata/conversion/run.log.gz"
     path.write_bytes(gzip.decompress(fixture.read_bytes()))
+    path.with_name("run.head").write_bytes(fixture.with_name("run.head").read_bytes())
     source = FileProjects(FakeGitRepositories().repository, SimThreads(), clock=ManualClock())
     response = source.saved_runs(
         pb.ListSavedRunsRequest(request_id="native-only", project=str(root))
@@ -162,6 +147,7 @@ def test_registry_read_discovers_native_history_through_the_public_host_handler(
     fixture = Path(__file__).resolve().parents[2] / "proto/testdata/conversion/run.log.gz"
     original = gzip.decompress(fixture.read_bytes())
     path.write_bytes(original)
+    path.with_name("run.head").write_bytes(fixture.with_name("run.head").read_bytes())
     threads = SimThreads()
     host = replace(
         fake_host(threads, SimNetwork(threads)),
@@ -175,7 +161,9 @@ def test_registry_read_discovers_native_history_through_the_public_host_handler(
     )
     lock = RunLock(path.parent / "run.lock") if live else None
     try:
-        encoded = answer_registered_read("list-saved-runs", request.to_binary(), host)
+        encoded = answer_registered_read(
+            "list-saved-runs", request.to_binary(), registry_read_source(host)
+        )
     finally:
         if lock is not None:
             lock.close()
@@ -226,7 +214,7 @@ def test_discovery_dates_native_only_runs_from_the_first_epoch_and_sorts_them(
         ),
     )
     response = ReadResponse.from_binary(
-        answer_registered_read("list-saved-runs", request.to_binary(), host)
+        answer_registered_read("list-saved-runs", request.to_binary(), registry_read_source(host))
     )
     validate(response)
     assert response.result is not None

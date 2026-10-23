@@ -9,7 +9,9 @@ import {
   TailResponseSchema,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
+import {refusalOf} from '@vibesys/run-skeleton';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
+import {GrpcCode, GrpcError, grpcCode} from '@vibesys/transport';
 import {gatewayTransport} from './gateway-transport.js';
 
 /** The callback bridge over a faithful in-memory gateway; each call owns its cancellation. */
@@ -26,7 +28,7 @@ function bridgeFor(remote: FakeRunTransport): GatewayBridge {
           for await (const frame of remote.stream(method, bytes, owner.signal)) receive(frame);
           ended();
         } catch (error) {
-          ended(String(error));
+          ended(String(error), grpcCode(error));
         }
       };
       void follow();
@@ -89,4 +91,30 @@ test('stream data, remote errors and owner cancellation cross the callback adapt
     [Symbol.asyncIterator]();
   await expect(failed.next()).rejects.toThrow('Fault');
   failure.abort();
+});
+
+test('a stream ended with a gRPC status rethrows that status to the reader', async () => {
+  for (const code of [undefined, GrpcCode.NOT_FOUND, GrpcCode.INTERNAL]) {
+    const remote = new FakeRunTransport(storeRunFixture());
+    remote.fail(
+      `${SERVICE}Tail`,
+      code === undefined ? new Error('pipe closed') : new GrpcError(code, 'lstat: no such file'),
+    );
+    const transport = gatewayTransport(bridgeFor(remote), 'local');
+    const read = async (): Promise<unknown> => {
+      try {
+        for await (const _ of transport.stream(
+          `${SERVICE}Tail`,
+          toBinary(TailRequestSchema, create(TailRequestSchema, {runId: 'run-a', fromSeq: 1n})),
+          new AbortController().signal,
+        ));
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    };
+    const error = await read();
+    expect((error as {status?: number}).status).toBe(code);
+    expect(refusalOf(error) === 'not-found').toBe(code === GrpcCode.NOT_FOUND);
+  }
 });

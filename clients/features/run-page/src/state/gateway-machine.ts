@@ -1,9 +1,19 @@
-/** Gateway screen control owns the setting, loader, content request and selected log follower. */
+/** Gateway screen control owns the loader, content request and selected log follower. */
 import {emptyLogView, foldChunk, type LogView} from '@vibesys/logs';
 import {unprovided} from '@vibesys/machine';
-import type {RunLivenessHint, SkeletonLoad} from '@vibesys/run-skeleton';
+import type {
+  LoadProgress,
+  RunLivenessHint,
+  SkeletonLoad,
+  SkeletonLoadFailure,
+} from '@vibesys/run-skeleton';
 import {type RecordRow, recordRows} from '@vibesys/run-state/records';
 import type {SkeletonContent} from '@vibesys/run-state/skeleton';
+import {
+  emptyNativeTranscript,
+  type NativeTranscript,
+  nativeTranscriptHashes,
+} from '@vibesys/run-state/transcript';
 import {assign, fromCallback, setup} from 'xstate';
 import {
   type RunPageAction,
@@ -21,30 +31,47 @@ export interface GatewayLogInput {
   readonly streamId: string;
   readonly receive: (event: GatewayEvent) => void;
 }
-export interface GatewayRecordsInput {
+export interface GatewayTranscriptInput {
   readonly runId: string;
-  readonly fromSeq: bigint;
+  readonly spanId: string;
+  readonly streamId: string;
   readonly receive: (event: GatewayEvent) => void;
 }
 export type GatewayEvent =
-  | {type: 'setting-changed'}
-  | {type: 'toggle'; enabled: boolean}
+  | {type: 'refresh-writer'}
+  | {type: 'follow-transcript'; selection: {spanId: string; streamId: string} | null}
+  | {type: 'transcript'; spanId: string; transcript: NativeTranscript}
   | {type: 'ui'; action: RunPageAction}
   | {type: 'log'; streamId: string; text: string; offset: number; next: number}
   | {type: 'log-failed'}
   | {type: 'records'; rows: readonly RecordRow[]}
-  | {type: 'loaded'; load: SkeletonLoad | undefined; failed: boolean; hint?: RunLivenessHint};
+  | {type: 'retry'}
+  | {
+      type: 'loaded';
+      load: SkeletonLoad | undefined;
+      progress: LoadProgress;
+      failure: SkeletonLoadFailure | undefined;
+      terminal: boolean;
+      hint?: RunLivenessHint;
+      fresh: boolean;
+    };
 export interface GatewayRunContext extends GatewayInput {
-  enabled: boolean;
   load: SkeletonLoad | undefined;
+  progress: LoadProgress;
+  failure: SkeletonLoadFailure | undefined;
+  terminal: boolean;
   hint: RunLivenessHint | undefined;
+  /** The reader's liveness lease; the controls read this same fact. */
+  fresh: boolean;
+  head: RunLivenessHint['head'];
   ui: RunPageState;
   text: Readonly<Record<string, string>>;
   contentHash: string;
   attemptedContent: ReadonlySet<string>;
   replies: NonNullable<SkeletonContent['replies']>;
   error: string | null;
-  recordsNextSeq: bigint;
+  selectedTranscript: {spanId: string; streamId: string} | null;
+  transcripts: Readonly<Record<string, NativeTranscript>>;
 }
 
 function nextContentHash(context: GatewayRunContext): string {
@@ -55,8 +82,13 @@ function nextContentHash(context: GatewayRunContext): string {
       return hash;
   }
   return (
-    Object.values(context.replies)
-      .flat()
+    [
+      ...Object.values(context.transcripts).flatMap(nativeTranscriptHashes),
+      ...Object.values(context.replies)
+        .flat()
+        .map(ref => ref.hash),
+    ]
+      .map(hash => ({hash}))
       .map(ref => ref.hash)
       .find(hash => context.text[hash] === undefined && !context.attemptedContent.has(hash)) ?? ''
   );
@@ -119,13 +151,19 @@ function receivedLog(
   };
 }
 
+/** Committed headlines survive a lost lease independently of the transient lock hint. */
+function receivedHead(previous: RunLivenessHint['head'], next: RunLivenessHint['head']) {
+  if (!previous) return next;
+  if (!next) return previous;
+  return next.epoch > previous.epoch ||
+    (next.epoch === previous.epoch && (next.committedSeq ?? -1n) >= (previous.committedSeq ?? -1n))
+    ? next
+    : previous;
+}
+
 export const gatewayRunMachine = setup({
   types: {context: {} as GatewayRunContext, input: {} as GatewayInput, events: {} as GatewayEvent},
   actors: {
-    watchSetting: fromCallback<GatewayEvent>(() => {
-      throw new Error('setting watch not provided');
-    }),
-    setting: unprovided<boolean, boolean | undefined>('transport setting'),
     loader: fromCallback<GatewayEvent, {runId: string}>(() => {
       throw new Error('loader not provided');
     }),
@@ -133,20 +171,17 @@ export const gatewayRunMachine = setup({
       'content by hash',
     ),
     log: unprovided<void, GatewayLogInput>('log transport'),
-    records: unprovided<void, GatewayRecordsInput>('run records'),
+    transcript: unprovided<void, GatewayTranscriptInput>('transcript transport'),
   },
   guards: {
     needsContent: ({context}) => nextContentHash(context) !== '',
-    hasStream: ({context}) => context.ui.selected !== null,
   },
   actions: {
     receivedRecords: assign(({context, event}) => {
       if (event.type !== 'records') return {};
       const rows = recordRows(context.ui.recordLog ?? [], event.rows);
-      const last = rows.at(-1);
       return {
         replies: replyAttachments(context.replies, event.rows),
-        recordsNextSeq: last ? BigInt(last.seq) + 1n : context.recordsNextSeq,
         ui: {...context.ui, recordLog: rows, recordLogError: null},
       };
     }),
@@ -155,125 +190,74 @@ export const gatewayRunMachine = setup({
   id: 'gatewayRun',
   context: ({input}) => ({
     ...input,
-    enabled: false,
     load: undefined,
+    progress: {phase: 'skeleton'},
+    failure: undefined,
+    terminal: false,
     hint: undefined,
+    fresh: false,
+    head: undefined,
     ui: runPageInitial(input.seed),
     text: {},
     contentHash: '',
     attemptedContent: new Set(),
     replies: {},
     error: null,
-    recordsNextSeq: 0n,
+    selectedTranscript: null,
+    transcripts: {},
   }),
-  initial: 'checking',
-  invoke: {id: 'watch-setting', src: 'watchSetting'},
-  on: {
-    'setting-changed': {target: '.checking', reenter: true},
-    toggle: {
-      target: '.saving',
-      reenter: true,
-      actions: assign({enabled: ({event}) => event.enabled, error: null}),
-    },
-  },
+  initial: 'active',
   states: {
-    checking: {
-      invoke: {
-        id: 'read-setting',
-        src: 'setting',
-        input: undefined,
-        onDone: [
-          {guard: ({event}) => event.output, target: 'active', actions: assign({enabled: true})},
-          {target: 'off', actions: assign({enabled: false})},
-        ],
-        onError: {target: 'failed', actions: assign({error: 'Unavailable'})},
-      },
-      after: {15000: {target: 'failed', actions: assign({error: 'Timeout'})}},
-    },
-    saving: {
-      invoke: {
-        id: 'save-setting',
-        src: 'setting',
-        input: ({context}) => context.enabled,
-        onDone: [
-          {guard: ({event}) => event.output, target: 'active', actions: assign({enabled: true})},
-          {target: 'off'},
-        ],
-        onError: {target: 'failed', actions: assign({error: 'Unavailable'})},
-      },
-      after: {15000: {target: 'failed', actions: assign({error: 'Timeout'})}},
-    },
-    off: {},
-    failed: {},
     active: {
       entry: assign({
         load: undefined,
+        progress: {phase: 'skeleton'},
+        failure: undefined,
+        terminal: false,
         hint: undefined,
+        fresh: false,
+        head: undefined,
         contentHash: '',
         attemptedContent: new Set(),
-        ui: ({context}) => ({...context.ui, selected: null, views: {}}),
+        replies: {},
+        ui: ({context}) => {
+          const {recordLog: _rows, recordLogError: _error, ...rest} = context.ui;
+          return {...rest, selected: null, views: {}};
+        },
       }),
       type: 'parallel',
-      invoke: {
-        id: 'loader',
-        src: 'loader',
-        input: ({context}) => ({runId: context.seed.identity.runId}),
-        onError: {actions: assign({error: 'Unavailable'})},
-      },
       on: {
         loaded: {
           actions: assign({
-            load: ({event}) => event.load,
+            load: ({context, event}) =>
+              (event.load?.skeleton.throughSeq ?? -1n) >= (context.load?.skeleton.throughSeq ?? -1n)
+                ? event.load
+                : context.load,
+            progress: ({event}) => event.progress,
+            failure: ({event}) => event.failure,
+            terminal: ({event}) => event.terminal,
             hint: ({event}) => event.hint,
-            error: ({context, event}) =>
-              event.failed
-                ? 'Disconnected'
-                : context.error === 'Disconnected'
-                  ? null
-                  : context.error,
+            fresh: ({event}) => event.fresh,
+            head: ({context, event}) => receivedHead(context.head, event.hint?.head),
           }),
         },
+        records: {actions: 'receivedRecords'},
+        retry: {target: '#gatewayRun.active', reenter: true},
         ui: {actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)})},
       },
       states: {
-        records: {
-          initial: 'reading',
+        writer: {
+          initial: 'following',
+          on: {'refresh-writer': {target: '.following', reenter: true}},
           states: {
-            reading: {
+            following: {
               invoke: {
-                id: 'records',
-                src: 'records',
-                input: ({context, self}) => ({
-                  runId: context.seed.identity.runId,
-                  fromSeq: context.recordsNextSeq,
-                  receive: event => self.send(event),
-                }),
-                onDone: {target: 'retrying'},
-                onError: {
-                  target: 'retrying',
-                  actions: assign({
-                    ui: ({context}) => ({...context.ui, recordLogError: 'Run records unavailable'}),
-                  }),
-                },
+                id: 'loader',
+                src: 'loader',
+                input: ({context}) => ({runId: context.seed.identity.runId}),
+                onError: {actions: assign({error: 'Unavailable'})},
               },
-              initial: 'waiting',
-              states: {
-                waiting: {
-                  after: {
-                    30000: {
-                      target: '#gatewayRun.active.records.retrying',
-                      actions: assign({
-                        ui: ({context}) => ({...context.ui, recordLogError: 'Run records timeout'}),
-                      }),
-                    },
-                  },
-                  on: {records: {target: 'live', actions: 'receivedRecords'}},
-                },
-                live: {},
-              },
-              on: {records: {actions: 'receivedRecords'}},
             },
-            retrying: {after: {1000: 'reading'}},
           },
         },
         content: {
@@ -315,6 +299,79 @@ export const gatewayRunMachine = setup({
             },
           },
         },
+        transcript: {
+          initial: 'idle',
+          on: {
+            'follow-transcript': {
+              guard: ({context, event}) =>
+                event.selection?.streamId !== context.selectedTranscript?.streamId,
+              target: '.choose',
+              actions: assign(({context, event}) => ({
+                selectedTranscript: event.selection,
+                transcripts: event.selection
+                  ? {...context.transcripts, [event.selection.spanId]: emptyNativeTranscript()}
+                  : context.transcripts,
+              })),
+            },
+          },
+          states: {
+            idle: {},
+            choose: {
+              always: [
+                {guard: ({context}) => context.selectedTranscript !== null, target: 'reading'},
+                {target: 'idle'},
+              ],
+            },
+            reading: {
+              invoke: {
+                id: 'transcript',
+                src: 'transcript',
+                input: ({context, self}) => ({
+                  runId: context.seed.identity.runId,
+                  spanId: context.selectedTranscript?.spanId ?? '',
+                  streamId: context.selectedTranscript?.streamId ?? '',
+                  receive: event => self.send(event),
+                }),
+                onError: {target: 'idle', actions: assign({error: 'Transcript unavailable'})},
+                onDone: {target: 'idle'},
+              },
+              initial: 'waiting',
+              states: {
+                waiting: {
+                  after: {
+                    30000: {
+                      target: '#gatewayRun.active.transcript.idle',
+                      actions: assign({error: 'Transcript timeout'}),
+                    },
+                  },
+                  on: {
+                    transcript: {
+                      guard: ({event}) => event.transcript.entries.length > 0,
+                      target: 'live',
+                      actions: assign(({context, event}) => ({
+                        transcripts: {
+                          ...context.transcripts,
+                          [event.spanId]: event.transcript,
+                        },
+                      })),
+                    },
+                  },
+                },
+                live: {},
+              },
+              on: {
+                transcript: {
+                  actions: assign(({context, event}) => ({
+                    transcripts: {
+                      ...context.transcripts,
+                      [event.spanId]: event.transcript,
+                    },
+                  })),
+                },
+              },
+            },
+          },
+        },
         logs: {
           initial: 'idle',
           on: {
@@ -322,9 +379,15 @@ export const gatewayRunMachine = setup({
               {
                 guard: ({event, context}) =>
                   event.action.type === 'select-stream' &&
-                  event.action.streamId !== context.ui.selected,
+                  (event.action.streamId !== context.ui.selected ||
+                    context.ui.logProblem !== undefined),
                 target: '.following',
-                actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)}),
+                actions: assign({
+                  ui: ({context, event}) => ({
+                    ...uiStep(context.ui, event.action),
+                    logProblem: undefined,
+                  }),
+                }),
               },
               {actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)})},
             ],
@@ -332,29 +395,6 @@ export const gatewayRunMachine = setup({
           states: {
             idle: {},
             following: {
-              initial: 'waiting',
-              states: {
-                waiting: {
-                  after: {
-                    30000: {
-                      target: '#gatewayRun.active.logs.idle',
-                      actions: assign({error: 'Log timeout'}),
-                    },
-                  },
-                  on: {
-                    log: {
-                      target: 'live',
-                      actions: assign({
-                        ui: ({context, event}) => ({
-                          ...context.ui,
-                          views: receivedLog(context, event),
-                        }),
-                      }),
-                    },
-                  },
-                },
-                live: {},
-              },
               invoke: {
                 id: 'log',
                 src: 'log',
@@ -363,15 +403,35 @@ export const gatewayRunMachine = setup({
                   streamId: context.ui.selected ?? '',
                   receive: event => self.send(event),
                 }),
-                onError: {target: 'idle', actions: assign({error: 'Log unavailable'})},
+                onError: {
+                  target: 'idle',
+                  actions: assign({
+                    ui: ({context}) => ({
+                      ...context.ui,
+                      logProblem: {streamId: context.ui.selected ?? '', message: 'Log unavailable'},
+                    }),
+                  }),
+                },
               },
               on: {
                 log: {
                   actions: assign({
-                    ui: ({context, event}) => ({...context.ui, views: receivedLog(context, event)}),
+                    ui: ({context, event}) => ({
+                      ...context.ui,
+                      views: receivedLog(context, event),
+                      logProblem: undefined,
+                    }),
                   }),
                 },
-                'log-failed': {target: 'idle', actions: assign({error: 'Log unavailable'})},
+                'log-failed': {
+                  target: 'idle',
+                  actions: assign({
+                    ui: ({context}) => ({
+                      ...context.ui,
+                      logProblem: {streamId: context.ui.selected ?? '', message: 'Log unavailable'},
+                    }),
+                  }),
+                },
               },
             },
           },

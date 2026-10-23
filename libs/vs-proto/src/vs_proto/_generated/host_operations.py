@@ -221,6 +221,76 @@ def accept_list_saved_runs(
     return ListSavedRuns.accept(request)
 
 
+ListAgentLogins = Operation(
+    "ListAgentLogins",
+    19,
+    19,
+    19,
+    25000,
+    5000,
+    1,
+    2,
+    1,
+    1,
+    None,
+    pb.ListAgentLoginsRequest,
+    pb.ListAgentLoginsResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_list_agent_logins(
+    request: pb.ListAgentLoginsRequest,
+) -> AcceptedRequest[pb.ListAgentLoginsRequest]:
+    return ListAgentLogins.accept(request)
+
+
+ListRunDigests = Operation(
+    "ListRunDigests",
+    41,
+    41,
+    41,
+    25000,
+    5000,
+    1,
+    2,
+    1,
+    1,
+    None,
+    pb.ListRunDigestsRequest,
+    pb.ListRunDigestsResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_list_run_digests(
+    request: pb.ListRunDigestsRequest,
+) -> AcceptedRequest[pb.ListRunDigestsRequest]:
+    return ListRunDigests.accept(request)
+
+
+UsageWindow = Operation(
+    "UsageWindow",
+    42,
+    42,
+    42,
+    25000,
+    5000,
+    1,
+    2,
+    1,
+    1,
+    None,
+    pb.UsageWindowRequest,
+    pb.UsageWindowResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_usage_window(request: pb.UsageWindowRequest) -> AcceptedRequest[pb.UsageWindowRequest]:
+    return UsageWindow.accept(request)
+
+
 CreateExample = Operation(
     "CreateExample",
     34,
@@ -412,6 +482,7 @@ ADAPTER_OPERATIONS: dict[str, Operation] = {
     "compute.list": ListCompute,
     "run.preflight": PreflightRun,
     "examples.destination": InspectDestination,
+    "agent_logins.list": ListAgentLogins,
 }
 OPERATIONS: tuple[Operation, ...] = (
     ListTasks,
@@ -423,6 +494,9 @@ OPERATIONS: tuple[Operation, ...] = (
     PreflightRun,
     InspectDestination,
     ListSavedRuns,
+    ListAgentLogins,
+    ListRunDigests,
+    UsageWindow,
     CreateExample,
     CopyProject,
     PutCluster,
@@ -447,6 +521,9 @@ class Handlers:
     preflight_run: Callable[[pb.PreflightRunRequest], pb.PreflightRunResponse]
     inspect_destination: Callable[[pb.InspectDestinationRequest], pb.InspectDestinationResponse]
     list_saved_runs: Callable[[pb.ListSavedRunsRequest], pb.ListSavedRunsResponse]
+    list_agent_logins: Callable[[pb.ListAgentLoginsRequest], pb.ListAgentLoginsResponse]
+    list_run_digests: Callable[[pb.ListRunDigestsRequest], pb.ListRunDigestsResponse]
+    usage_window: Callable[[pb.UsageWindowRequest], pb.UsageWindowResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
@@ -485,6 +562,18 @@ class Handlers:
             case 37:
                 return ListSavedRuns.validate_response(
                     request, self.list_saved_runs(ListSavedRuns.request_value(request))
+                )
+            case 19:
+                return ListAgentLogins.validate_response(
+                    request, self.list_agent_logins(ListAgentLogins.request_value(request))
+                )
+            case 41:
+                return ListRunDigests.validate_response(
+                    request, self.list_run_digests(ListRunDigests.request_value(request))
+                )
+            case 42:
+                return UsageWindow.validate_response(
+                    request, self.usage_window(UsageWindow.request_value(request))
                 )
             case _:
                 raise ValueError("unknown operation id")
@@ -597,12 +686,14 @@ HOST_CALLS: tuple[HostCall, ...] = (
     HostCall("post_intent", "post-intent", 2, 1, 10000, 5000),
     HostCall("relaunch", "relaunch", 3, 3, 30000, 5000),
     HostCall("chat_message", "chat-message", 4, 4, 10000, 5000),
+    HostCall("create_chat_session", "create-chat-session", 6, 6, 10000, 5000),
 )
 
 HostCallResult: TypeAlias = (
     Oneof[Literal["post_intent"], host_call.PostIntentResponse]
     | Oneof[Literal["relaunch"], host_call.RelaunchResponse]
     | Oneof[Literal["chat_message"], host_call.ChatMessageResponse]
+    | Oneof[Literal["create_chat_session"], host_call.CreateChatSessionResponse]
 )
 
 
@@ -613,6 +704,9 @@ def dispatch_host_call(
     post_intent: Callable[[host_call.PostIntentRequest], host_call.PostIntentResponse],
     relaunch: Callable[[host_call.RelaunchRequest], host_call.RelaunchResponse],
     chat_message: Callable[[host_call.ChatMessageRequest], host_call.ChatMessageResponse],
+    create_chat_session: Callable[
+        [host_call.CreateChatSessionRequest], host_call.CreateChatSessionResponse
+    ],
 ) -> HostCallResult | None:
     """Run the handler registered for one generated HostCall slot."""
     match field:
@@ -622,6 +716,11 @@ def dispatch_host_call(
             return Oneof("relaunch", relaunch(cast(host_call.RelaunchRequest, request)))
         case "chat_message":
             return Oneof("chat_message", chat_message(cast(host_call.ChatMessageRequest, request)))
+        case "create_chat_session":
+            return Oneof(
+                "create_chat_session",
+                create_chat_session(cast(host_call.CreateChatSessionRequest, request)),
+            )
         case _:
             return None
 
@@ -636,6 +735,9 @@ READS: dict[str, Operation] = {
     "preflight_run": PreflightRun,
     "inspect_destination": InspectDestination,
     "list_saved_runs": ListSavedRuns,
+    "list_agent_logins": ListAgentLogins,
+    "list_run_digests": ListRunDigests,
+    "usage_window": UsageWindow,
 }
 READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_tasks", "list-tasks", 10, 10, 10000, 5000),
@@ -647,6 +749,9 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("preflight_run", "preflight-run", 16, 16, 65000, 5000),
     HostCall("inspect_destination", "inspect-destination", 23, 23, 10000, 5000),
     HostCall("list_saved_runs", "list-saved-runs", 37, 37, 10000, 5000),
+    HostCall("list_agent_logins", "list-agent-logins", 19, 19, 25000, 5000),
+    HostCall("list_run_digests", "list-run-digests", 41, 41, 25000, 5000),
+    HostCall("usage_window", "usage-window", 42, 42, 25000, 5000),
 )
 MUTATIONS: dict[str, Operation] = {
     "create_example": CreateExample,

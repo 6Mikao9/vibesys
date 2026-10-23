@@ -41,6 +41,7 @@ export {
   type HostListing,
   type HostRun,
   hostListing,
+  hostsComeUp,
   type InstanceObservation,
   instanceObservation,
   instancePhaseText,
@@ -59,7 +60,6 @@ export {
 export {type RecordedProjectRoot, recordedProjectRoot} from './recorded-root.js';
 export {missingRequiredFeatures, REQUIRED_HELPER_FEATURES} from './required-features.js';
 export {
-  digestEntries,
   digestLook,
   type IdeaPoint,
   type ListedRun,
@@ -77,6 +77,5 @@ export {
   USAGE_WINDOW_MAX_RUNS,
   type UsageWindowEntry,
   type UsageWindowOutcome,
-  usageWindowEntry,
   usageWindowRefusal,
 } from './usage-window.js';

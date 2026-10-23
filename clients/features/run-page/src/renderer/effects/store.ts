@@ -10,8 +10,9 @@
 
 import type {RunStatus} from '@vibesys/contracts';
 import {type LogListOutcome, type LogTransport, startLogFollower} from '@vibesys/logs';
-import type {ScheduleTimeout} from '@vibesys/machine';
+import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {createStore, type Store} from '@vibesys/store';
+import {createActor, fromPromise} from 'xstate';
 import {
   followedStreams,
   type HistoryReply,
@@ -21,11 +22,13 @@ import {
   type RunPageSeed,
   type RunPageState,
   readerHeld,
+  runHasEnded,
   runPageInitial,
   runPageStep,
   type SpanDetailReply,
   type SummaryReply,
 } from '../../state/index.js';
+import {resumeMachine, resumeStatus} from '../../state/resume.js';
 import {type LiveChat, type OpenSession, SessionHolder} from './live-session.js';
 
 /** The run's logs as the app reads them. */
@@ -58,8 +61,8 @@ export interface RunPagePorts {
   /** The run's summary: its run level without its history. */
   readSummary(status: RunStatus): Promise<SummaryReply>;
   readSpan(spanId: string, from: number, max: number): Promise<SpanDetailReply>;
-  /** Resume an ended run that its end record says can resume. */
-  resumeEnded(fromRound: number | null): void;
+  /** Ask the host to resume an ended run; its live listing confirms the new writer. */
+  resumeEnded(): Promise<void>;
   openWindow(): void;
   /** This window's clock, in epoch milliseconds. */
   now(): number;
@@ -269,9 +272,6 @@ function performCommand(ports: RunPagePorts, request: RunPageRequest, dispatch: 
     case 'read-span':
       readSpan(ports, request, dispatch);
       return;
-    case 'resume-ended':
-      ports.resumeEnded(request.fromRound);
-      return;
     case 'open-window':
       ports.openWindow();
       return;
@@ -385,9 +385,26 @@ function performReader(
 /** Brings each reconciler in step with the state after every change. */
 function reconcile(
   state: RunPageState,
+  resume: ReturnType<typeof resumeActor> | undefined,
   reconcilers: readonly (null | {reconcile(state: RunPageState): void})[],
 ): void {
+  if (resume && !resume.getSnapshot().matches('ready') && !runHasEnded(state))
+    resume.send({type: 'started'});
   for (const each of reconcilers) each?.reconcile(state);
+}
+
+function resumeActor(ports: RunPagePorts, schedule: ScheduleTimeout, dispatch: Dispatch) {
+  const actor = createActor(
+    resumeMachine.provide({
+      actors: {
+        resume: fromPromise(() => ports.resumeEnded()),
+      },
+    }),
+    {clock: clockFrom(schedule)},
+  );
+  actor.subscribe(snapshot => dispatch({type: 'resume-status', status: resumeStatus(snapshot)}));
+  actor.start();
+  return actor;
 }
 
 export function createRunPageStore(
@@ -395,6 +412,7 @@ export function createRunPageStore(
   ports: RunPagePorts,
   schedule: ScheduleTimeout,
 ): RunPageStore {
+  let resume: ReturnType<typeof resumeActor> | undefined;
   const cancels = new Set<() => void>();
   const bounds = new Bounds(schedule, cancels);
   let disposed = false;
@@ -410,6 +428,10 @@ export function createRunPageStore(
     const dispatch = live(raw);
     if (disposed) return;
     switch (request.kind) {
+      case 'resume-ended':
+        resume ??= resumeActor(ports, schedule, dispatch);
+        resume.send({type: 'resume'});
+        return;
       case 'arm-bound':
       case 'cancel-bound':
         bounds.perform(request, dispatch);
@@ -458,13 +480,14 @@ export function createRunPageStore(
   const followers = logs === null ? null : new Followers(logs, schedule, live(store.dispatch));
   store.dispatch({type: 'locate'}); // bounds the wait for the listing to place the run
   const unsubscribe = store.subscribe(() => {
-    reconcile(store.getState(), [followers, sessions, readerSessions, ticker]);
+    reconcile(store.getState(), resume, [followers, sessions, readerSessions, ticker]);
   });
   return {
     ...store,
     chat: chatRoute(sessions, readerSessions),
     dispose: () => {
       disposed = true;
+      resume?.stop();
       unsubscribe();
       followers?.stop();
       sessions.close();

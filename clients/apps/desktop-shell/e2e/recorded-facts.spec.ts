@@ -116,9 +116,8 @@ function withoutRoot(source: StoreRunFixture): StoreRunFixture {
 
 async function openGateway(page: Page, fixture: StoreRunFixture): Promise<void> {
   await page.setViewportSize({width: 1440, height: 900});
-  await page.addInitScript(installGateway, wire(fixture));
+  await installGateway(page, wire(fixture));
   await openFixture(page, {...fixtureNamed('queue-rs-live'), runId: 'run-a'});
-  await page.getByRole('switch', {name: 'Run transport v2'}).check();
   await expect(page.getByRole('heading', {name: 'queue-rs · mpmc'})).toBeVisible();
   await settled(page);
 }
@@ -141,8 +140,10 @@ test('recorded root shows Pause, the checkout skip, and scripted', async ({page}
   await shot(page, 'checkout-skip');
 });
 
-test('a run with no recorded root shows no Pause', async ({page}) => {
+test('a run whose log records no root is still addressed by the catalog, so it shows Pause', async ({
+  page,
+}) => {
   await openGateway(page, withoutRoot(storeRunFixture('live')));
-  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeVisible();
   await shot(page, 'no-recorded-root');
 });

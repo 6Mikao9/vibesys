@@ -5,7 +5,6 @@ import {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   HostService,
-  TailRequestSchema,
   TailStreamRequestSchema,
   TailStreamResponseSchema,
   WatchRunsRequestSchema,
@@ -14,13 +13,20 @@ import {
 } from '@vibesys/proto';
 import type {AbortSignalLike} from '@vibesys/transport';
 import {createActor, fromCallback, fromPromise} from 'xstate';
+import {DescriptorCache} from './descriptors.js';
 import {
+  type LoadProgress,
+  loadProgress,
   type RunLivenessHint,
   type RunTransport,
   type SkeletonCache,
   type SkeletonLoad,
+  type SkeletonLoadFailure,
   startSkeletonLoader,
 } from './index.js';
+import type {RecordsListener} from './loader.js';
+
+export type {RecordsListener};
 
 import {isFinalLoad} from './loading.js';
 import {
@@ -35,16 +41,30 @@ export interface GatewayLogChunk {
   readonly offset: number;
   readonly next: number;
 }
+/** What a reader knows of one run's history and liveness; each field is a fact, not a message. */
+export interface GatewayObservation {
+  readonly load: SkeletonLoad | undefined;
+  readonly progress: LoadProgress;
+  /** Set while the history is not being read: a refusal, or a failure being retried. */
+  readonly failure: SkeletonLoadFailure | undefined;
+  /** The reader gave up on this failure; a new observation is the only retry. */
+  readonly terminal: boolean;
+  readonly hint: RunLivenessHint | undefined;
+  /** The liveness lease is held: the host spoke within the lease. The one lease of the run. */
+  readonly fresh: boolean;
+}
 export interface GatewayReader {
-  records(
+  /** One reader per run: history and records come from the same stream. */
+  binary(
     runId: string,
-    fromSeq: bigint,
+    streamId: string,
     signal: AbortSignalLike,
     receive: (bytes: Uint8Array) => void,
   ): Promise<void>;
   watch(
     runId: string,
-    receive: (load: SkeletonLoad | undefined, failed: boolean, hint?: RunLivenessHint) => void,
+    receive: (observation: GatewayObservation) => void,
+    records: RecordsListener,
   ): () => void;
   content(
     runId: string,
@@ -89,20 +109,17 @@ async function content(
   return {hash, text: new TextDecoder('utf-8', {fatal: true}).decode(bytes)};
 }
 
-async function log(
+async function binary(
   transport: RunTransport,
   runId: string,
   streamId: string,
   signal: AbortSignalLike,
-  receive: (chunk: GatewayLogChunk) => void,
+  receive: (bytes: Uint8Array) => void,
   fromOffset = 0n,
 ): Promise<void> {
   if (fromOffset < 0n || fromOffset > BigInt(Number.MAX_SAFE_INTEGER))
     throw new Error('Stream offset exceeds screen precision');
-  const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
-  const encoder = new TextEncoder();
   let offset = fromOffset;
-  let decodedOffset = Number(fromOffset);
   for await (const bytes of transport.stream(
     `${SERVICE}${HostService.method.tailStream.name}`,
     toBinary(
@@ -118,12 +135,37 @@ async function log(
       response.nextOffset > BigInt(Number.MAX_SAFE_INTEGER)
     )
       throw new Error('Stream offset mismatch');
-    const text = decoder.decode(response.data, {stream: true});
-    const next = decodedOffset + encoder.encode(text).length;
-    if (text !== '') receive({text, offset: decodedOffset, next});
-    decodedOffset = next;
     offset = response.nextOffset;
+    receive(response.data);
   }
+}
+
+async function log(
+  transport: RunTransport,
+  runId: string,
+  streamId: string,
+  signal: AbortSignalLike,
+  receive: (chunk: GatewayLogChunk) => void,
+  fromOffset = 0n,
+): Promise<void> {
+  if (fromOffset < 0n || fromOffset > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new Error('Stream offset exceeds screen precision');
+  const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
+  const encoder = new TextEncoder();
+  let decodedOffset = Number(fromOffset);
+  await binary(
+    transport,
+    runId,
+    streamId,
+    signal,
+    data => {
+      const text = decoder.decode(data, {stream: true});
+      const next = decodedOffset + encoder.encode(text).length;
+      if (text !== '') receive({text, offset: decodedOffset, next});
+      decodedOffset = next;
+    },
+    fromOffset,
+  );
   if (!signal.aborted) decoder.decode();
 }
 
@@ -132,28 +174,20 @@ export function gatewayReader(
   cache: ContentCache,
   schedule: ScheduleTimeout,
 ): GatewayReader {
+  const descriptors = new DescriptorCache();
   return {
-    async records(runId, fromSeq, signal, receive) {
-      for await (const bytes of transport.stream(
-        `${SERVICE}${HostService.method.tail.name}`,
-        toBinary(TailRequestSchema, create(TailRequestSchema, {runId, fromSeq})),
-        signal,
-      )) {
-        if (signal.aborted) return;
-        receive(bytes);
-      }
-    },
-    watch(runId, receive) {
+    watch(runId, receive, records) {
       const actor = createActor(
         runObservationMachine.provide({
           actors: {
             history: fromCallback<ObservationEvent, ObservationOperation>(({input}) => {
-              const loader = startSkeletonLoader(transport, schedule, input);
+              const loader = startSkeletonLoader(transport, schedule, input, records, descriptors);
               const subscription = loader.subscribe(snapshot =>
                 input.receive({
                   type: 'read',
                   load: snapshot.context.load,
-                  failed: snapshot.context.error !== undefined,
+                  failure: snapshot.context.error,
+                  terminal: snapshot.matches('failed'),
                 }),
               );
               return () => {
@@ -173,13 +207,7 @@ export function gatewayReader(
                 if (response.runId !== input.runId) continue;
                 input.receive({
                   type: 'hint',
-                  hint: response.removed
-                    ? undefined
-                    : {
-                        epoch: observedEpoch(response),
-                        value: response.liveness,
-                        head: response.head,
-                      },
+                  hint: livenessHint(response),
                 });
               }
             }),
@@ -187,26 +215,36 @@ export function gatewayReader(
         }),
         {input: {runId, timeoutMs: 30000}, clock: clockFrom(schedule)},
       ).start();
-      const subscription = actor.subscribe(({context}) =>
-        receive(
-          context.load,
-          context.failed || (context.watchFailed && !isFinalLoad(context.load)),
-          context.hint,
-        ),
-      );
+      const subscription = actor.subscribe(snapshot => {
+        const {context} = snapshot;
+        receive({
+          fresh: snapshot.matches({watching: 'live'}),
+          load: context.load,
+          progress: loadProgress(context.load),
+          failure:
+            context.failure ??
+            (context.watchFailed && !isFinalLoad(context.load)
+              ? {kind: 'transport', cause: 'liveness stream unavailable'}
+              : undefined),
+          terminal: context.terminal,
+          hint: context.hint,
+        });
+      });
       return () => {
         subscription.unsubscribe();
         actor.stop();
       };
     },
+    binary: (runId, streamId, signal, receive) =>
+      binary(transport, runId, streamId, signal, receive),
     content: (runId, hash, signal) => content(transport, cache, runId, hash, signal),
     log: (runId, streamId, signal, receive, fromOffset) =>
       log(transport, runId, streamId, signal, receive, fromOffset),
   };
 }
 
-function observedEpoch(response: WatchRunsResponse): number {
-  // Phase 1 heads omit the canonical epoch (proto3 decodes it as zero).
-  // Preserve their process epoch for fencing; liveness still comes from the gateway's lock probe.
-  return response.head?.epoch || response.head?.process?.epoch || 0;
+/** Project only the gateway's canonical epoch; removed runs clear their hint. */
+function livenessHint(response: WatchRunsResponse): RunLivenessHint | undefined {
+  if (response.removed) return undefined;
+  return {epoch: response.head?.epoch ?? 0, value: response.liveness, head: response.head};
 }

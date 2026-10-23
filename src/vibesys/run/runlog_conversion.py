@@ -1,14 +1,31 @@
-"""Stopped-run migration and complete, idempotent host-wide outcome reporting."""
+"""One-shot migration of pre-schema runs to the typed run log.
+
+TEMPORARY: this module, ``vibesys host convert-run(s)`` and their tests are deleted after the
+transport flip (tracking issue: #3441). The product never converts on read; a run that has not
+been migrated is listed as "old format". Run it once per project, offline::
+
+    vibesys host convert-runs --project <project directory> [--reconvert]
+
+Each converted run also brings its chat conversations along (``import_legacy_chat``), so a
+thread of the preceding app is still there after the migration. Only the run histories that
+exist need to migrate; it is not a general converter.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import builtins
+import json
+from contextlib import closing
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
-from vibesys.events import CoreEvent, CoreEventType
+from vibesys.chat._legacy import import_legacy_chat
+from vibesys.chat._session import ChatRuntime
+from vibesys.events import INTERRUPTS, CoreEvent, CoreEventType, EventStatus
 from vibesys.run.runlog_tee import JOURNAL_EVENT_MAX_BYTES, RunLogTee
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import Project, ProjectError
@@ -22,7 +39,7 @@ from vs_runlog.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from vs_sim.api import SleepingClock, Threads
 
@@ -52,7 +69,7 @@ class ConversionResult:
     reason: str
 
 
-def _events(path: Path) -> Iterator[tuple[bytes, CoreEvent]]:
+def _events(path: Path) -> Generator[tuple[bytes, CoreEvent]]:
     with path.open("rb") as stream:
         while line := stream.readline(JOURNAL_EVENT_MAX_BYTES + 1):
             event = decode_json(
@@ -64,6 +81,68 @@ def _events(path: Path) -> Iterator[tuple[bytes, CoreEvent]]:
                     raise _UnsupportedJournalError(message)
                 raise RunLogConversionError(event.details("journal event"))
             yield line, event
+
+
+def _with_agent_identity(line: bytes) -> bytes:
+    """Name the agent of a turn span whose older journal gave it no identity.
+
+    The first journals labelled a turn with its role and model only. Its role is the identity the
+    older agent events already get (``vibesys.records._agents``), so a turn of such a journal
+    counts under its role.
+    """
+    if b'"agent_turn"' not in line:
+        return line
+    event = json.loads(line)
+    label = (event.get("data") or {}).get("span", {}).get("label")
+    if label is None or label.get("kind") != "agent_turn":
+        return line
+    attrs = json.loads(label.get("attrs_json") or "{}")
+    if "agent" in attrs or "role" not in attrs:
+        return line
+    label["attrs_json"] = json.dumps({"agent": attrs["role"], **attrs}, separators=(",", ":"))
+    return json.dumps(event, separators=(",", ":")).encode() + b"\n"
+
+
+def _is_interrupt(event: CoreEvent) -> bool:
+    """Whether a pre-schema run ended by an interrupt or a cancellation, which it recorded as a failure.
+
+    The journal names the exception's class (``Name: message``). The class decides, as it does
+    for a native run (``INTERRUPTS``), not a list of names.
+    """
+    if event.type is not CoreEventType.RUN_FAILED or event.data is not None:
+        return False
+    name = event.text.partition(":")[0]
+    named = getattr(builtins, name, None) or getattr(asyncio, name, None)
+    return isinstance(named, type) and issubclass(named, INTERRUPTS)
+
+
+def _journal_line(line: bytes, event: CoreEvent) -> bytes:
+    """The journal line to convert: an interrupted run ends Stopped, as a native one does."""
+    if _is_interrupt(event):
+        stopped = event.model_copy(
+            update={
+                "type": CoreEventType.STOPPED,
+                "text": "Run stopped by interrupt",
+                "status": EventStatus.INTERRUPTED,
+            }
+        )
+        line = stopped.model_dump_json().encode() + b"\n"
+    return _with_agent_identity(line)
+
+
+def _written_by_migration(directory: Path) -> bool:
+    """Whether a complete log can be rebuilt from its journal.
+
+    A live writer knows its checkout; an offline conversion never does. A log that names one
+    holds facts its journal cannot reproduce.
+    """
+    if not (directory / "core-events.jsonl").exists():
+        return False
+    with (directory / "run.log").open("rb") as stream:
+        return not any(
+            r.body is not None and r.body.field == "epoch_started" and r.body.value.provenance_known
+            for r in RunLogReader(stream)
+        )
 
 
 def _complete_sequence(path: Path) -> int:
@@ -110,7 +189,12 @@ def _has_checkpoint(directory: Path, sequence: int) -> bool:
 
 
 def convert_run(
-    project: Project, run_id: str, *, clock: SleepingClock, threads: Threads
+    project: Project,
+    run_id: str,
+    *,
+    clock: SleepingClock,
+    threads: Threads,
+    reconvert: bool = False,
 ) -> ConversionResult:
     """Convert one stopped project run; leave its journal and core store untouched.
 
@@ -119,11 +203,18 @@ def convert_run(
     """
     directory = project.log_directory_for(project.root, run_id)
     try:
-        result = _convert_directory(directory, run_id, clock=clock, threads=threads)
+        result = _convert_directory(
+            directory, run_id, clock=clock, threads=threads, reconvert=reconvert
+        )
     except _UnsupportedJournalError as exc:
         return ConversionResult(ConversionStatus.SKIPPED, str(exc))
     if result.status in {ConversionStatus.CONVERTED, ConversionStatus.EXISTS}:
         project.publish_run_for(project.root, run_id)
+        imported = import_legacy_chat(str(project.root), run_id, ChatRuntime(clock, threads))
+        if imported:
+            result = ConversionResult(
+                result.status, f"{result.reason}; imported {len(imported)} chat threads"
+            )
     if project.state.state_store_namespace(run_id).read_bytes("store.json") is not None:
         result = ConversionResult(
             result.status, result.reason + "; store.json retained, state.pb conversion is phase 3"
@@ -132,7 +223,7 @@ def convert_run(
 
 
 def _convert_directory(
-    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
+    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads, reconvert: bool
 ) -> ConversionResult:
     """Atomically convert a quiescent run with trace events, preserving the JSONL source.
 
@@ -141,7 +232,8 @@ def _convert_directory(
     successful conversion. Corrupt destinations require operator attention.
     """
     destination = directory / "run.log"
-    if sequence := _complete_sequence(destination):
+    sequence = _complete_sequence(destination)
+    if sequence and not (reconvert and _written_by_migration(directory)):
         if _has_checkpoint(directory, sequence):
             return ConversionResult(ConversionStatus.EXISTS, "already converted")
         with FileRunLogWriter(destination, clock=clock, threads=threads):
@@ -150,20 +242,10 @@ def _convert_directory(
     journal = directory / "core-events.jsonl"
     if not journal.exists():
         return ConversionResult(ConversionStatus.SKIPPED, "journal is missing")
-    first = None
-    has_trace = False
-    for _, event in _events(journal):
-        if first is None:
-            first = event
-        has_trace |= event.type in (
-            CoreEventType.SPAN_STARTED,
-            CoreEventType.SPAN_UPDATED,
-            CoreEventType.SPAN_ENDED,
-        )
-    if first is None:
+    with closing(_events(journal)) as events:
+        empty = next(events, None) is None
+    if empty:
         return ConversionResult(ConversionStatus.SKIPPED, "journal has no events")
-    if not has_trace:
-        return ConversionResult(ConversionStatus.SKIPPED, "journal predates the run trace")
     with TemporaryDirectory(prefix=".convert-run-", dir=destination.parent) as temporary:
         staged = Path(temporary) / "run.log"
 
@@ -171,8 +253,8 @@ def _convert_directory(
             content = FileRunContent(directory / "blobs", directory / "streams")
             writer = FileRunLogWriter(staged, clock=clock, threads=threads)
             with RunLogTee(writer, content, run_id) as tee:
-                for line, _ in _events(journal):
-                    tee.append(line)
+                for line, event in _events(journal):
+                    tee.append(_journal_line(line, event))
                 writer.checkpoint()
 
         install_run_log(staged, destination, prepare=prepare)
@@ -188,10 +270,12 @@ class RunConversion:
 
 
 def _attempt(
-    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
+    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads, reconvert: bool
 ) -> ConversionResult:
     try:
-        return _convert_directory(directory, run_id, clock=clock, threads=threads)
+        return _convert_directory(
+            directory, run_id, clock=clock, threads=threads, reconvert=reconvert
+        )
     except _UnsupportedJournalError as exc:
         return ConversionResult(ConversionStatus.SKIPPED, str(exc))
     except (OSError, ValueError, TypeError, ProjectError) as exc:
@@ -214,11 +298,13 @@ def _indexed_target(entry: Path) -> Path | ConversionResult:
 
 
 def convert_runs(
-    project: Project, *, clock: SleepingClock, threads: Threads
+    project: Project, *, clock: SleepingClock, threads: Threads, reconvert: bool = False
 ) -> tuple[RunConversion, ...]:
     """Convert stopped project runs and every host index entry, once per target.
 
-    Originals are never deleted, including after the seven-day retention window.
+    ``reconvert`` rebuilds a run the migration already converted from its untouched journal, so
+    a later improvement of the migration reaches it. Originals are never deleted, including after
+    the seven-day retention window.
     A failed run does not prevent later runs from being attempted. Index entries
     without a supported journal are explicitly reported, including dangling links.
     """
@@ -230,7 +316,7 @@ def convert_runs(
         directory = project.log_directory_for(project.root, run_id)
         seen.add(directory.resolve())
         try:
-            result = convert_run(project, run_id, clock=clock, threads=threads)
+            result = convert_run(project, run_id, clock=clock, threads=threads, reconvert=reconvert)
         except (OSError, ValueError, TypeError, ProjectError) as exc:
             result = ConversionResult(ConversionStatus.FAILED, str(exc))
         if (
@@ -252,7 +338,7 @@ def convert_runs(
                 ConversionStatus.SKIPPED, "already processed this index target"
             )
         else:
-            result = _attempt(target, entry.name, clock=clock, threads=threads)
+            result = _attempt(target, entry.name, clock=clock, threads=threads, reconvert=reconvert)
             seen.add(target)
         if result.status is ConversionStatus.EXISTS:
             result = ConversionResult(ConversionStatus.SKIPPED, result.reason)

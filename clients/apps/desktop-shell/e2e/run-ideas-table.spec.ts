@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import fc from 'fast-check';
 import {settled} from './checks/settle.js';
 import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 import {
@@ -8,10 +9,8 @@ import {
   installFakeMachines,
   installFakeProjectRuns,
 } from './fake-bridge.js';
-import {lineageRun} from './fake-lineage.js';
-import {installFakeRun} from './fake-run.js';
-import {installFakeServer} from './fake-server.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {journeyScript} from './journey-world.js';
 import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
@@ -61,11 +60,7 @@ async function openRun(page: Page, count: number): Promise<void> {
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
-    initScript(installFakeRun, {streams: [], text: {}}),
-    initScript(
-      installFakeServer,
-      lineageRun(RUN, {count, chain: count > 100 ? 15 : 4, days: count > 100 ? 14 : 1}),
-    ),
+    journeyScript(count > 100 ? 'lineage600' : 'lineage10'),
   ]);
   await page.goto('./shell.html');
   await page
@@ -107,12 +102,129 @@ test('six hundred ideas render a window of rows and remain keyboard reachable', 
   await ideas.focus();
   await page.keyboard.press('End');
   await expect(ideas.getByRole('option').last()).toBeFocused();
+  // Rows are measured as they are drawn, so the end of the list moves until its rows are at rest.
+  await settled(page);
   const scrollTop = await ideas.evaluate(list => list.scrollTop);
   await ideas.evaluate(list => list.setAttribute('data-test-persist', 'yes'));
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
   await expect(ideas).toHaveAttribute('data-test-persist', 'yes');
+  await settled(page);
   expect(await ideas.evaluate(list => list.scrollTop)).toBe(scrollTop);
+});
+
+/** Rows wrap at some window sizes and not at others, so the list's rows have several heights. */
+const WINDOWS = [
+  {width: 1440, height: 900},
+  {width: 1200, height: 800},
+  {width: 1100, height: 760},
+  {width: 1000, height: 700},
+  {width: 1000, height: 900},
+] as const;
+
+for (const {width, height} of WINDOWS) {
+  test(`opening the last idea leaves the Ideas list where the end key put it at ${width}x${height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({width, height});
+    await openRun(page, 600);
+    const ideas = page.getByRole('listbox', {name: 'Ideas'});
+    await expect(ideas.getByRole('option').first()).toBeVisible();
+    await ideas.focus();
+    await page.keyboard.press('End');
+    await expect(ideas.getByRole('option').last()).toBeFocused();
+    await settled(page);
+    const scrollTop = await ideas.evaluate(list => list.scrollTop);
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
+    await settled(page);
+    expect(await ideas.evaluate(list => list.scrollTop)).toBe(scrollTop);
+  });
+}
+
+/**
+ * What a reader does to a list: a wheel turn, any key that scrolls, or a drag or touch (which move
+ * the scroll without a key or wheel event, so the one move a script can make stands for all of
+ * them: `scroll` sets the position and leaves its scroll event pending for the same task).
+ */
+type Reader =
+  | {readonly kind: 'wheel'; readonly delta: number}
+  | {readonly kind: 'key'; readonly key: string}
+  | {readonly kind: 'scroll'; readonly fraction: number};
+
+const READER: fc.Arbitrary<Reader> = fc.oneof(
+  fc.record({kind: fc.constant('wheel' as const), delta: fc.integer({min: -2400, max: 2400})}),
+  fc.record({
+    kind: fc.constant('key' as const),
+    key: fc.constantFrom('PageUp', 'PageDown', 'Space', 'Home', 'End', 'ArrowUp', 'ArrowDown'),
+  }),
+  fc.record({
+    kind: fc.constant('scroll' as const),
+    fraction: fc.double({min: 0, max: 1, noNaN: true}),
+  }),
+);
+
+/**
+ * Opens the idea of the row most in view, or closes the open one: a commit that lays the list out
+ * again. The scroll it began with is read in the same task, so a move of it still waiting as an
+ * event counts as where the reader left the list.
+ */
+async function commitFrom(page: Page, move: number | null): Promise<number> {
+  return page.evaluate(fraction => {
+    const list = document.querySelector<HTMLElement>('[role="listbox"][aria-label="Ideas"]');
+    if (list === null) throw new Error('the Ideas list is not on screen');
+    if (fraction !== null) {
+      list.scrollTop = fraction * (list.scrollHeight - list.clientHeight);
+    }
+    const at = list.scrollTop;
+    const close = document.querySelector<HTMLElement>('button[aria-label="Close idea"]');
+    if (close !== null) {
+      close.click();
+      return at;
+    }
+    const box = list.getBoundingClientRect();
+    const shown = (row: HTMLElement): number => {
+      const rect = row.getBoundingClientRect();
+      return Math.min(rect.bottom, box.bottom) - Math.max(rect.top, box.top);
+    };
+    const rows = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+    const row = rows.sort((a, b) => shown(b) - shown(a))[0];
+    if (row === undefined) throw new Error('no row is drawn');
+    row.click();
+    return at;
+  }, move);
+}
+
+test('no scroll of the reader is undone by a commit, whatever the reader did before it', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 1000, height: 700});
+  await openRun(page, 600);
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  await expect(ideas.getByRole('option').first()).toBeVisible();
+  await settled(page);
+  const [steps] = fc.sample(fc.array(READER, {minLength: 24, maxLength: 24}), {
+    numRuns: 1,
+    seed: 20261023,
+  });
+  for (const step of steps ?? []) {
+    let move: number | null = null;
+    if (step.kind === 'wheel') {
+      const box = await ideas.boundingBox();
+      if (box === null) throw new Error('the Ideas list has no box');
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, step.delta);
+      await settled(page);
+    } else if (step.kind === 'key') {
+      await page.keyboard.press(step.key);
+      await settled(page);
+    } else {
+      move = step.fraction;
+    }
+    const at = await commitFrom(page, move);
+    await settled(page);
+    expect(await ideas.evaluate(list => list.scrollTop), JSON.stringify(step)).toBe(at);
+  }
 });
 
 test('opening an idea preserves the Ideas list and controls at wide and narrow widths', async ({

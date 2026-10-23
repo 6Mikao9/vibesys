@@ -1,8 +1,9 @@
-"""Saved-run discovery projection and idempotent import through the transport owner.
+"""Saved-run discovery: the project catalog's metadata, and whether each run has a typed log.
 
-The project catalog supplies metadata; this module never derives run facts.
-``page_saved_runs`` fences pages by that catalog and publishes readable runs in
-its existing host index. This command module loads only for saved-run discovery.
+The project catalog supplies metadata; this module never derives run facts. ``page_saved_runs``
+fences pages by that catalog and reads no journal. A run kept in the old format is listed as such
+until it is migrated (``vibesys host convert-runs``). This command module loads only for
+saved-run discovery.
 """
 
 from __future__ import annotations
@@ -16,55 +17,28 @@ if TYPE_CHECKING:
 
     from vs_project.api import Project
     from vs_proto.api import host_payloads as pb
-    from vs_sim.api import SleepingClock, Threads
 
 __all__ = ["page_saved_runs"]
 
 
-def _import(project: Project, run: pb.SavedRun, clock: SleepingClock, threads: Threads) -> None:
-    transport = import_module("vibesys.api.transport")
-    project_api = import_module("vs_project.api")
+def _availability(project: Project, run: pb.SavedRun) -> None:
+    """A run is readable when it has a typed log; any other run is in the old format."""
     pb = import_module("vs_proto.api").host_payloads
-    assert_run_unlocked = import_module("vs_runlog.api").assert_run_unlocked
-
-    path = project.run_log_path_for(project.root, run.run_id)
-    try:
-        assert_run_unlocked(path)
-    except RuntimeError:
-        if path.is_file():
-            project.publish_run_for(project.root, run.run_id)
-            run.imported = pb.SavedRunImport.AVAILABLE
-        else:
-            run.imported = pb.SavedRunImport.UNAVAILABLE
-            run.detail = "Pause this run before importing its history"
-        return
-    try:
-        result = transport.convert_run(project, run.run_id, clock=clock, threads=threads)
-    except (OSError, ValueError, TypeError, project_api.ProjectError) as error:
+    if project.run_log_path_for(project.root, run.run_id).is_file():
+        run.imported = pb.SavedRunImport.AVAILABLE
+    else:
         run.imported = pb.SavedRunImport.UNAVAILABLE
-        run.detail = str(error)
-        return
-    run.imported = (
-        pb.SavedRunImport.AVAILABLE
-        if result.status
-        in {transport.ConversionStatus.CONVERTED, transport.ConversionStatus.EXISTS}
-        else pb.SavedRunImport.UNAVAILABLE
-    )
-    run.detail = result.reason
+        run.detail = "old format"
 
 
 def page_saved_runs(
     request: pb.ListSavedRunsRequest,
     root: Path,
     runs: list[pb.SavedRun],
-    *,
-    clock: SleepingClock,
-    threads: Threads,
 ) -> pb.ListSavedRunsResponse:
     """Return at most 200 rows and 1 MiB; refuse continuation after catalog drift.
 
-    Import preserves original journals and positional recovery state. A refused
-    import stays in the listing with its reason, rather than disappearing.
+    Listing checks one file per run. A run in the old format stays listed, labelled as such.
     """
     project_type = import_module("vs_project.api").Project
     pb = import_module("vs_proto.api").host_payloads
@@ -87,7 +61,7 @@ def page_saved_runs(
     project = project_type.open(root)
     for index in range(request.offset, min(request.offset + 200, len(runs))):
         run = pb.SavedRun.from_binary(runs[index].to_binary())
-        _import(project, run, clock, threads)
+        _availability(project, run)
         response.runs.append(run)
         if index + 1 < len(runs):
             response.next_offset = index + 1

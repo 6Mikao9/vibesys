@@ -1,92 +1,66 @@
-import {newRequestId} from '@vibesys/request-identity';
-/** The app chooses one reader for a run, using the existing host setting. */
+/** The gateway owns every run reader. */
 
 import {useRunIntents} from '@vibesys/feature-run-intents/renderer';
-import type {RunPageAddress} from '@vibesys/feature-run-page/renderer';
-import {type GatewayRunPorts, RunScreen, useGatewayRun} from '@vibesys/feature-run-page/renderer';
-import {type RunPageSeed, recordedRunRoot} from '@vibesys/feature-run-page/state';
-import {useRunSessions} from '@vibesys/feature-run-sessions/renderer';
-import type {GatewayBridge, WelcomeBridge} from '@vibesys/ipc';
+import type {RunPageAddress, RunPageNavigation} from '@vibesys/feature-run-page/renderer';
+import {
+  type GatewayRunPorts,
+  LoadStatus,
+  RunScreen,
+  useGatewayRun,
+} from '@vibesys/feature-run-page/renderer';
+import type {RunPageSeed} from '@vibesys/feature-run-page/state';
+import type {RecordedProjectRoot} from '@vibesys/hosts';
+import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
-import {observeRun, type Skeleton} from '@vibesys/run-skeleton';
+import {type RecordsFanout, type RecordsListener, recordsFanout} from '@vibesys/run-skeleton';
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
-import {gatewayReader} from '@vibesys/run-skeleton/reader';
-import {proposalIntent} from '@vibesys/runs/chat';
-import {type RelaunchObservation, runReference} from '@vibesys/runs/intents';
-import {Card, EmptyState, Page, Stack, Switch, Text} from '@vibesys/ui';
-import {type JSX, type ReactNode, useMemo} from 'react';
+import {type GatewayReader, gatewayReader} from '@vibesys/run-skeleton/reader';
+import {Card, EmptyState, Page, Text} from '@vibesys/ui';
+import {type JSX, useMemo} from 'react';
+import {useGatewayChat} from './gateway-chat.js';
 import {gatewayTransport} from './gateway-transport.js';
 
-export function GatewayRun(props: {
+interface GatewayRunProps {
   readonly seed: RunPageSeed;
+  readonly projectRoot: RecordedProjectRoot | undefined;
   readonly bridge: GatewayBridge;
-  readonly settings: WelcomeBridge;
   readonly schedule: ScheduleTimeout;
   readonly address: RunPageAddress;
-  readonly legacy: (toggle: ReactNode) => ReactNode;
-}): JSX.Element {
-  const {bridge, settings, seed, schedule, address} = props;
-  const ports = useMemo<GatewayRunPorts>(
-    () => ({
-      watchSetting: listener => settings.onHostSettingsChanged(listener),
-      reader: gatewayReader(
-        gatewayTransport(bridge, seed.identity.host),
-        gatewayContentCache(indexedDB),
-        schedule,
-      ),
-      setting: async enabled => {
-        const reply = await settings.runTransportV2(seed.identity.host, enabled);
-        if (!reply.ok) throw new Error(reply.error);
-        return reply.value;
-      },
-    }),
-    [bridge, settings, seed.identity.host, schedule],
+  readonly navigation: RunPageNavigation;
+}
+
+export function GatewayRun(props: GatewayRunProps): JSX.Element {
+  const {bridge, seed, schedule, address} = props;
+  const {fanout, ports} = useMemo(
+    () => gatewayPorts({bridge, host: seed.identity.host, schedule}),
+    [bridge, seed.identity.host, schedule],
   );
   const page = useGatewayRun({seed, ports, schedule, address});
   const {snapshot} = page;
-  const observation = observationOf(snapshot.context.load?.skeleton);
-  const projectRoot = recordedRunRoot(snapshot.context.load?.skeleton);
+  const {observation} = page.writer;
+  const projectRoot = props.projectRoot;
   const intents = useRunIntents({
     bridge,
     host: seed.identity.host,
     runId: seed.identity.runId,
     projectRoot,
-    ...(observation ? {relaunch: observation} : {}),
-    enabled: snapshot.context.enabled,
+    enabled: true,
+    records: fanout.subscribe,
+    refreshWriter: page.refreshWriter,
+    writer: page.writer,
     schedule,
   });
-  const sessions = useRunSessions({
+  const sessions = useGatewayChat({
     bridge,
     host: seed.identity.host,
     runId: seed.identity.runId,
-    sessionId: 'default',
     projectRoot: projectRoot ?? '',
-    enabled: snapshot.matches('active') && projectRoot !== undefined,
     schedule,
-    steerBusy: intents.busy,
-    sendSteer: proposal =>
-      intents.sendRequest({
-        type: 'send',
-        request: proposalIntent(
-          {
-            ...runReference(projectRoot ?? '', seed.identity.runId),
-            requestId: newRequestId(),
-            expectedEpoch: observation?.epoch ?? 0n,
-          },
-          proposal,
-        ),
-      }),
+    records: fanout.subscribe,
+    core: page.state?.run.core ?? null,
+    epoch: observation?.epoch ?? 0n,
+    readOnly: !intents.steerable,
   });
-  const busy = snapshot.matches('checking') || snapshot.matches('saving');
-  const toggle = (
-    <Switch
-      label="Run transport v2"
-      checked={snapshot.context.enabled}
-      change={page.toggle}
-      {...(busy ? {disabledReason: 'Connecting'} : {})}
-    />
-  );
-  if (snapshot.matches('off')) return <>{props.legacy(toggle)}</>;
   if (
     page.state === null ||
     page.model === null ||
@@ -95,9 +69,12 @@ export function GatewayRun(props: {
   ) {
     return (
       <Page>
-        <Card>{toggle}</Card>
         <Card>
-          <EmptyState title={snapshot.context.error ?? page.projectionError ?? 'Loading'} />
+          {(snapshot.context.error ?? page.projectionError) ? (
+            <EmptyState title={snapshot.context.error ?? page.projectionError ?? ''} />
+          ) : (
+            <LoadStatus view={page.load} retry={page.retry} />
+          )}
         </Card>
       </Page>
     );
@@ -110,24 +87,51 @@ export function GatewayRun(props: {
       core={page.state.run.core}
       route={page.route}
       zoom={page.zoom}
-      dispatch={page.dispatch}
-      chat={{...sessions, minimumMain: 'wide'}}
-      toolbar={
-        <Stack gap="space-1" align="start">
-          {toggle}
-          {intents.controls}
-        </Stack>
-      }
+      dispatch={action => {
+        if (action.type === 'run-again') props.navigation.runAgain();
+        else if (action.type === 'open-window') props.navigation.openWindow();
+        else page.dispatch(action);
+      }}
+      chat={sessions}
+      toolbar={intents.controls}
       supplemental={
-        snapshot.context.error ? <Text tone="err">{snapshot.context.error}</Text> : null
+        <>
+          <LoadStatus view={page.load} retry={page.retry} />
+          {snapshot.context.error ? <Text tone="err">{snapshot.context.error}</Text> : null}
+        </>
       }
     />
   );
 }
 
-function observationOf(skeleton: Skeleton | undefined): RelaunchObservation | undefined {
-  if (!skeleton) return undefined;
-  const {epoch, lifecycle} = observeRun(skeleton);
-  if (epoch === 0) return undefined;
-  return {epoch: BigInt(epoch), ...(lifecycle ? {lifecycle} : {})};
+function gatewayPorts(input: {
+  readonly bridge: GatewayBridge;
+  readonly host: RunPageSeed['identity']['host'];
+  readonly schedule: ScheduleTimeout;
+}): {readonly fanout: RecordsFanout; readonly ports: GatewayRunPorts} {
+  const {bridge, host, schedule} = input;
+  const fanout = recordsFanout();
+  const reader = gatewayReader(
+    gatewayTransport(bridge, host),
+    gatewayContentCache(indexedDB),
+    schedule,
+  );
+  return {
+    fanout,
+    ports: {
+      reader: shared(reader, fanout.publish),
+    },
+  };
+}
+
+/** The one reader of the run's log also feeds every other consumer of its records. */
+function shared(reader: GatewayReader, publish: RecordsListener): GatewayReader {
+  return {
+    ...reader,
+    watch: (runId, receive, records) =>
+      reader.watch(runId, receive, batch => {
+        records(batch);
+        publish(batch);
+      }),
+  };
 }

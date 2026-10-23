@@ -12,8 +12,8 @@ export {
   type GatewayEvent,
   type GatewayInput,
   type GatewayLogInput,
-  type GatewayRecordsInput,
   type GatewayRunContext,
+  type GatewayTranscriptInput,
   gatewayRunMachine,
 } from './gateway-machine.js';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
@@ -53,6 +53,7 @@ export {
   type SessionView,
   type TraceLog,
 } from './live.js';
+export {type LoadView, loadView, paintedSkeleton} from './load-view.js';
 export {type ModelNames, modelNamesOf, NO_MODEL_NAMES} from './model-names.js';
 export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';
 export {

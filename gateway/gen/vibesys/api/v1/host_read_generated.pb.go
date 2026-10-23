@@ -41,6 +41,9 @@ type ReadRequest struct {
 	//	*ReadRequest_CompletePaths
 	//	*ReadRequest_InspectDestination
 	//	*ReadRequest_ListSavedRuns
+	//	*ReadRequest_ListAgentLogins
+	//	*ReadRequest_ListRunDigests
+	//	*ReadRequest_UsageWindow
 	Method        isReadRequest_Method `protobuf_oneof:"method"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -189,6 +192,33 @@ func (x *ReadRequest) GetListSavedRuns() *v1.ListSavedRunsRequest {
 	return nil
 }
 
+func (x *ReadRequest) GetListAgentLogins() *v1.ListAgentLoginsRequest {
+	if x != nil {
+		if x, ok := x.Method.(*ReadRequest_ListAgentLogins); ok {
+			return x.ListAgentLogins
+		}
+	}
+	return nil
+}
+
+func (x *ReadRequest) GetListRunDigests() *v1.ListRunDigestsRequest {
+	if x != nil {
+		if x, ok := x.Method.(*ReadRequest_ListRunDigests); ok {
+			return x.ListRunDigests
+		}
+	}
+	return nil
+}
+
+func (x *ReadRequest) GetUsageWindow() *v1.UsageWindowRequest {
+	if x != nil {
+		if x, ok := x.Method.(*ReadRequest_UsageWindow); ok {
+			return x.UsageWindow
+		}
+	}
+	return nil
+}
+
 type isReadRequest_Method interface {
 	isReadRequest_Method()
 }
@@ -237,6 +267,18 @@ type ReadRequest_ListSavedRuns struct {
 	ListSavedRuns *v1.ListSavedRunsRequest `protobuf:"bytes,37,opt,name=list_saved_runs,json=listSavedRuns,proto3,oneof"`
 }
 
+type ReadRequest_ListAgentLogins struct {
+	ListAgentLogins *v1.ListAgentLoginsRequest `protobuf:"bytes,19,opt,name=list_agent_logins,json=listAgentLogins,proto3,oneof"`
+}
+
+type ReadRequest_ListRunDigests struct {
+	ListRunDigests *v1.ListRunDigestsRequest `protobuf:"bytes,41,opt,name=list_run_digests,json=listRunDigests,proto3,oneof"`
+}
+
+type ReadRequest_UsageWindow struct {
+	UsageWindow *v1.UsageWindowRequest `protobuf:"bytes,42,opt,name=usage_window,json=usageWindow,proto3,oneof"`
+}
+
 func (*ReadRequest_ListTasks) isReadRequest_Method() {}
 
 func (*ReadRequest_ListHarnesses) isReadRequest_Method() {}
@@ -259,6 +301,12 @@ func (*ReadRequest_InspectDestination) isReadRequest_Method() {}
 
 func (*ReadRequest_ListSavedRuns) isReadRequest_Method() {}
 
+func (*ReadRequest_ListAgentLogins) isReadRequest_Method() {}
+
+func (*ReadRequest_ListRunDigests) isReadRequest_Method() {}
+
+func (*ReadRequest_UsageWindow) isReadRequest_Method() {}
+
 // The matching read result, or a typed failure. Tag 2 stays reserved for failure.
 type ReadResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -276,6 +324,9 @@ type ReadResponse struct {
 	//	*ReadResponse_CompletePaths
 	//	*ReadResponse_InspectDestination
 	//	*ReadResponse_ListSavedRuns
+	//	*ReadResponse_ListAgentLogins
+	//	*ReadResponse_ListRunDigests
+	//	*ReadResponse_UsageWindow
 	Result        isReadResponse_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -426,6 +477,33 @@ func (x *ReadResponse) GetListSavedRuns() *v1.ListSavedRunsResponse {
 	return nil
 }
 
+func (x *ReadResponse) GetListAgentLogins() *v1.ListAgentLoginsResponse {
+	if x != nil {
+		if x, ok := x.Result.(*ReadResponse_ListAgentLogins); ok {
+			return x.ListAgentLogins
+		}
+	}
+	return nil
+}
+
+func (x *ReadResponse) GetListRunDigests() *v1.ListRunDigestsResponse {
+	if x != nil {
+		if x, ok := x.Result.(*ReadResponse_ListRunDigests); ok {
+			return x.ListRunDigests
+		}
+	}
+	return nil
+}
+
+func (x *ReadResponse) GetUsageWindow() *v1.UsageWindowResponse {
+	if x != nil {
+		if x, ok := x.Result.(*ReadResponse_UsageWindow); ok {
+			return x.UsageWindow
+		}
+	}
+	return nil
+}
+
 type isReadResponse_Result interface {
 	isReadResponse_Result()
 }
@@ -478,6 +556,18 @@ type ReadResponse_ListSavedRuns struct {
 	ListSavedRuns *v1.ListSavedRunsResponse `protobuf:"bytes,37,opt,name=list_saved_runs,json=listSavedRuns,proto3,oneof"`
 }
 
+type ReadResponse_ListAgentLogins struct {
+	ListAgentLogins *v1.ListAgentLoginsResponse `protobuf:"bytes,19,opt,name=list_agent_logins,json=listAgentLogins,proto3,oneof"`
+}
+
+type ReadResponse_ListRunDigests struct {
+	ListRunDigests *v1.ListRunDigestsResponse `protobuf:"bytes,41,opt,name=list_run_digests,json=listRunDigests,proto3,oneof"`
+}
+
+type ReadResponse_UsageWindow struct {
+	UsageWindow *v1.UsageWindowResponse `protobuf:"bytes,42,opt,name=usage_window,json=usageWindow,proto3,oneof"`
+}
+
 func (*ReadResponse_Failure) isReadResponse_Result() {}
 
 func (*ReadResponse_ListTasks) isReadResponse_Result() {}
@@ -502,11 +592,17 @@ func (*ReadResponse_InspectDestination) isReadResponse_Result() {}
 
 func (*ReadResponse_ListSavedRuns) isReadResponse_Result() {}
 
+func (*ReadResponse_ListAgentLogins) isReadResponse_Result() {}
+
+func (*ReadResponse_ListRunDigests) isReadResponse_Result() {}
+
+func (*ReadResponse_UsageWindow) isReadResponse_Result() {}
+
 var File_vibesys_api_v1_host_read_generated_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_read_generated_proto_rawDesc = "" +
 	"\n" +
-	"(vibesys/api/v1/host_read_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\xb8\a\n" +
+	"(vibesys/api/v1/host_read_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\xad\t\n" +
 	"\vReadRequest\x12&\n" +
 	"\bcheckout\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 R\bcheckout\x12B\n" +
@@ -522,8 +618,11 @@ const file_vibesys_api_v1_host_read_generated_proto_rawDesc = "" +
 	"\x11inspect_candidate\x18\x11 \x01(\v2(.vibesys.host.v1.InspectCandidateRequestH\x00R\x10inspectCandidate\x12N\n" +
 	"\x0ecomplete_paths\x18\x12 \x01(\v2%.vibesys.host.v1.CompletePathsRequestH\x00R\rcompletePaths\x12]\n" +
 	"\x13inspect_destination\x18\x17 \x01(\v2*.vibesys.host.v1.InspectDestinationRequestH\x00R\x12inspectDestination\x12O\n" +
-	"\x0flist_saved_runs\x18% \x01(\v2%.vibesys.host.v1.ListSavedRunsRequestH\x00R\rlistSavedRunsB\x0f\n" +
-	"\x06method\x12\x05\xbaH\x02\b\x01\"\xdb\a\n" +
+	"\x0flist_saved_runs\x18% \x01(\v2%.vibesys.host.v1.ListSavedRunsRequestH\x00R\rlistSavedRuns\x12U\n" +
+	"\x11list_agent_logins\x18\x13 \x01(\v2'.vibesys.host.v1.ListAgentLoginsRequestH\x00R\x0flistAgentLogins\x12R\n" +
+	"\x10list_run_digests\x18) \x01(\v2&.vibesys.host.v1.ListRunDigestsRequestH\x00R\x0elistRunDigests\x12H\n" +
+	"\fusage_window\x18* \x01(\v2#.vibesys.host.v1.UsageWindowRequestH\x00R\vusageWindowB\x0f\n" +
+	"\x06method\x12\x05\xbaH\x02\b\x01\"\xd3\t\n" +
 	"\fReadResponse\x12=\n" +
 	"\afailure\x18\x02 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x12C\n" +
 	"\n" +
@@ -538,7 +637,10 @@ const file_vibesys_api_v1_host_read_generated_proto_rawDesc = "" +
 	"\x11inspect_candidate\x18\x11 \x01(\v2).vibesys.host.v1.InspectCandidateResponseH\x00R\x10inspectCandidate\x12O\n" +
 	"\x0ecomplete_paths\x18\x12 \x01(\v2&.vibesys.host.v1.CompletePathsResponseH\x00R\rcompletePaths\x12^\n" +
 	"\x13inspect_destination\x18\x17 \x01(\v2+.vibesys.host.v1.InspectDestinationResponseH\x00R\x12inspectDestination\x12P\n" +
-	"\x0flist_saved_runs\x18% \x01(\v2&.vibesys.host.v1.ListSavedRunsResponseH\x00R\rlistSavedRunsB\x0f\n" +
+	"\x0flist_saved_runs\x18% \x01(\v2&.vibesys.host.v1.ListSavedRunsResponseH\x00R\rlistSavedRuns\x12V\n" +
+	"\x11list_agent_logins\x18\x13 \x01(\v2(.vibesys.host.v1.ListAgentLoginsResponseH\x00R\x0flistAgentLogins\x12S\n" +
+	"\x10list_run_digests\x18) \x01(\v2'.vibesys.host.v1.ListRunDigestsResponseH\x00R\x0elistRunDigests\x12I\n" +
+	"\fusage_window\x18* \x01(\v2$.vibesys.host.v1.UsageWindowResponseH\x00R\vusageWindowB\x0f\n" +
 	"\x06result\x12\x05\xbaH\x02\b\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
 
 var (
@@ -568,18 +670,24 @@ var file_vibesys_api_v1_host_read_generated_proto_goTypes = []any{
 	(*v1.CompletePathsRequest)(nil),       // 10: vibesys.host.v1.CompletePathsRequest
 	(*v1.InspectDestinationRequest)(nil),  // 11: vibesys.host.v1.InspectDestinationRequest
 	(*v1.ListSavedRunsRequest)(nil),       // 12: vibesys.host.v1.ListSavedRunsRequest
-	(*v1.OperationFailure)(nil),           // 13: vibesys.host.v1.OperationFailure
-	(*v1.ListTasksResponse)(nil),          // 14: vibesys.host.v1.ListTasksResponse
-	(*v1.ListHarnessesResponse)(nil),      // 15: vibesys.host.v1.ListHarnessesResponse
-	(*v1.ListExamplesResponse)(nil),       // 16: vibesys.host.v1.ListExamplesResponse
-	(*v1.GetTaskGoalResponse)(nil),        // 17: vibesys.host.v1.GetTaskGoalResponse
-	(*v1.DescribeMachineResponse)(nil),    // 18: vibesys.host.v1.DescribeMachineResponse
-	(*v1.ListComputeResponse)(nil),        // 19: vibesys.host.v1.ListComputeResponse
-	(*v1.PreflightRunResponse)(nil),       // 20: vibesys.host.v1.PreflightRunResponse
-	(*v1.InspectCandidateResponse)(nil),   // 21: vibesys.host.v1.InspectCandidateResponse
-	(*v1.CompletePathsResponse)(nil),      // 22: vibesys.host.v1.CompletePathsResponse
-	(*v1.InspectDestinationResponse)(nil), // 23: vibesys.host.v1.InspectDestinationResponse
-	(*v1.ListSavedRunsResponse)(nil),      // 24: vibesys.host.v1.ListSavedRunsResponse
+	(*v1.ListAgentLoginsRequest)(nil),     // 13: vibesys.host.v1.ListAgentLoginsRequest
+	(*v1.ListRunDigestsRequest)(nil),      // 14: vibesys.host.v1.ListRunDigestsRequest
+	(*v1.UsageWindowRequest)(nil),         // 15: vibesys.host.v1.UsageWindowRequest
+	(*v1.OperationFailure)(nil),           // 16: vibesys.host.v1.OperationFailure
+	(*v1.ListTasksResponse)(nil),          // 17: vibesys.host.v1.ListTasksResponse
+	(*v1.ListHarnessesResponse)(nil),      // 18: vibesys.host.v1.ListHarnessesResponse
+	(*v1.ListExamplesResponse)(nil),       // 19: vibesys.host.v1.ListExamplesResponse
+	(*v1.GetTaskGoalResponse)(nil),        // 20: vibesys.host.v1.GetTaskGoalResponse
+	(*v1.DescribeMachineResponse)(nil),    // 21: vibesys.host.v1.DescribeMachineResponse
+	(*v1.ListComputeResponse)(nil),        // 22: vibesys.host.v1.ListComputeResponse
+	(*v1.PreflightRunResponse)(nil),       // 23: vibesys.host.v1.PreflightRunResponse
+	(*v1.InspectCandidateResponse)(nil),   // 24: vibesys.host.v1.InspectCandidateResponse
+	(*v1.CompletePathsResponse)(nil),      // 25: vibesys.host.v1.CompletePathsResponse
+	(*v1.InspectDestinationResponse)(nil), // 26: vibesys.host.v1.InspectDestinationResponse
+	(*v1.ListSavedRunsResponse)(nil),      // 27: vibesys.host.v1.ListSavedRunsResponse
+	(*v1.ListAgentLoginsResponse)(nil),    // 28: vibesys.host.v1.ListAgentLoginsResponse
+	(*v1.ListRunDigestsResponse)(nil),     // 29: vibesys.host.v1.ListRunDigestsResponse
+	(*v1.UsageWindowResponse)(nil),        // 30: vibesys.host.v1.UsageWindowResponse
 }
 var file_vibesys_api_v1_host_read_generated_proto_depIdxs = []int32{
 	2,  // 0: vibesys.api.v1.ReadRequest.list_tasks:type_name -> vibesys.host.v1.ListTasksRequest
@@ -593,23 +701,29 @@ var file_vibesys_api_v1_host_read_generated_proto_depIdxs = []int32{
 	10, // 8: vibesys.api.v1.ReadRequest.complete_paths:type_name -> vibesys.host.v1.CompletePathsRequest
 	11, // 9: vibesys.api.v1.ReadRequest.inspect_destination:type_name -> vibesys.host.v1.InspectDestinationRequest
 	12, // 10: vibesys.api.v1.ReadRequest.list_saved_runs:type_name -> vibesys.host.v1.ListSavedRunsRequest
-	13, // 11: vibesys.api.v1.ReadResponse.failure:type_name -> vibesys.host.v1.OperationFailure
-	14, // 12: vibesys.api.v1.ReadResponse.list_tasks:type_name -> vibesys.host.v1.ListTasksResponse
-	15, // 13: vibesys.api.v1.ReadResponse.list_harnesses:type_name -> vibesys.host.v1.ListHarnessesResponse
-	16, // 14: vibesys.api.v1.ReadResponse.list_examples:type_name -> vibesys.host.v1.ListExamplesResponse
-	17, // 15: vibesys.api.v1.ReadResponse.get_task_goal:type_name -> vibesys.host.v1.GetTaskGoalResponse
-	18, // 16: vibesys.api.v1.ReadResponse.describe_machine:type_name -> vibesys.host.v1.DescribeMachineResponse
-	19, // 17: vibesys.api.v1.ReadResponse.list_compute:type_name -> vibesys.host.v1.ListComputeResponse
-	20, // 18: vibesys.api.v1.ReadResponse.preflight_run:type_name -> vibesys.host.v1.PreflightRunResponse
-	21, // 19: vibesys.api.v1.ReadResponse.inspect_candidate:type_name -> vibesys.host.v1.InspectCandidateResponse
-	22, // 20: vibesys.api.v1.ReadResponse.complete_paths:type_name -> vibesys.host.v1.CompletePathsResponse
-	23, // 21: vibesys.api.v1.ReadResponse.inspect_destination:type_name -> vibesys.host.v1.InspectDestinationResponse
-	24, // 22: vibesys.api.v1.ReadResponse.list_saved_runs:type_name -> vibesys.host.v1.ListSavedRunsResponse
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	13, // 11: vibesys.api.v1.ReadRequest.list_agent_logins:type_name -> vibesys.host.v1.ListAgentLoginsRequest
+	14, // 12: vibesys.api.v1.ReadRequest.list_run_digests:type_name -> vibesys.host.v1.ListRunDigestsRequest
+	15, // 13: vibesys.api.v1.ReadRequest.usage_window:type_name -> vibesys.host.v1.UsageWindowRequest
+	16, // 14: vibesys.api.v1.ReadResponse.failure:type_name -> vibesys.host.v1.OperationFailure
+	17, // 15: vibesys.api.v1.ReadResponse.list_tasks:type_name -> vibesys.host.v1.ListTasksResponse
+	18, // 16: vibesys.api.v1.ReadResponse.list_harnesses:type_name -> vibesys.host.v1.ListHarnessesResponse
+	19, // 17: vibesys.api.v1.ReadResponse.list_examples:type_name -> vibesys.host.v1.ListExamplesResponse
+	20, // 18: vibesys.api.v1.ReadResponse.get_task_goal:type_name -> vibesys.host.v1.GetTaskGoalResponse
+	21, // 19: vibesys.api.v1.ReadResponse.describe_machine:type_name -> vibesys.host.v1.DescribeMachineResponse
+	22, // 20: vibesys.api.v1.ReadResponse.list_compute:type_name -> vibesys.host.v1.ListComputeResponse
+	23, // 21: vibesys.api.v1.ReadResponse.preflight_run:type_name -> vibesys.host.v1.PreflightRunResponse
+	24, // 22: vibesys.api.v1.ReadResponse.inspect_candidate:type_name -> vibesys.host.v1.InspectCandidateResponse
+	25, // 23: vibesys.api.v1.ReadResponse.complete_paths:type_name -> vibesys.host.v1.CompletePathsResponse
+	26, // 24: vibesys.api.v1.ReadResponse.inspect_destination:type_name -> vibesys.host.v1.InspectDestinationResponse
+	27, // 25: vibesys.api.v1.ReadResponse.list_saved_runs:type_name -> vibesys.host.v1.ListSavedRunsResponse
+	28, // 26: vibesys.api.v1.ReadResponse.list_agent_logins:type_name -> vibesys.host.v1.ListAgentLoginsResponse
+	29, // 27: vibesys.api.v1.ReadResponse.list_run_digests:type_name -> vibesys.host.v1.ListRunDigestsResponse
+	30, // 28: vibesys.api.v1.ReadResponse.usage_window:type_name -> vibesys.host.v1.UsageWindowResponse
+	29, // [29:29] is the sub-list for method output_type
+	29, // [29:29] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_api_v1_host_read_generated_proto_init() }
@@ -629,6 +743,9 @@ func file_vibesys_api_v1_host_read_generated_proto_init() {
 		(*ReadRequest_CompletePaths)(nil),
 		(*ReadRequest_InspectDestination)(nil),
 		(*ReadRequest_ListSavedRuns)(nil),
+		(*ReadRequest_ListAgentLogins)(nil),
+		(*ReadRequest_ListRunDigests)(nil),
+		(*ReadRequest_UsageWindow)(nil),
 	}
 	file_vibesys_api_v1_host_read_generated_proto_msgTypes[1].OneofWrappers = []any{
 		(*ReadResponse_Failure)(nil),
@@ -643,6 +760,9 @@ func file_vibesys_api_v1_host_read_generated_proto_init() {
 		(*ReadResponse_CompletePaths)(nil),
 		(*ReadResponse_InspectDestination)(nil),
 		(*ReadResponse_ListSavedRuns)(nil),
+		(*ReadResponse_ListAgentLogins)(nil),
+		(*ReadResponse_ListRunDigests)(nil),
+		(*ReadResponse_UsageWindow)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

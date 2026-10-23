@@ -91,3 +91,40 @@ describe('a turn’s typed reply in the transcript', () => {
     expect(reduceEventBatch(initialCoreState(), [plain]).transcript).toEqual([]);
   });
 });
+
+it('regression: canonical replies replace equivalent JSON envelopes across every chunk boundary', () => {
+  const value = {...VALUE, analysis: String.raw`Unicode 🦊 {quoted \"field\"} \\ tail`};
+  const reordered = Object.fromEntries(Object.entries(value).reverse());
+  const cases = [reordered, {reply: reordered}].flatMap(envelope =>
+    [0, 2].flatMap(spaces =>
+      ['', 'I checked.\n', 'code with {unbalanced prefix\n'].map(prefix => ({
+        prefix,
+        raw: prefix + JSON.stringify(envelope, null, spaces),
+      })),
+    ),
+  );
+  for (const {raw, prefix} of cases) {
+    for (let cut = 1; cut < raw.length; cut += 7) {
+      const finish = event(3, 'agent_execution_finished', {
+        invocation_id: 'inv-1',
+        span_id: 'op:1',
+        status: 'completed',
+        data: {
+          kind: 'agent_execution_finished',
+          result: text(JSON.stringify(value)),
+          reply: {kind: 'JudgeResponse', json_schema: {type: 'object'}, value},
+        },
+      });
+      const {transcript} = reduceEventBatch(initialCoreState(), [
+        say(1, raw.slice(0, cut)),
+        say(2, raw.slice(cut)),
+        finish,
+      ]);
+      expect(transcript.map(entry => entry.kind)).toEqual(
+        prefix ? ['assistant', 'reply'] : ['reply'],
+      );
+      expect(JSON.stringify(transcript.at(-1)?.reply?.value)).toBe(JSON.stringify(value));
+      if (prefix) expect(transcript[0]?.content).toBe(prefix.trimEnd());
+    }
+  }
+});

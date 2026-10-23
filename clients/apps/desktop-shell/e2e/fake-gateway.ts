@@ -1,9 +1,12 @@
-import {create, toBinary} from '@bufbuild/protobuf';
+import {fileURLToPath} from 'node:url';
+import {create, type DescMessage, type MessageInitShape, toBinary} from '@bufbuild/protobuf';
+import type {Page} from '@playwright/test';
 import {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   HostService,
   RecordSchema,
+  type RunHead,
   RunLiveness,
   SkeletonResponseSchema,
   TailRequestSchema,
@@ -13,6 +16,7 @@ import {
 } from '@vibesys/proto';
 import type {StoreRunFixture} from '@vibesys/run-fixtures';
 import {epochHasEnded} from '@vibesys/run-skeleton';
+import {buildSync} from 'esbuild';
 
 export interface WireFixture {
   methods: Record<'skeleton' | 'tail' | 'blobs' | 'log' | 'hostCall' | 'watchRuns', string>;
@@ -20,11 +24,31 @@ export interface WireFixture {
   tail: number[];
   blobs: Record<string, number[]>;
   log: number[];
+  streams?: Record<string, number[]>;
   chatRequest: number[];
   chat: number[];
   watchRuns: number[];
+  behavior?: GatewayBehavior;
 }
-export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixture {
+
+/** The delivery seam shared with the native gateway world in desktop-main. */
+export interface GatewayBehavior {
+  readonly holdTail?: boolean;
+  readonly skeleton?: {readonly status: number; readonly message: string};
+  readonly refuseActions?: readonly string[];
+}
+const encode = <S extends DescMessage>(schema: S, init: MessageInitShape<S>): number[] => [
+  ...toBinary(schema, create(schema, init)),
+];
+
+export function wire(
+  fixture: StoreRunFixture,
+  liveness?: RunLiveness,
+  head?: RunHead,
+): WireFixture {
+  const epochRecord = fixture.records.find(record => record.body.case === 'epochStarted');
+  if (epochRecord?.body.case !== 'epochStarted') throw new Error('Fixture has no native epoch');
+  const runId = epochRecord.body.value.runId;
   const encoded = fixture.records.map(record => toBinary(RecordSchema, record));
   const prefix = fixture.records.slice(0, fixture.initialCount);
   const method = (name: keyof typeof HostService.method): string =>
@@ -32,21 +56,21 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
   const last = fixture.records.filter(record => record.body.case === 'lifecycle').at(-1);
   const lifecycle = last?.body.case === 'lifecycle' ? last.body.value : undefined;
   const epoch = fixture.records.at(-1)?.epoch ?? 1;
+  const throughSeq = fixture.records.at(-1)?.seq ?? 0n;
+  const stream = (data: Uint8Array) =>
+    encode(TailStreamResponseSchema, {data, nextOffset: BigInt(data.length)});
   return {
-    watchRuns: [
-      ...toBinary(
-        WatchRunsResponseSchema,
-        create(WatchRunsResponseSchema, {
-          runId: 'run-a',
-          liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
-          head: {
-            strategy: 'fixture',
-            lifecycle,
-            process: {pid: 1, epoch, startedAt: {seconds: 1700000000n}},
-          },
-        }),
-      ),
-    ],
+    watchRuns: encode(WatchRunsResponseSchema, {
+      runId,
+      projectRoot: epochRecord.body.value.projectRoot ?? '/project',
+      liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
+      head: head ?? {
+        strategy: 'fixture',
+        epoch,
+        lifecycle,
+        process: {pid: 1, epoch, startedAt: {seconds: 1700000000n}},
+      },
+    }),
     methods: {
       skeleton: method('skeleton'),
       tail: method('tail'),
@@ -55,144 +79,45 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
       hostCall: method('hostCall'),
       watchRuns: method('watchRuns'),
     },
-    skeleton: [
-      ...toBinary(
-        SkeletonResponseSchema,
-        create(SkeletonResponseSchema, {
-          records: encoded.slice(0, fixture.initialCount),
-          committedSeq: fixture.records.at(-1)?.seq ?? 0n,
-          nextSeq: (prefix.at(-1)?.seq ?? 0n) + 1n,
-          complete: fixture.initialCount === fixture.records.length,
-        }),
-      ),
-    ],
-    tail: [
-      ...toBinary(
-        TailResponseSchema,
-        create(TailResponseSchema, {
-          records: encoded.slice(fixture.initialCount),
-          throughSeq: fixture.records.at(-1)?.seq ?? 0n,
-        }),
-      ),
-    ],
+    skeleton: encode(SkeletonResponseSchema, {
+      records: encoded.slice(0, fixture.initialCount),
+      committedSeq: throughSeq,
+      nextSeq: (prefix.at(-1)?.seq ?? 0n) + 1n,
+      complete: fixture.initialCount === fixture.records.length,
+    }),
+    tail: encode(TailResponseSchema, {records: encoded.slice(fixture.initialCount), throughSeq}),
     blobs: Object.fromEntries(
       Object.entries(fixture.blobs).map(([sha256, data]) => [
-        [
-          ...toBinary(
-            GetBlobsRequestSchema,
-            create(GetBlobsRequestSchema, {runId: 'run-a', sha256: [sha256]}),
-          ),
-        ].join(','),
-        [
-          ...toBinary(
-            GetBlobsResponseSchema,
-            create(GetBlobsResponseSchema, {blobs: [{sha256, data}]}),
-          ),
-        ],
+        encode(GetBlobsRequestSchema, {runId, sha256: [sha256]}).join(','),
+        encode(GetBlobsResponseSchema, {blobs: [{sha256, data}]}),
       ]),
     ),
-    chatRequest: [
-      ...toBinary(TailRequestSchema, create(TailRequestSchema, {sessionId: 'default'})),
-    ],
+    chatRequest: encode(TailRequestSchema, {sessionId: 'default'}),
     chat: [],
-    log: [
-      ...toBinary(
-        TailStreamResponseSchema,
-        create(TailStreamResponseSchema, {
-          data: fixture.streams['build-log'] ?? new Uint8Array(),
-          nextOffset: BigInt(fixture.streams['build-log']?.length ?? 0),
-        }),
-      ),
-    ],
+    streams: Object.fromEntries(
+      Object.entries(fixture.streams).map(([id, data]) => [id, stream(data)]),
+    ),
+    log: stream(fixture.streams['build-log'] ?? new Uint8Array()),
   };
 }
 
-export function installGateway(input: WireFixture): void {
-  const calls: string[] = [];
-  const streams = new Set<(bytes: Uint8Array) => void>();
-  const ended = new Set<(error?: string) => void>();
-  const history = [input.tail];
-  const chats = new Set<(bytes: Uint8Array) => void>();
-  const watchers = new Set<(bytes: Uint8Array) => void>();
-  let active = 0;
-  Object.assign(window, {
-    vibesysGateway: {
-      unary: (host: string, method: string, request: Uint8Array) => {
-        calls.push(method);
-        if (method === input.methods.hostCall) {
-          const peer = window as unknown as {
-            postIntent(host: string, bytes: number[]): Promise<number[]>;
-          };
-          return {
-            result: peer.postIntent(host, [...request]).then(bytes => new Uint8Array(bytes)),
-            cancel: () => undefined,
-          };
-        }
-        const bytes =
-          method === input.methods.skeleton
-            ? input.skeleton
-            : method === input.methods.blobs
-              ? input.blobs[[...request].join(',')]
-              : undefined;
-        if (!bytes) throw new Error('Unknown unary');
-        return {result: Promise.resolve(new Uint8Array(bytes)), cancel: () => undefined};
-      },
-      stream: (
-        _host: string,
-        method: string,
-        _bytes: Uint8Array,
-        receive: (bytes: Uint8Array) => void,
-        finish: (error?: string) => void,
-      ) => {
-        ended.add(finish);
-        calls.push(method);
-        active += 1;
-        let closed = false;
-        if (method === input.methods.tail) {
-          if (
-            [..._bytes].slice(-input.chatRequest.length).join(',') === input.chatRequest.join(',')
-          ) {
-            chats.add(receive);
-            receive(new Uint8Array(input.chat));
-          } else {
-            streams.add(receive);
-            for (const bytes of history) receive(new Uint8Array(bytes));
-          }
-        } else if (method === input.methods.watchRuns) {
-          watchers.add(receive);
-          receive(new Uint8Array(input.watchRuns));
-        } else if (method === input.methods.log) receive(new Uint8Array(input.log));
-        else throw new Error('Unknown stream');
-        return {
-          cancel: () => {
-            if (!closed) {
-              closed = true;
-              active -= 1;
-              streams.delete(receive);
-              ended.delete(finish);
-              chats.delete(receive);
-              watchers.delete(receive);
-            }
-          },
-        };
-      },
-    },
-    fakeGateway: {
-      appendChat: (bytes: number[]) => {
-        for (const receive of chats) receive(new Uint8Array(bytes));
-      },
-      disconnect: () => {
-        for (const finish of [...ended]) finish('SSH connection closed');
-      },
-      calls: () => calls,
-      active: () => active,
-      observe: (bytes: number[]) => {
-        for (const receive of watchers) receive(new Uint8Array(bytes));
-      },
-      append: (bytes: number[]) => {
-        history.push(bytes);
-        for (const receive of streams) receive(new Uint8Array(bytes));
-      },
-    },
-  });
+let preload: string | undefined;
+
+/** Bundle the real generated codecs into the page so the Fake cannot drift from the preload ABI. */
+export function gatewayScript(input: WireFixture): string {
+  preload ??= buildSync({
+    entryPoints: [fileURLToPath(new URL('./gateway-preload.ts', import.meta.url))],
+    bundle: true,
+    write: false,
+    format: 'iife',
+    globalName: 'fixtureGateway',
+    platform: 'browser',
+    conditions: ['@vibesys/source'],
+    target: 'es2022',
+  }).outputFiles[0]?.text;
+  if (preload === undefined) throw new Error('gateway fixture bundle is missing');
+  return `${preload}\nfixtureGateway.installGateway(${JSON.stringify(input)});`;
+}
+export async function installGateway(page: Page, input: WireFixture): Promise<void> {
+  await page.addInitScript({content: gatewayScript(input)});
 }

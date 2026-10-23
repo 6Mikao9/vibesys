@@ -161,6 +161,7 @@ graph TD
     launch --> vs_sim
     launch --> vs_slurm
     server --> vibesys
+    server --> vs_agent
     server --> vs_async_ops
     server --> vs_decode
     server --> vs_logs

@@ -13,11 +13,12 @@ from protobuf._codegen import file_desc
 
 from . import host_call_pb, host_mutate_generated_pb, host_read_generated_pb, host_watch_generated_pb
 from ....buf.validate import validate_pb
-from ...store.v1 import skeleton_pb
+from ...store.v1 import chat_pb, skeleton_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile
 
+    from ...store.v1.chat_pb import ChatSessionCreated
     from ...store.v1.skeleton_pb import RunHead
 
 
@@ -128,7 +129,7 @@ class TailRequest(Message[_TailRequestFields]):
         from_seq: int
         session_id: str
 
-_TailResponseFields: TypeAlias = Literal["records", "through_seq"]
+_TailResponseFields: TypeAlias = Literal["records", "through_seq", "head"]
 
 class TailResponse(Message[_TailResponseFields]):
     """
@@ -149,9 +150,15 @@ class TailResponse(Message[_TailResponseFields]):
             ```proto
             uint64 through_seq = 2;
             ```
+        head:
+            Canonical facts of exactly through_seq; absent for session and phase 1 logs.
+
+            ```proto
+            optional vibesys.store.v1.RunHead head = 3;
+            ```
     """
 
-    __slots__ = ("records", "through_seq")
+    __slots__ = ("records", "through_seq", "head")
 
     if TYPE_CHECKING:
 
@@ -160,13 +167,15 @@ class TailResponse(Message[_TailResponseFields]):
             *,
             records: list[bytes] | None = None,
             through_seq: int = 0,
+            head: RunHead | None = None,
         ) -> None:
             pass
 
         records: list[bytes]
         through_seq: int
+        head: RunHead | None
 
-_SkeletonRequestFields: TypeAlias = Literal["run_id"]
+_SkeletonRequestFields: TypeAlias = Literal["run_id", "known_descriptors_sha256"]
 
 class SkeletonRequest(Message[_SkeletonRequestFields]):
     """
@@ -179,9 +188,16 @@ class SkeletonRequest(Message[_SkeletonRequestFields]):
             ```proto
             string run_id = 1;
             ```
+        known_descriptors_sha256:
+            Descriptor sets the client already holds. The reply names each epoch's set
+            by hash and sends the bytes only of sets not listed here.
+
+            ```proto
+            repeated string known_descriptors_sha256 = 2;
+            ```
     """
 
-    __slots__ = ("run_id",)
+    __slots__ = ("run_id", "known_descriptors_sha256")
 
     if TYPE_CHECKING:
 
@@ -189,18 +205,61 @@ class SkeletonRequest(Message[_SkeletonRequestFields]):
             self,
             *,
             run_id: str = "",
+            known_descriptors_sha256: list[str] | None = None,
         ) -> None:
             pass
 
         run_id: str
+        known_descriptors_sha256: list[str]
 
-_SkeletonResponseFields: TypeAlias = Literal["keyframe", "records", "committed_seq", "next_seq", "complete", "sessions"]
+_DescriptorSetFields: TypeAlias = Literal["sha256", "data"]
+
+class DescriptorSet(Message[_DescriptorSetFields]):
+    """
+    One EpochStarted.descriptors set, addressed by the SHA-256 of its encoded
+    bytes. data is exactly the bytes that hash covers, so a reader verifies it
+    without re-encoding.
+
+    ```proto
+    message vibesys.api.v1.DescriptorSet
+    ```
+
+    Attributes:
+        sha256:
+            ```proto
+            string sha256 = 1;
+            ```
+        data:
+            ```proto
+            bytes data = 2;
+            ```
+    """
+
+    __slots__ = ("sha256", "data")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            sha256: str = "",
+            data: bytes = b"",
+        ) -> None:
+            pass
+
+        sha256: str
+        data: bytes
+
+_SkeletonResponseFields: TypeAlias = Literal["keyframe", "records", "committed_seq", "next_seq", "complete", "sessions", "descriptor_sets", "head"]
 
 class SkeletonResponse(Message[_SkeletonResponseFields]):
     """
     A bounded committed prefix, at most 1 MiB encoded. No keyframe means replay
-    from the beginning; a keyframe larger than the budget is omitted. Records that
-    do not fit (including a single large record) are delivered through Tail.
+    from the beginning; a keyframe larger than the budget once its descriptors are
+    addressed by hash is omitted. Records that do not fit (including a single
+    large record) are delivered through Tail. Every epoch of the keyframe names its
+    descriptors by EpochVersion.descriptors_sha256; descriptor_sets carries the
+    ones the request did not list.
 
     ```proto
     message vibesys.api.v1.SkeletonResponse
@@ -238,9 +297,19 @@ class SkeletonResponse(Message[_SkeletonResponseFields]):
             ```proto
             repeated string sessions = 6;
             ```
+        descriptor_sets:
+            ```proto
+            repeated vibesys.api.v1.DescriptorSet descriptor_sets = 7;
+            ```
+        head:
+            Core facts at committed_seq, including the retained-writer read upgrade.
+
+            ```proto
+            optional vibesys.store.v1.RunHead head = 8;
+            ```
     """
 
-    __slots__ = ("keyframe", "records", "committed_seq", "next_seq", "complete", "sessions")
+    __slots__ = ("keyframe", "records", "committed_seq", "next_seq", "complete", "sessions", "descriptor_sets", "head")
 
     if TYPE_CHECKING:
 
@@ -253,6 +322,8 @@ class SkeletonResponse(Message[_SkeletonResponseFields]):
             next_seq: int = 0,
             complete: bool = False,
             sessions: list[str] | None = None,
+            descriptor_sets: list[DescriptorSet] | None = None,
+            head: RunHead | None = None,
         ) -> None:
             pass
 
@@ -262,6 +333,8 @@ class SkeletonResponse(Message[_SkeletonResponseFields]):
         next_seq: int
         complete: bool
         sessions: list[str]
+        descriptor_sets: list[DescriptorSet]
+        head: RunHead | None
 
 _WatchRunsRequestFields: TypeAlias = NoReturn
 
@@ -281,7 +354,7 @@ class WatchRunsRequest(Message[_WatchRunsRequestFields]):
         ) -> None:
             pass
 
-_WatchRunsResponseFields: TypeAlias = Literal["run_id", "head", "liveness", "removed", "initial_complete"]
+_WatchRunsResponseFields: TypeAlias = Literal["run_id", "head", "liveness", "removed", "initial_complete", "heartbeat", "project_root"]
 
 class WatchRunsResponse(Message[_WatchRunsResponseFields]):
     """
@@ -316,9 +389,23 @@ class WatchRunsResponse(Message[_WatchRunsResponseFields]):
             ```proto
             bool initial_complete = 5;
             ```
+        heartbeat:
+            Emitted at least every five seconds, after all preceding run observations.
+            A receiver expires its facts after thirty seconds without a frame.
+
+            ```proto
+            bool heartbeat = 6;
+            ```
+        project_root:
+            Canonical host-side project directory. Older gateways may omit it; those entries have no
+            address and cannot enter project-dependent listings. Markers and tombstones omit it.
+
+            ```proto
+            optional string project_root = 7;
+            ```
     """
 
-    __slots__ = ("run_id", "head", "liveness", "removed", "initial_complete")
+    __slots__ = ("run_id", "head", "liveness", "removed", "initial_complete", "heartbeat", "project_root")
 
     if TYPE_CHECKING:
 
@@ -330,6 +417,8 @@ class WatchRunsResponse(Message[_WatchRunsResponseFields]):
             liveness: RunLiveness | None = None,
             removed: bool = False,
             initial_complete: bool = False,
+            heartbeat: bool = False,
+            project_root: str | None = None,
         ) -> None:
             pass
 
@@ -338,6 +427,8 @@ class WatchRunsResponse(Message[_WatchRunsResponseFields]):
         liveness: RunLiveness
         removed: bool
         initial_complete: bool
+        heartbeat: bool
+        project_root: str
 
 _GetBlobsRequestFields: TypeAlias = Literal["run_id", "sha256", "session_id"]
 
@@ -534,6 +625,65 @@ class TailStreamResponse(Message[_TailStreamResponseFields]):
         data: bytes
         next_offset: int
 
+_ListChatSessionsRequestFields: TypeAlias = Literal["run_id"]
+
+class ListChatSessionsRequest(Message[_ListChatSessionsRequestFields]):
+    """
+    Only committed session metadata is exposed. Empty sessions created before a
+    first question remain discoverable. Listing never starts an agent.
+
+    ```proto
+    message vibesys.api.v1.ListChatSessionsRequest
+    ```
+
+    Attributes:
+        run_id:
+            ```proto
+            string run_id = 1;
+            ```
+    """
+
+    __slots__ = ("run_id",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            run_id: str = "",
+        ) -> None:
+            pass
+
+        run_id: str
+
+_ListChatSessionsResponseFields: TypeAlias = Literal["sessions"]
+
+class ListChatSessionsResponse(Message[_ListChatSessionsResponseFields]):
+    """
+    ```proto
+    message vibesys.api.v1.ListChatSessionsResponse
+    ```
+
+    Attributes:
+        sessions:
+            ```proto
+            repeated vibesys.store.v1.ChatSessionCreated sessions = 1;
+            ```
+    """
+
+    __slots__ = ("sessions",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            sessions: list[ChatSessionCreated] | None = None,
+        ) -> None:
+            pass
+
+        sessions: list[ChatSessionCreated]
+
 class RunLiveness(Enum):
     """
     ```proto
@@ -573,13 +723,14 @@ class RunLiveness(Enum):
 
 
 _DESC = file_desc(
-    b'\n\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1evibesys/api/v1/host_call.proto\x1a(vibesys/api/v1/host_read_generated.proto\x1a*vibesys/api/v1/host_mutate_generated.proto\x1a)vibesys/api/v1/host_watch_generated.proto\x1a\x1fvibesys/store/v1/skeleton.proto"M\n\x0cHelloRequest\x12=\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHashB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$"\x83\x01\n\rHelloResponse\x12=\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHashB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x123\n\x0fgateway_version\x18\x02 \x01(\tR\x0egatewayVersionB\n\xbaH\x07r\x05\x10\x01(\x80\x02"\xc6\x01\n\x0bTailRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12*\n\x08from_seq\x18\x02 \x01(\x04R\x07fromSeqB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f\x12J\n\nsession_id\x18\x03 \x01(\tR\tsessionIdB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$"r\n\x0cTailResponse\x120\n\x07records\x18\x01 \x03(\x0cR\x07recordsB\x16\xbaH\x13\x92\x01\x10\x08\x01\x10\x80\x80@"\x08z\x06\x10\x01\x18\x80\x80@\x120\n\x0bthrough_seq\x18\x02 \x01(\x04R\nthroughSeqB\x0f\xbaH\x0c2\n\x18\xfe\xff\xff\xff\xff\xff\xff\xff\x7f"R\n\x0fSkeletonRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"\xcc\x02\n\x10SkeletonResponse\x12,\n\x08keyframe\x18\x01 \x01(\x0cH\x00R\x08keyframeB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80@\x88\x01\x01\x12.\n\x07records\x18\x02 \x03(\x0cR\x07recordsB\x14\xbaH\x11\x92\x01\x0e\x10\x80\x80@"\x08z\x06\x10\x01\x18\x80\x80@\x124\n\rcommitted_seq\x18\x03 \x01(\x04R\x0ccommittedSeqB\x0f\xbaH\x0c2\n\x18\xfe\xff\xff\xff\xff\xff\xff\xff\x7f\x12*\n\x08next_seq\x18\x04 \x01(\x04R\x07nextSeqB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f\x12\x1a\n\x08complete\x18\x05 \x01(\x08R\x08complete\x12O\n\x08sessions\x18\x06 \x03(\tR\x08sessionsB3\xbaH0\x92\x01-\x10\x80\x80@\x18\x01"%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$B\x0b\n\t_keyframe"\x12\n\x10WatchRunsRequest"\xf4\x04\n\x11WatchRunsResponse\x12B\n\x06run_id\x18\x01 \x01(\tR\x05runIdB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$\x12-\n\x04head\x18\x02 \x01(\x0b2\x19.vibesys.store.v1.RunHeadR\x04head\x12A\n\x08liveness\x18\x03 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessR\x08livenessB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12\x18\n\x07removed\x18\x04 \x01(\x08R\x07removed\x12)\n\x10initial_complete\x18\x05 \x01(\x08R\x0finitialComplete:\xe3\x02\xbaH\xdf\x02\x1a\xdc\x02\n\x10watch_runs.shape\x12drun_id, head, liveness, removed and initial_complete must form an entry, tombstone or initial marker\x1a\xe1\x01this.initial_complete ? (this.run_id == \'\' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != \'\' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))"\xd5\x01\n\x0fGetBlobsRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x125\n\x06sha256\x18\x02 \x03(\tR\x06sha256B\x1d\xbaH\x1a\x92\x01\x17\x10\x80\x02"\x12r\x102\x0e^[0-9a-f]{64}$\x12J\n\nsession_id\x18\x03 \x01(\tR\tsessionIdB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$"O\n\x10GetBlobsResponse\x12;\n\x05blobs\x18\x01 \x03(\x0b2\x1a.vibesys.api.v1.BlobResultR\x05blobsB\t\xbaH\x06\x92\x01\x03\x10\x80\x02"\x80\x03\n\nBlobResult\x12-\n\x06sha256\x18\x01 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12\x1e\n\x04data\x18\x02 \x01(\x0cR\x04dataB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08\x12(\n\nerror_code\x18\x03 \x01(\x05R\terrorCodeB\t\xbaH\x06\x1a\x04\x18\x10(\x00\x12.\n\rerror_message\x18\x04 \x01(\tR\x0cerrorMessageB\t\xbaH\x06r\x04(\x80\x80\x04:\xc8\x01\xbaH\xc4\x01\x1a\xc1\x01\n\x13blob_result.outcome\x12Cerror_code, error_message and data must describe success or failure\x1aethis.error_code == 0 ? this.error_message == \'\' : (this.data.size() == 0 && this.error_message != \'\')"\xce\x01\n\x11TailStreamRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12F\n\tstream_id\x18\x02 \x01(\tR\x08streamIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$\x120\n\x0bfrom_offset\x18\x03 \x01(\x04R\nfromOffsetB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f"\xcb\x01\n\x12TailStreamResponse\x12\x1f\n\x04data\x18\x01 \x01(\x0cR\x04dataB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80\x04\x120\n\x0bnext_offset\x18\x02 \x01(\x04R\nnextOffsetB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f:b\xbaH_\x1a]\n\x12tail_stream.offset\x12\x1bnext_offset must cover data\x1a*this.next_offset >= uint(this.data.size())*\x92\x01\n\x0bRunLiveness\x12\x1c\n\x18RUN_LIVENESS_UNSPECIFIED\x10\x00\x12\x16\n\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n\x12RUN_LIVENESS_ENDED\x10\x03\x12\x17\n\x13RUN_LIVENESS_PARKED\x10\x042\x84\x06\n\x0bHostService\x12M\n\x08HostCall\x12\x1f.vibesys.api.v1.HostCallRequest\x1a .vibesys.api.v1.HostCallResponse\x12A\n\x04Read\x12\x1b.vibesys.api.v1.ReadRequest\x1a\x1c.vibesys.api.v1.ReadResponse\x12F\n\x05Watch\x12\x1c.vibesys.api.v1.WatchRequest\x1a\x1d.vibesys.api.v1.WatchResponse0\x01\x12G\n\x06Mutate\x12\x1d.vibesys.api.v1.MutateRequest\x1a\x1e.vibesys.api.v1.MutateResponse\x12D\n\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12C\n\x04Tail\x12\x1b.vibesys.api.v1.TailRequest\x1a\x1c.vibesys.api.v1.TailResponse0\x01\x12M\n\x08Skeleton\x12\x1f.vibesys.api.v1.SkeletonRequest\x1a .vibesys.api.v1.SkeletonResponse\x12R\n\tWatchRuns\x12 .vibesys.api.v1.WatchRunsRequest\x1a!.vibesys.api.v1.WatchRunsResponse0\x01\x12M\n\x08GetBlobs\x12\x1f.vibesys.api.v1.GetBlobsRequest\x1a .vibesys.api.v1.GetBlobsResponse\x12U\n\nTailStream\x12!.vibesys.api.v1.TailStreamRequest\x1a".vibesys.api.v1.TailStreamResponse0\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
+    b'\n\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1evibesys/api/v1/host_call.proto\x1a*vibesys/api/v1/host_mutate_generated.proto\x1a(vibesys/api/v1/host_read_generated.proto\x1a)vibesys/api/v1/host_watch_generated.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1fvibesys/store/v1/skeleton.proto"M\n\x0cHelloRequest\x12=\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHashB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$"\x83\x01\n\rHelloResponse\x12=\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHashB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x123\n\x0fgateway_version\x18\x02 \x01(\tR\x0egatewayVersionB\n\xbaH\x07r\x05\x10\x01(\x80\x02"\xc6\x01\n\x0bTailRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12*\n\x08from_seq\x18\x02 \x01(\x04R\x07fromSeqB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f\x12J\n\nsession_id\x18\x03 \x01(\tR\tsessionIdB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$"\xf5\x02\n\x0cTailResponse\x120\n\x07records\x18\x01 \x03(\x0cR\x07recordsB\x16\xbaH\x13\x92\x01\x10\x08\x01\x10\x80\x80@"\x08z\x06\x10\x01\x18\x80\x80@\x120\n\x0bthrough_seq\x18\x02 \x01(\x04R\nthroughSeqB\x0f\xbaH\x0c2\n\x18\xfe\xff\xff\xff\xff\xff\xff\xff\x7f\x12-\n\x04head\x18\x03 \x01(\x0b2\x19.vibesys.store.v1.RunHeadR\x04head:\xd1\x01\xbaH\xcd\x01\x1a\xca\x01\n\x10tail_head_prefix\x123head must state performance for exactly through_seq\x1a\x80\x01!has(this.head) || (has(this.head.committed_seq) && this.head.committed_seq == this.through_seq && this.head.performance_stated)"\xac\x01\n\x0fSkeletonRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12X\n\x18known_descriptors_sha256\x18\x02 \x03(\tR\x16knownDescriptorsSha256B\x1e\xbaH\x1b\x92\x01\x18\x10@\x18\x01"\x12r\x102\x0e^[0-9a-f]{64}$"_\n\rDescriptorSet\x12-\n\x06sha256\x18\x01 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12\x1f\n\x04data\x18\x02 \x01(\x0cR\x04dataB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80@"\xcd\x03\n\x10SkeletonResponse\x12,\n\x08keyframe\x18\x01 \x01(\x0cH\x00R\x08keyframeB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80@\x88\x01\x01\x12.\n\x07records\x18\x02 \x03(\x0cR\x07recordsB\x14\xbaH\x11\x92\x01\x0e\x10\x80\x80@"\x08z\x06\x10\x01\x18\x80\x80@\x124\n\rcommitted_seq\x18\x03 \x01(\x04R\x0ccommittedSeqB\x0f\xbaH\x0c2\n\x18\xfe\xff\xff\xff\xff\xff\xff\xff\x7f\x12*\n\x08next_seq\x18\x04 \x01(\x04R\x07nextSeqB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f\x12\x1a\n\x08complete\x18\x05 \x01(\x08R\x08complete\x12O\n\x08sessions\x18\x06 \x03(\tR\x08sessionsB3\xbaH0\x92\x01-\x10\x80\x80@\x18\x01"%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12P\n\x0fdescriptor_sets\x18\x07 \x03(\x0b2\x1d.vibesys.api.v1.DescriptorSetR\x0edescriptorSetsB\x08\xbaH\x05\x92\x01\x02\x10@\x12-\n\x04head\x18\x08 \x01(\x0b2\x19.vibesys.store.v1.RunHeadR\x04headB\x0b\n\t_keyframe"\x12\n\x10WatchRunsRequest"\xa7\x06\n\x11WatchRunsResponse\x12B\n\x06run_id\x18\x01 \x01(\tR\x05runIdB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$\x12-\n\x04head\x18\x02 \x01(\x0b2\x19.vibesys.store.v1.RunHeadR\x04head\x12A\n\x08liveness\x18\x03 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessR\x08livenessB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12\x18\n\x07removed\x18\x04 \x01(\x08R\x07removed\x12)\n\x10initial_complete\x18\x05 \x01(\x08R\x0finitialComplete\x12\x1c\n\theartbeat\x18\x06 \x01(\x08R\theartbeat\x125\n\x0cproject_root\x18\x07 \x01(\tH\x00R\x0bprojectRootB\r\xbaH\nr\x08\x10\x01(\x80 :\x01/\x88\x01\x01B\x0f\n\r_project_root:\xb0\x03\xbaH\xac\x03\x1a\xa9\x03\n\x10watch_runs.shape\x12orun_id, head, liveness, removed and initial_complete must form an entry, tombstone, initial marker or heartbeat\x1a\xa3\x02(this.initial_complete || this.heartbeat) ? (!(this.initial_complete && this.heartbeat) && this.run_id == \'\' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != \'\' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))"\xd5\x01\n\x0fGetBlobsRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x125\n\x06sha256\x18\x02 \x03(\tR\x06sha256B\x1d\xbaH\x1a\x92\x01\x17\x10\x80\x02"\x12r\x102\x0e^[0-9a-f]{64}$\x12J\n\nsession_id\x18\x03 \x01(\tR\tsessionIdB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$"O\n\x10GetBlobsResponse\x12;\n\x05blobs\x18\x01 \x03(\x0b2\x1a.vibesys.api.v1.BlobResultR\x05blobsB\t\xbaH\x06\x92\x01\x03\x10\x80\x02"\x80\x03\n\nBlobResult\x12-\n\x06sha256\x18\x01 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12\x1e\n\x04data\x18\x02 \x01(\x0cR\x04dataB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08\x12(\n\nerror_code\x18\x03 \x01(\x05R\terrorCodeB\t\xbaH\x06\x1a\x04\x18\x10(\x00\x12.\n\rerror_message\x18\x04 \x01(\tR\x0cerrorMessageB\t\xbaH\x06r\x04(\x80\x80\x04:\xc8\x01\xbaH\xc4\x01\x1a\xc1\x01\n\x13blob_result.outcome\x12Cerror_code, error_message and data must describe success or failure\x1aethis.error_code == 0 ? this.error_message == \'\' : (this.data.size() == 0 && this.error_message != \'\')"\xce\x01\n\x11TailStreamRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12F\n\tstream_id\x18\x02 \x01(\tR\x08streamIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$\x120\n\x0bfrom_offset\x18\x03 \x01(\x04R\nfromOffsetB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f"\xcb\x01\n\x12TailStreamResponse\x12\x1f\n\x04data\x18\x01 \x01(\x0cR\x04dataB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80\x04\x120\n\x0bnext_offset\x18\x02 \x01(\x04R\nnextOffsetB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f:b\xbaH_\x1a]\n\x12tail_stream.offset\x12\x1bnext_offset must cover data\x1a*this.next_offset >= uint(this.data.size())"Z\n\x17ListChatSessionsRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"g\n\x18ListChatSessionsResponse\x12K\n\x08sessions\x18\x01 \x03(\x0b2$.vibesys.store.v1.ChatSessionCreatedR\x08sessionsB\t\xbaH\x06\x92\x01\x03\x10\x80 *\x92\x01\n\x0bRunLiveness\x12\x1c\n\x18RUN_LIVENESS_UNSPECIFIED\x10\x00\x12\x16\n\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n\x12RUN_LIVENESS_ENDED\x10\x03\x12\x17\n\x13RUN_LIVENESS_PARKED\x10\x042\xeb\x06\n\x0bHostService\x12M\n\x08HostCall\x12\x1f.vibesys.api.v1.HostCallRequest\x1a .vibesys.api.v1.HostCallResponse\x12A\n\x04Read\x12\x1b.vibesys.api.v1.ReadRequest\x1a\x1c.vibesys.api.v1.ReadResponse\x12F\n\x05Watch\x12\x1c.vibesys.api.v1.WatchRequest\x1a\x1d.vibesys.api.v1.WatchResponse0\x01\x12G\n\x06Mutate\x12\x1d.vibesys.api.v1.MutateRequest\x1a\x1e.vibesys.api.v1.MutateResponse\x12D\n\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12e\n\x10ListChatSessions\x12\'.vibesys.api.v1.ListChatSessionsRequest\x1a(.vibesys.api.v1.ListChatSessionsResponse\x12C\n\x04Tail\x12\x1b.vibesys.api.v1.TailRequest\x1a\x1c.vibesys.api.v1.TailResponse0\x01\x12M\n\x08Skeleton\x12\x1f.vibesys.api.v1.SkeletonRequest\x1a .vibesys.api.v1.SkeletonResponse\x12R\n\tWatchRuns\x12 .vibesys.api.v1.WatchRunsRequest\x1a!.vibesys.api.v1.WatchRunsResponse0\x01\x12M\n\x08GetBlobs\x12\x1f.vibesys.api.v1.GetBlobsRequest\x1a .vibesys.api.v1.GetBlobsResponse\x12U\n\nTailStream\x12!.vibesys.api.v1.TailStreamRequest\x1a".vibesys.api.v1.TailStreamResponse0\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
     [
         validate_pb.desc(),
         host_call_pb.desc(),
-        host_read_generated_pb.desc(),
         host_mutate_generated_pb.desc(),
+        host_read_generated_pb.desc(),
         host_watch_generated_pb.desc(),
+        chat_pb.desc(),
         skeleton_pb.desc(),
     ],
     {
@@ -588,6 +739,7 @@ _DESC = file_desc(
         "TailRequest": TailRequest,
         "TailResponse": TailResponse,
         "SkeletonRequest": SkeletonRequest,
+        "DescriptorSet": DescriptorSet,
         "SkeletonResponse": SkeletonResponse,
         "WatchRunsRequest": WatchRunsRequest,
         "WatchRunsResponse": WatchRunsResponse,
@@ -596,6 +748,8 @@ _DESC = file_desc(
         "BlobResult": BlobResult,
         "TailStreamRequest": TailStreamRequest,
         "TailStreamResponse": TailStreamResponse,
+        "ListChatSessionsRequest": ListChatSessionsRequest,
+        "ListChatSessionsResponse": ListChatSessionsResponse,
         "RunLiveness": RunLiveness,
     },
 )

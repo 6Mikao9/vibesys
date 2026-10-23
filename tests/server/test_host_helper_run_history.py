@@ -24,8 +24,9 @@ from server.host_api import (
     RunsReadTailRequest,
     request_features,
 )
+from server.host_examples import ProjectLookupError
 from server.host_helper_os import FileProjects, JournalTally, tally_journal
-from server.host_helper_requests import ProjectLookupError, answer, event_page
+from server.host_helper_requests import answer, event_page
 from server.host_run_summary import RUN_SUMMARY_FILE, RunsSummaryRequest
 from vs_project.api import GitFaultSink, GitRepository, Project
 from vs_project.api.testing import FakeGitRepositories

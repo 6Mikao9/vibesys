@@ -1,4 +1,4 @@
-"""Host-side maintenance commands, dispatched before starting a run engine."""
+"""Host commands with contract-only startup; dispatched commands load their I/O adapters."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ class LoginLibrary(Protocol):
 if TYPE_CHECKING:
     from typing import BinaryIO
 
-    from vs_sim.api import SignalRelay, SleepingClock, Threads
+    from vs_sim.api import Processes, SignalRelay, SleepingClock, Threads
 
 
 def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tuple[int, str, str]:
@@ -82,6 +82,11 @@ def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tu
     convert.add_argument("--project", type=Path, default=cwd, help="project directory")
     bulk = methods.add_parser("convert-runs", help="convert stopped project and host-index runs")
     bulk.add_argument("--project", type=Path, default=cwd, help="project directory")
+    bulk.add_argument(
+        "--reconvert",
+        action="store_true",
+        help="rebuild runs this migration already converted, from their untouched journals",
+    )
     args = parser.parse_args(argv)
     conversion = import_module("vibesys.api.transport")
     clock = SystemClock() if clock is None else clock
@@ -89,7 +94,9 @@ def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tu
     try:
         project = Project.open(root)
         if args.method == "convert-runs":
-            rows = conversion.convert_runs(project, clock=clock, threads=OsThreads())
+            rows = conversion.convert_runs(
+                project, clock=clock, threads=OsThreads(), reconvert=args.reconvert
+            )
             counts = Counter(row.result.status for row in rows)
             output = "".join(
                 f"{row.run}: {row.result.status}: {row.result.reason}\n" for row in rows
@@ -134,8 +141,9 @@ def main(
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
         host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
-        reply = import_module("server.host_helper_requests").answer_registered_read
-        destination.write(reply(arguments[0], source.read((1 << 20) + 1), host))
+        facts = import_module("server.host_helper_requests").registry_read_source(host)
+        reply = import_module("server.host_operation_reads").answer_registered_read
+        destination.write(reply(arguments[0], source.read((1 << 20) + 1), facts))
         return 0
     if arguments and arguments[0] in _WATCH_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -145,15 +153,7 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        owned = threads
-        host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), owned)
-        library = import_module("entrypoints.host_helper").AgentLibraryLogins
-        if not isinstance(host.logins, library):
-            message = "host logins cannot be held open"
-            raise TypeError(message)
-        watch_login(
-            source.read((1 << 20) + 1), destination, host.logins, owned, WakeupFdSignalRelay(owned)
-        )
+        _serve_login(source.read((1 << 20) + 1), destination, threads)
         return 0
     if arguments and arguments[0] in _MUTATION_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -170,7 +170,7 @@ def main(
                 platform=runtime,
             )
             if _MUTATION_COMMANDS[arguments[0]] == "terminate_run"
-            else _serve_mutation(arguments[0], source.read((1 << 20) + 1), owned)
+            else _serve_mutation(arguments[0], source.read((1 << 20) + 1), owned, runtime.processes)
         )
         return 0
     if arguments and arguments[0] in _HOST_CALL_COMMANDS:
@@ -195,6 +195,13 @@ def main(
     sys.stdout.write(output)
     sys.stderr.write(error)
     return code
+
+
+def _serve_login(payload: bytes, destination: BinaryIO, threads: Threads) -> None:
+    """Wire the native login watch without constructing unrelated helper resources."""
+    launcher = import_module("vs_sim.api").SubprocessPipedProcessLauncher()
+    logins = import_module("server.host_agent_logins").host_logins(launcher, threads)
+    watch_login(payload, destination, logins, threads, WakeupFdSignalRelay(threads))
 
 
 def watch_login(
@@ -237,24 +244,27 @@ def watch_login(
 
     def write(chunk: bytes) -> None:
         destination.write(chunk)
+        # A watch stays alive after its first frame; a pipe cannot wait for process exit.
+        destination.flush()
 
     with signals.relay([Signals.SIGTERM], lambda _number: stop.set()):
         serve_login(payload, cli="login", start=start, write=write, wait=wait)
 
 
-def _serve_mutation(cli: str, payload: bytes, threads: Threads) -> bytes:
+def _serve_mutation(cli: str, payload: bytes, threads: Threads, processes: Processes) -> bytes:
     """Dispatch one mutation command. Cluster and project changes are not starts."""
     slot = _MUTATION_COMMANDS[cli]
     if slot == "start_run":
         return _serve_start(payload, threads)
     if slot in {"put_cluster", "remove_cluster", "test_cluster"}:
-        return _serve_cluster(payload, threads)
+        return _serve_cluster(payload, processes)
     return _serve_project(payload, threads)
 
 
 def _serve_project(payload: bytes, threads: Threads) -> bytes:
     """Admit one project change, then apply it. Replay does not apply it again."""
     requests = import_module("server.host_helper_requests")
+    refused = import_module("server.host_examples").ProjectLookupError
     host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
 
     def apply(slot: str, request: object) -> object:
@@ -263,7 +273,7 @@ def _serve_project(payload: bytes, threads: Threads) -> bytes:
             raise ProjectRefusedError(message)
         try:
             return requests.apply_registered_project(slot, request, host)
-        except (requests.ProjectLookupError, TypeError, ValueError) as exc:
+        except (refused, TypeError, ValueError) as exc:
             raise ProjectRefusedError(str(exc)) from exc
 
     return serve_project(
@@ -274,11 +284,15 @@ def _serve_project(payload: bytes, threads: Threads) -> bytes:
     )
 
 
-def _serve_cluster(payload: bytes, threads: Threads) -> bytes:
+def _serve_cluster(payload: bytes, processes: Processes) -> bytes:
     """Admit one cluster change, then apply it. Replay does not apply it again."""
-    requests = import_module("server.host_helper_requests")
-    refused = import_module("server.host_helper_compute").ComputeError
-    host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
+    models = import_module("server.host_compute")
+    refused = models.ComputeError
+    adapters = import_module("server.host_compute_runtime")
+    probe = import_module("vs_sim.api").ProcessesProbe(processes)
+    compute = adapters.MachineCompute(
+        adapters.OsConfigFiles(), probe, home=str(Path.home()), environ=os.environ
+    )
 
     def apply(slot: str, request: object) -> object:
         if not isinstance(
@@ -287,7 +301,7 @@ def _serve_cluster(payload: bytes, threads: Threads) -> bytes:
             message = "cluster request is not a cluster mutation"
             raise ClusterRefusedError(message)
         try:
-            return requests.apply_registered_cluster(slot, request, host)
+            return models.apply_registered_cluster(slot, request, compute)
         except (refused, TypeError, ValueError) as exc:
             raise ClusterRefusedError(str(exc)) from exc
 
@@ -302,6 +316,7 @@ def _serve_cluster(payload: bytes, threads: Threads) -> bytes:
 def _serve_start(payload: bytes, threads: Threads) -> bytes:
     """Admit the start, then launch through the helper. Replay does not launch."""
     requests = import_module("server.host_helper_requests")
+    refused = import_module("server.host_examples").ProjectLookupError
     models = import_module("server.host_api")
 
     def launch(request: pb.StartRunRequest) -> tuple[str, str]:
@@ -312,7 +327,7 @@ def _serve_start(payload: bytes, threads: Threads) -> bytes:
         host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
         try:
             reply = requests.launch_registered_run(body, host)
-        except requests.ProjectLookupError as exc:
+        except refused as exc:
             raise StartRefusedError(str(exc)) from exc
         if isinstance(reply, models.HelperError):
             raise StartRefusedError(reply.message)

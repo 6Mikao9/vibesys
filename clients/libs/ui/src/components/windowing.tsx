@@ -41,6 +41,17 @@ function leftTheEnd(element: HTMLElement, following: boolean, placed: number): b
   return following && !atBottom(element) && element.scrollTop < placed - 1;
 }
 
+/**
+ * Puts a resting list back where it stood before the commit. `before` is what the scroll was when
+ * the commit's render began, so whatever the reader or the list had moved it to by then is the
+ * position kept. A scroll that ends the commit higher, with the position still available, was
+ * clamped by a layout in the middle of the commit against a momentarily shorter list.
+ */
+function unclamped(element: HTMLElement, before: number | null, resting: boolean): void {
+  if (!resting || before === null || element.scrollTop >= before) return;
+  if (element.scrollHeight - element.clientHeight >= before) element.scrollTop = before;
+}
+
 /** Scrolls to the end and returns where that landed. */
 function scrollToEnd(element: HTMLElement): number {
   element.scrollTop = element.scrollHeight;
@@ -105,6 +116,21 @@ function remeasured(row: HTMLElement, key: string, measured: Map<string, number>
   return true;
 }
 
+/** The place of the row at `index`: measuring it records its height and tells the list when that changed. */
+function slotFor(
+  index: number,
+  count: number,
+  keyOf: (index: number) => string,
+  measured: Map<string, number>,
+  changed: () => void,
+): Slot {
+  return {
+    index,
+    size: count,
+    measure: row => row !== null && remeasured(row, keyOf(index), measured) && changed(),
+  };
+}
+
 /** What a row of a windowed list is told about its place: for its position and its measuring. */
 interface Slot {
   readonly index: number;
@@ -152,6 +178,8 @@ export interface Windowed {
  * `estimate` until it has been drawn, then the height it was measured at. With `follow`, a list
  * scrolled to its end stays at it as rows arrive and grow; scrolling up sets `behind` instead. No
  * effect hooks: the scroller's ref is called after every commit and does the work effects would.
+ * Only a list that follows its end holds the end; any other is just scrolled to it. While held, the
+ * scroll events are the list's own placing and the browser's anchoring.
  */
 export function useWindowed(options: {
   readonly count: number;
@@ -192,6 +220,8 @@ export function useWindowed(options: {
   const first = Math.max(0, indexAt(offsets, top) - OVERSCAN);
   const last = Math.min(count, indexAt(offsets, top + view.height) + 1 + OVERSCAN);
 
+  // The scroll as this commit's render finds it: before any layout the commit forces.
+  const before = pane.current?.scrollTop ?? null;
   const scroller = (element: HTMLElement | null): void => {
     pane.current = element;
     if (element === null) return;
@@ -199,6 +229,7 @@ export function useWindowed(options: {
       setView({top: view.top, height: element.clientHeight});
     }
     if (placedOnCommit(element, holdAt, following, placed)) setBehind(true);
+    unclamped(element, before, holdAt === null && !follow);
     if (scrolledToEnd.current !== toEnd) {
       scrolledToEnd.current = toEnd;
       jump();
@@ -215,7 +246,6 @@ export function useWindowed(options: {
   };
   const scrolled = (event: UIEvent<HTMLElement>): void => {
     const element = event.currentTarget;
-    // While held, the scroll events are the list's own placing and the browser's anchoring.
     if (held.current) return;
     if (follow) {
       following.current = atBottom(element);
@@ -225,7 +255,6 @@ export function useWindowed(options: {
   };
   const jump = (): void => {
     held.current = false;
-    // Only a list that follows its end holds the end; any other is just scrolled to it.
     if (follow) {
       following.current = true;
       setBehind(false);
@@ -238,31 +267,16 @@ export function useWindowed(options: {
     held.current = false;
     following.current = false;
     const height = element.clientHeight || view.height;
-    const next = scrollFor(offsets[index] ?? 0, offsets[index + 1], view.top, height);
+    const next = scrollFor(offsets[index] ?? 0, offsets[index + 1], element.scrollTop, height);
     element.scrollTop = next;
     const row = drawnRow(element, index);
     if (row === null) pending.current = {index, then};
     else then(row);
     setView({top: next, height});
   };
-  const slotOf = (index: number): Slot => ({
-    index,
-    size: count,
-    measure: row =>
-      row !== null && remeasured(row, keyOf(index), measured.current) && setMeasures(n => n + 1),
-  });
+  const slotOf = (index: number): Slot =>
+    slotFor(index, count, keyOf, measured.current, () => setMeasures(n => n + 1));
 
-  return {
-    scroller,
-    scrolled,
-    touched,
-    first,
-    last,
-    before: offsets[first] ?? 0,
-    after: total - (offsets[last] ?? total),
-    slotOf,
-    reveal,
-    behind,
-    jump,
-  };
+  const spacers = {before: offsets[first] ?? 0, after: total - (offsets[last] ?? total)};
+  return {scroller, scrolled, touched, first, last, ...spacers, slotOf, reveal, behind, jump};
 }

@@ -1,12 +1,14 @@
 package connect
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +28,7 @@ func TestDetachedStartup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := Dial(ctx, socket, binary, []string{"-test.run=^TestDetachedHelper$", "--", socket})
+	connection, err := Dial(ctx, socket, binary, []string{"-test.run=^TestDetachedHelper$", "--", socket}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +93,36 @@ func TestStartupFailure(t *testing.T) {
 	defer os.RemoveAll(root)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if connection, err := Dial(ctx, filepath.Join(root, "missing.sock"), "/nonexistent/vibesysd", nil); err == nil {
+	if connection, err := Dial(ctx, filepath.Join(root, "missing.sock"), "/nonexistent/vibesysd", nil, io.Discard); err == nil {
 		connection.Close()
 		t.Fatal("missing executable accepted")
+	}
+}
+
+func TestPreviousServeStderrIsReportedThenReplaced(t *testing.T) {
+	root, err := os.MkdirTemp("/tmp", "gw-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+	socket := filepath.Join(root, "gateway.sock")
+	previous := strings.Repeat("x", 2*ServeLogTail) + "serve: lock held\n"
+	if err := os.WriteFile(ServeLogPath(socket), []byte(previous), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var report bytes.Buffer
+	// The candidate cannot start, so Dial fails after replacing the log.
+	if connection, err := Dial(ctx, socket, filepath.Join(root, "missing"), nil, &report); err == nil {
+		connection.Close()
+		t.Fatal("missing executable accepted")
+	}
+	got := report.String()
+	if !strings.Contains(got, "serve: lock held") || len(got) > ServeLogTail+64 {
+		t.Fatalf("report is not the bounded tail: %d bytes", len(got))
+	}
+	if info, err := os.Stat(ServeLogPath(socket)); err != nil || info.Size() != 0 {
+		t.Fatalf("serve log was not truncated for the new candidate: %v %v", info, err)
 	}
 }

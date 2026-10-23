@@ -10,7 +10,7 @@ from protobuf.wkt.google.protobuf.wrappers_pb import StringValue
 import vibesys.events as e
 import vs_proto.api as p
 from vibesys.events import CoreEventType, make_core_event
-from vibesys.records._common import Projection, enum_value
+from vibesys.records._common import Projection, enum_value, measured_input
 from vibesys.records._spans import ATTRS_TYPES
 
 if TYPE_CHECKING:
@@ -44,6 +44,10 @@ def descriptors() -> FileDescriptorSet:
 
 
 def header(projection: Projection, run: p.RunDescription | None = None) -> None:
+    if run is not None and projection.input_measurement is not None:
+        # A later epoch of the same run starts from the input the earlier one measured.
+        run.input_measurement = projection.input_measurement
+        projection.input_inherited = measured_input(projection.input_measurement) is not None
     projection.emit(
         "epoch_started",
         p.EpochStarted(
@@ -92,9 +96,14 @@ def started(projection: Projection) -> None:
     if not isinstance(data, e.RunStartedData):
         message = "run_started requires RunStartedData"
         raise TypeError(message)
+    # A journal that holds several segments of one run (each resume appends one) replays them in
+    # one state: a segment's ending belongs to that segment and must not decide the next one's.
+    projection.epoch_ended = False
+    projection.ending = None
     overview = data.overview
     objective = None if overview is None else overview.objective
     evaluator = None if overview is None else overview.benchmarks.evaluator
+    projection.primary_series = None if objective is None else objective.metric
     objectives = (
         []
         if objective is None

@@ -6,10 +6,8 @@ import {
   installFakeMachines,
   installFakeProjectRuns,
 } from './fake-bridge.js';
-import {installFakeRun} from './fake-run.js';
-import {type FakeServerSeed, installFakeServer} from './fake-server.js';
-import {judgeEvents, RUN_ID, traceEvents, turnEvents} from './fake-trace.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {journeyScript} from './journey-world.js';
 import {revealNav} from './settings-machine.js';
 import {STARTED_AT} from './started-at.js';
 import {drawnUnderWindowControls, type FakeHostWindow, open, SEED, sidebar} from './world.js';
@@ -25,11 +23,7 @@ import {drawnUnderWindowControls, type FakeHostWindow, open, SEED, sidebar} from
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
 const INSTANCE = '00000000000a';
 
-const EVENTS = (() => {
-  const spans = traceEvents();
-  const turns = turnEvents(spans.length);
-  return [...spans, ...turns, ...judgeEvents(spans.length + turns.length)];
-})();
+const RUN_ID = '20261015-163047';
 
 const WORLD: FakeBridgeSeed = {
   ...SEED,
@@ -73,25 +67,12 @@ const WORLD: FakeBridgeSeed = {
   },
 };
 
-const SERVER: FakeServerSeed = {
-  runId: RUN_ID,
-  batch: {
-    type: 'event_batch',
-    events: EVENTS,
-    through_sequence: EVENTS.length,
-    store_id: 'store-1',
-    history_after_sequence: 0,
-  },
-  snapshot: {run_id: RUN_ID, sequence: 0, status: 'running'},
-};
-
 async function openRun(page: Page): Promise<void> {
   await addInitScripts(page, [
     initScript(installFakeBridge, WORLD),
     initScript(installFakeMachines, WORLD),
     initScript(installFakeProjectRuns, WORLD),
-    initScript(installFakeRun, {streams: [], text: {}}),
-    initScript(installFakeServer, SERVER),
+    journeyScript('trace'),
   ]);
   await page.goto('./shell.html');
   await page

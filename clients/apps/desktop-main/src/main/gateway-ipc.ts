@@ -1,4 +1,4 @@
-/** Generic IPC composition. Authorization and per-host opt-in precede provisioning or dialing. */
+/** Generic IPC composition. Authorization precedes provisioning or dialing. */
 import {arch, platform} from 'node:os';
 import {
   type ConnectionManager,
@@ -10,31 +10,26 @@ import {
   gatewayTarget,
   localGateway,
   provisionGateway,
+  READ_METHOD,
   SshLink,
 } from '@vibesys/connection';
-import {type HostKey, hostFromKey, hostKey} from '@vibesys/hosts';
-import {GATEWAY_CHANNEL, parseGatewayRequest} from '@vibesys/ipc';
-import {configuredHostCall, HOST_CALL_METHOD} from '@vibesys/runs/intents';
-import {type SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
-import type {ScheduleTimeout} from '@vibesys/transport';
+import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
+import {GATEWAY_CHANNEL, gatewayEnd, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
+import {configuredHostCall, configuredRead, HOST_CALL_METHOD} from '@vibesys/runs/intents';
+import {grpcCode, type ScheduleTimeout} from '@vibesys/transport';
 import type {IpcMain} from 'electron';
 import {rendererGeneration, type WelcomeInvokeEvent} from './welcome-ipc.js';
 
 export function createGatewayCalls(
   manager: ConnectionManager,
-  settings: SettingsStore,
   resources: string,
   schedule: ScheduleTimeout,
   log: (message: string) => void,
 ): GatewayCalls {
   const calls = new GatewayCalls(
-    async key => {
-      const {settings: file} = await settings.hosts();
-      return settingsFor(file, hostFromKey(key))?.runTransportV2 === true;
-    },
-    key => gatewayFor(key, manager, resources, schedule),
+    key => gatewayFor(key, manager, resources, schedule, line => log(`${key}: ${line}`)),
     schedule,
-    (host, diagnostic) => log(`${host} answered a failed call: ${diagnostic}`),
+    (host, diagnostic) => log(`${host} gateway call failed: ${diagnostic}`),
   );
   manager.onDisposing(() => calls.close());
   return calls;
@@ -44,11 +39,11 @@ export function installGatewayIpc(
   ipc: IpcMain,
   {
     calls,
-    settings,
+    checkout,
     admits,
   }: {
     calls: GatewayCalls;
-    settings: SettingsStore;
+    checkout: (host: HostId) => Promise<string | null>;
     admits: (event: WelcomeInvokeEvent) => boolean;
   },
 ): void {
@@ -63,7 +58,7 @@ export function installGatewayIpc(
       abort.abort();
       event.sender.removeListener('destroyed', cancelled);
       event.sender.removeListener('did-start-navigation', navigated);
-      port.postMessage({end: true, ...(error === undefined ? {} : {error: String(error)})});
+      port.postMessage(endOf(error));
       port.close();
     };
     const cancelled = (): void => finish(new Error('gateway caller closed'));
@@ -84,21 +79,38 @@ export function installGatewayIpc(
       authorize(event, admits);
       const request = parseGatewayRequest(value);
       const receive = (bytes: Uint8Array): void => {
-        if (!done) port.postMessage({bytes});
+        if (!done) port.postMessage(gatewayReply(bytes));
       };
       if (request.kind === 'unary') {
-        let bytes = request.bytes;
-        if (request.method === HOST_CALL_METHOD) {
-          const {settings: file} = await settings.hosts();
-          bytes = configuredHostCall(
-            bytes,
-            settingsFor(file, hostFromKey(request.host))?.checkout ?? null,
-          );
-        }
+        const bytes = await withCheckout(checkout, request);
         receive(await calls.unary(request.host, request.method, bytes, abort.signal));
       } else await calls.stream(request.host, request.method, request.bytes, abort.signal, receive);
     })().then(() => finish(), finish);
   });
+}
+
+/** Host-call and read requests carry the checkout configured for their host. */
+async function withCheckout(
+  checkout: (host: HostId) => Promise<string | null>,
+  request: {readonly host: HostKey; readonly method: string; readonly bytes: Uint8Array},
+): Promise<Uint8Array> {
+  if (request.method !== HOST_CALL_METHOD && request.method !== READ_METHOD) return request.bytes;
+  const saved = await checkout(hostFromKey(request.host));
+  return request.method === HOST_CALL_METHOD
+    ? configuredHostCall(request.bytes, saved)
+    : configuredRead(request.bytes, saved);
+}
+
+/** One terminal reply: the failure's text and, when the gateway refused the call, its gRPC status. */
+export function endOf(error?: unknown): Uint8Array {
+  const status = grpcCode(error);
+  const message =
+    error === undefined
+      ? undefined
+      : status !== undefined && error instanceof Error
+        ? error.message
+        : String(error);
+  return gatewayEnd(message, status);
 }
 
 function gatewayFor(
@@ -106,6 +118,7 @@ function gatewayFor(
   manager: ConnectionManager,
   resources: string,
   schedule: ScheduleTimeout,
+  log: (line: string) => void,
 ): GatewayDialer {
   const host = hostFromKey(key);
   return {
@@ -127,6 +140,8 @@ function gatewayFor(
         const duplex = gatewayProcess(
           lease.link.spawnCommand(`exec "$HOME/${GATEWAY_DIRECTORY}/vibesysd" connect`),
           schedule,
+          log,
+          (code, tail) => lease.link.explain(code, tail, 'the gateway').message,
         );
         duplex.once('close', () => {
           void lease.release();
@@ -153,30 +168,4 @@ function authorize(
     })
   )
     throw new Error('not an app-owned shell document');
-}
-
-export function gatewaySetting(
-  settings: SettingsStore,
-  checkoutFor: (host: import('@vibesys/hosts').HostId) => Promise<string | null>,
-  disable: (host: HostKey) => void,
-) {
-  return async (
-    host: import('@vibesys/hosts').HostId,
-    enabled: boolean | undefined,
-  ): Promise<boolean> => {
-    const {settings: file} = await settings.hosts();
-    const saved = settingsFor(file, host);
-    if (enabled === undefined) return saved?.runTransportV2 === true;
-    const checkout = saved?.checkout ?? (await checkoutFor(host));
-    if (checkout === null) throw new Error('Set a checkout first');
-    await settings.updateHosts(current =>
-      withHostSettings(current, host, {
-        ...settingsFor(current, host),
-        checkout,
-        runTransportV2: enabled,
-      }),
-    );
-    if (!enabled) disable(hostKey(host));
-    return enabled;
-  };
 }

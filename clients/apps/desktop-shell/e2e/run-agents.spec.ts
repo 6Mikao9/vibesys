@@ -6,10 +6,8 @@ import {
   installFakeMachines,
   installFakeProjectRuns,
 } from './fake-bridge.js';
-import {installFakeRun} from './fake-run.js';
-import {type FakeServerSeed, installFakeServer} from './fake-server.js';
-import {judgeEvents, RUN_ID, traceEvents, turnEvents, usageEvents, W5_GATE} from './fake-trace.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {journeyScript} from './journey-world.js';
 import {STARTED_AT} from './started-at.js';
 
 /**
@@ -23,6 +21,7 @@ import {STARTED_AT} from './started-at.js';
  */
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
+const RUN_ID = '20261015-163047';
 const INSTANCE = '00000000000a';
 
 function server(phase: string, end: unknown = null): Record<string, unknown> {
@@ -61,48 +60,6 @@ const SEED: FakeBridgeSeed = {
   ],
 };
 
-const SPAN_EVENTS = traceEvents();
-const TURN_EVENTS = turnEvents(SPAN_EVENTS.length);
-const JUDGE_EVENTS = judgeEvents(SPAN_EVENTS.length + TURN_EVENTS.length);
-const EVENTS = [
-  ...SPAN_EVENTS,
-  ...TURN_EVENTS,
-  ...JUDGE_EVENTS,
-  ...usageEvents(SPAN_EVENTS.length + TURN_EVENTS.length + JUDGE_EVENTS.length),
-];
-
-const SERVER: FakeServerSeed = {
-  runId: RUN_ID,
-  batch: {
-    type: 'event_batch',
-    events: EVENTS,
-    through_sequence: EVENTS.length,
-    store_id: 'store-1',
-    history_after_sequence: 0,
-  },
-  snapshot: {run_id: RUN_ID, sequence: 0, status: 'running'},
-};
-
-const LOGS = {
-  streams: [
-    {
-      id: 's3',
-      owner: {
-        kind: 'gate_stage',
-        execution_id: 'w5',
-        gate: 'benchmark',
-        attempt: 1,
-        span_id: W5_GATE,
-      },
-      command: 'vibesys-queue benchmark',
-      retained_start: 0,
-      size: 0,
-      outcome: null,
-    },
-  ],
-  text: {s3: 'vibesys-queue benchmark, 3 repetitions\nrepetition 1: 41.2 Mops/s\n'},
-};
-
 const shots = process.env['LEVEL_SHOTS'];
 
 async function check(page: Page, name: string): Promise<void> {
@@ -119,8 +76,7 @@ async function openRun(page: Page): Promise<void> {
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
-    initScript(installFakeRun, LOGS),
-    initScript(installFakeServer, SERVER),
+    journeyScript('agents'),
   ]);
   await page.goto('./shell.html');
   await page

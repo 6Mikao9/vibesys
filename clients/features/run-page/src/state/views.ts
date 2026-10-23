@@ -21,6 +21,7 @@ import {
   type StageView,
   type Unavailable,
 } from './run-page.js';
+import {STARTUP_LABELS} from './startup-stages.js';
 import {type TokensReading, tokensReading} from './token-words.js';
 import {roleAgents} from './usage-view.js';
 import {whoWords} from './usage-who.js';
@@ -136,7 +137,10 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
       ...(state.lifecycleWord === undefined ? {} : {label: state.lifecycleWord}),
     },
     // Tokens counted over a prefix of the history are not what the run spent.
-    spent: historyLoading(state) === null ? tokensReading(state.run.core?.tokens.total) : null,
+    spent:
+      historyLoading(state) === null && (!state.progress || state.progress.phase === 'complete')
+        ? tokensReading(state.run.core?.tokens.total)
+        : null,
     agents: roleAgents(usageRecords(state), names).map(each => ({
       role: each.role,
       ran: each.ran.flatMap(who => whoWords(who) ?? []),
@@ -146,7 +150,9 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
       commandReason(state),
     ),
     pauseNow: offer(
-      state.readOnly !== true && state.record.kind === 'live',
+      state.readOnly !== true &&
+        state.record.kind === 'live' &&
+        !['ended', 'historical', 'unlisted'].includes(phase.kind),
       state.pauseNow.kind === 'idle'
         ? commandReason(state)
         : state.pauseNow.kind === 'confirming'
@@ -174,8 +180,8 @@ export function pauseNowBannerView(state: RunPageState): PauseNowBannerView {
 }
 
 const STAGES = [
-  {id: 'building_image', label: 'Building the agent image'},
-  {id: 'starting_container', label: 'Starting the agent container'},
+  {id: 'building_image', label: STARTUP_LABELS.building_image},
+  {id: 'starting_container', label: STARTUP_LABELS.starting_container},
 ] as const;
 
 function streamsOf(state: RunPageState): readonly LogStream[] {
@@ -421,7 +427,7 @@ function adoptedAtEnd(
   state: RunPageState,
 ): [AdoptedCandidate | 'input' | null, 'max' | 'min' | null | undefined] {
   const direction = overviewAt(state.run.trace, null)?.objective.direction;
-  return [adoptedCandidate(traceSpans(traceAt(state.run.trace, null)), direction), direction];
+  return [adoptedCandidate(traceSpans(traceAt(state.run.trace, null))), direction];
 }
 
 /**

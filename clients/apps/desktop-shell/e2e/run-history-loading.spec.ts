@@ -7,10 +7,9 @@ import {settled} from './checks/settle.js';
 import {openFixture, releaseHistory} from './fixture-world.js';
 
 /**
- * A finished run opened while its history is still being read: the screen says so, with how far
- * the read has come (a bar and "n of N events" when the host says the total, else the events and
- * bytes so far), and shows nothing derived from the prefix: no "running" count, no Now pane, no
- * outcome. It passes the layout and wording checks, then settles into the run once the read ends.
+ * A finished run opened while its history is still being read: the run paints from the first reply
+ * and the screen says how far the read has come ("History n of N"). It passes the layout and
+ * wording checks, keeps its header where it is, then settles once the read ends.
  * `SCREENS_DIR=<dir>` also writes each loading screen's screenshot (the app window only).
  */
 
@@ -24,6 +23,7 @@ if (shots !== undefined) mkdirSync(shots, {recursive: true});
 async function headerPlace(page: Page) {
   return Promise.all(
     HEADER.map(async selector => {
+      await expect(page.locator(selector).first()).toBeVisible();
       const box = await page.locator(selector).first().boundingBox();
       return box === null ? null : {x: box.x, y: box.y, width: box.width};
     }),
@@ -31,26 +31,18 @@ async function headerPlace(page: Page) {
 }
 
 for (const width of [1000, 1440]) {
-  for (const total of [true, false]) {
-    const name = `finished-run/history-loading/${total ? 'determinate' : 'indeterminate'}/${width}`;
+  for (const prefix of [1, 20]) {
+    const name = `finished-run/history-loading/${prefix}-records/${width}`;
     test(name, async ({page}) => {
       await page.setViewportSize({width, height: 900});
       await openFixture(page, fixture, {
-        historyServing: {pageSize: 10, hold: 2, total},
+        historyPrefix: prefix,
       });
       const main = page.getByRole('main');
-      await expect(main).toContainText(
-        total ? `20 of ${fixture.events.length} events` : '20 events',
-      );
-      if (total) {
-        await expect(main.getByRole('img', {name: 'Share of the run’s events read'})).toBeVisible();
-      } else {
-        await expect(main.getByRole('img')).toHaveCount(0);
-        await expect(main).toContainText('read so far');
-      }
-      await expect(main).not.toContainText(/running|\bnow\b/i);
-      await expect(page.getByRole('listbox', {name: 'Ideas'})).toHaveCount(0);
-      await expect(page.getByRole('slider', {name: 'Run position'})).toHaveCount(0);
+      // The run paints from the first reply (the keyframe) and says how far the read has come,
+      // in records: there is no total of events or bytes to name any more.
+      await expect(main.getByRole('heading', {level: 1})).toBeVisible();
+      await expect(main.getByText(/^History \d+ of \d+$/)).toBeVisible();
       await settled(page);
       const result = report(name, await screenCheck(page), KNOWN_FAILURES);
       expect(
@@ -61,6 +53,7 @@ for (const width of [1000, 1440]) {
       }
       const header = await headerPlace(page);
       await releaseHistory(page);
+      await expect(main.getByText(/^History \d+ of \d+$/)).toHaveCount(0);
       await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
       await settled(page);
       expect(await headerPlace(page)).toEqual(header);

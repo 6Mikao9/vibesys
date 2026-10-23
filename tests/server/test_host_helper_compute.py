@@ -55,6 +55,7 @@ from server.host_compute import (
     ClusterTestFailed,
     ClusterTestPassed,
     ClusterTestStage,
+    ComputeError,
     LoginNodeReach,
     ModalStatus,
     ModalTarget,
@@ -64,9 +65,8 @@ from server.host_compute import (
     SlurmTarget,
     SshReach,
 )
-from server.host_helper_compute import (
+from server.host_compute_runtime import (
     COMPUTE_FILE,
-    ComputeError,
     MachineCompute,
     accelerator_of_gpu_model,
     parse_sinfo,
@@ -75,7 +75,6 @@ from server.host_helper_compute import (
 )
 from server.host_helper_preflight import measurement_check, measurement_fits
 from server.host_helper_requests import answer, launch_arguments, run_arguments
-from server.host_helper_slurm import slurm_config_of
 from server.host_machine_facts import Accelerator
 from server.host_preflight import (
     Backend,
@@ -88,6 +87,7 @@ from server.host_preflight import (
     PreflightReport,
     SettingsValid,
 )
+from server.host_slurm import slurm_config_of
 from vs_decode.api import Unreadable
 from vs_sim.api import ProbeResult
 from vs_sim.api.testing import SimNetwork, SimThreads

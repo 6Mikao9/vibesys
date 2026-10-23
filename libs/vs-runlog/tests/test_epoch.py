@@ -23,9 +23,11 @@ from vs_proto.api import (
     RunFailureKind,
     RunHead,
     Running,
+    RunProcess,
     StageState,
     Starting,
     StartupStage,
+    Timestamp,
 )
 from vs_runlog.api import (
     CurrentEpoch,
@@ -34,6 +36,7 @@ from vs_runlog.api import (
     epoch_has_ended,
     fold_skeleton,
     read_current_epoch,
+    read_run_head,
 )
 from vs_sim.api.testing import examples
 
@@ -95,9 +98,11 @@ def test_current_epoch_survives_amendments_and_replay_without_inheriting_lifecyc
 
 @pytest.mark.regression
 @pytest.mark.parametrize("committed", [0, 1, 2, 3, 4])
+@pytest.mark.parametrize("process_epoch", [None, 7])
 def test_epoch_readers_ignore_a_complete_uncommitted_successor(
     tmp_path: Path,
     committed: int,
+    process_epoch: int | None,
 ) -> None:
     first = scenarios()["core"][0][:2]
     successor = Record.from_binary(first[0].to_binary())
@@ -128,6 +133,19 @@ def test_epoch_readers_ignore_a_complete_uncommitted_successor(
     assert facts is not None
     assert facts.number == expected_epoch
     assert facts.lifecycle == (running.body.value if committed in (2, 4) else None)
+
+    if lifecycle is not None:
+        # Retained heads cache lifecycle but predate the canonical epoch field.
+        head.epoch = 0
+        head.process = (
+            None
+            if process_epoch is None
+            else RunProcess(pid=1, epoch=process_epoch, started_at=Timestamp(seconds=1))
+        )
+        original = head.to_binary()
+        path.with_name("run.head").write_bytes(original)
+        assert read_run_head(path).epoch == expected_epoch
+        assert path.with_name("run.head").read_bytes() == original
 
 
 def test_a_typed_header_without_a_committed_head_cannot_confirm_an_epoch(tmp_path: Path) -> None:
@@ -256,3 +274,13 @@ def test_legacy_epoch_headers_keep_the_complete_record_rule(tmp_path: Path) -> N
     facts = read_current_epoch(path)
     assert facts is not None
     assert facts.number == 1
+
+
+def test_native_observation_uses_its_epoch_cache_without_reading_a_log(tmp_path: Path) -> None:
+    path = tmp_path / "run.log"
+    head = RunHead(strategy="test", epoch=7, lifecycle=Lifecycle(state=Oneof("running", Running())))
+    path.with_name("run.head").write_bytes(head.to_binary())
+    assert read_run_head(path) == head
+    head.epoch = 0
+    path.with_name("run.head").write_bytes(head.to_binary())
+    assert read_run_head(path).epoch == 0

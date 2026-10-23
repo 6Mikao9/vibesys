@@ -16,12 +16,14 @@ import {
   type HostRun,
   hostFromKey,
   hostLabel,
+  hostsComeUp,
   type ListedRun,
   type MachineProblem,
   problemWord,
   RUN_GONE_WORDS,
   type RunDigestEntry,
   type RunDigestsReply,
+  recordedProjectRoot,
 } from '@vibesys/hosts';
 import {type RecentRun, type RunRef, type SkippedRecent, sameRun} from '@vibesys/runs';
 import type {Step} from '@vibesys/store';
@@ -30,6 +32,7 @@ import {
   type AllRunsState,
   askProjectRuns,
   type ListProjectRuns,
+  projectRunGaps,
   projectRunsListed,
   refreshed,
   reportedRunRefs,
@@ -46,6 +49,7 @@ import {
   endReason,
   liveDetail,
   liveLook,
+  liveRuns,
   liveStatus,
   type RowLook,
   type RunRowStatus,
@@ -138,6 +142,8 @@ export interface ShellActions {
 export interface SidebarState {
   /** Whether the overview (the first listings and Recent) has been heard. */
   readonly overviewHeard: boolean;
+  /** Whether any run has been shown: a machine that stops answering later has runs, not none. */
+  readonly runsSeen: boolean;
   /** The latest listing of each host, one per host. */
   readonly listings: readonly HostListing[];
   readonly recent: readonly RecentRun[];
@@ -182,6 +188,7 @@ export type SidebarAction =
       readonly host: HostKey;
       readonly project: string;
       readonly runs: readonly ListedRun[] | null;
+      readonly error?: string;
     };
 
 /** What the sidebar asks of the main process. */
@@ -200,6 +207,7 @@ export type SidebarStep = Step<SidebarState, SidebarRequest>;
 
 export const SIDEBAR_EMPTY: SidebarState = {
   overviewHeard: false,
+  runsSeen: false,
   listings: [],
   recent: [],
   skippedRecent: [],
@@ -252,11 +260,19 @@ export function digestKey(run: RunRef): string {
 /** The next state for `action`, and the requests it makes. */
 export function sidebarStep(state: SidebarState, action: SidebarAction): SidebarStep {
   const step = baseStep(state, action);
-  const listed = askAllRuns(step.state);
-  const asked = askDigests(listed.state);
+  // A failed read is asked again on each refresh, and at once when its host comes back.
+  const retry = action.type === 'refresh-live-digests' || reconnected(state, step.state);
+  const listed = askAllRuns(step.state, retry);
+  const asked = askDigests(listed.state, retry);
   const live = askLiveDigests(asked.state, action.type === 'refresh-live-digests');
+  // A project whose listing failed is a project with runs this app cannot list yet, not none.
+  const runsSeen =
+    live.state.runsSeen ||
+    dashboardRefs(live.state).length > 0 ||
+    liveRows(live.state).length > 0 ||
+    projectRunGaps(live.state.allRuns).some(gap => gap.refusal !== null);
   return {
-    state: live.state,
+    state: runsSeen === live.state.runsSeen ? live.state : {...live.state, runsSeen},
     requests: [...step.requests, ...listed.requests, ...asked.requests, ...live.requests],
   };
 }
@@ -270,6 +286,19 @@ function recentRuns(state: SidebarState): RecentRun[] {
     .sort((left, right) => right.attachedAt - left.attachedAt);
 }
 
+/** Address from host catalog/registry or the saved catalog selection, never run history. */
+export function runProjectRoot(state: SidebarState, run: RunRef) {
+  const host = state.listings.find(listing => listing.host === run.host);
+  if (host?.kind === 'listed' && host.unknownProject?.some(each => each.runId === run.runId))
+    return undefined;
+  const listed = reportedRunRefs(state.allRuns, state.listings).find(each =>
+    sameRun({host: each.host, runId: each.run.runId}, run),
+  );
+  return recordedProjectRoot(
+    listed?.project ?? state.recent.find(each => sameRun(each, run))?.project,
+  );
+}
+
 /** A run whose digest a row of the sidebar or the All runs screen shows. */
 interface WantedDigest {
   readonly host: HostKey;
@@ -277,10 +306,11 @@ interface WantedDigest {
   readonly runId: string;
 }
 
-/** The most runs the dashboard shows (the newest), so what it reads stays bounded. */
-export const DASHBOARD_RUNS = 60;
-
-/** The runs the dashboard shows: not archived, newest first, at most `DASHBOARD_RUNS`. */
+/**
+ * The runs the dashboard shows: every run a machine lists that is not archived, newest first. No
+ * bound hides a run: what the dashboard reads is bounded by the helper's groups of at most
+ * `DIGESTS_PER_REQUEST` runs, not by dropping runs.
+ */
 export function dashboardRefs(state: SidebarState): ReturnType<typeof reportedRunRefs> {
   return reportedRunRefs(state.allRuns, state.listings)
     .filter(
@@ -290,8 +320,7 @@ export function dashboardRefs(state: SidebarState): ReturnType<typeof reportedRu
     .sort(
       (left, right) =>
         right.run.createdAt - left.run.createdAt || (left.run.runId < right.run.runId ? 1 : -1),
-    )
-    .slice(0, DASHBOARD_RUNS);
+    );
 }
 
 /** The runs whose digest a screen shows now: the runs the user opened, and every run the dashboard shows. */
@@ -342,11 +371,15 @@ function digestRequests(
  * so it is read afresh when it ends. A live run is never asked for here: its row reads its digest
  * through `askLiveDigests`, and asking for it here would be forgotten again by this very step.
  */
-function askDigests(state: SidebarState): SidebarStep {
+function askDigests(state: SidebarState, retryFailed = false): SidebarStep {
   const live = liveRows(state);
+  const reachable = new Set(
+    state.listings.filter(listing => listing.kind === 'listed').map(listing => listing.host),
+  );
   const digests: Record<string, DigestSlot> = {};
   for (const [key, slot] of Object.entries(state.digests)) {
-    if (!live.some(row => digestKey(row.run) === key)) digests[key] = slot;
+    const forgotten = retryFailed && slot.kind === 'failed' && reachable.has(hostOfKey(key));
+    if (!forgotten && !live.some(row => digestKey(row.run) === key)) digests[key] = slot;
   }
   const wanted = shownRuns(state).filter(run => {
     const key = digestKey({host: run.host, runId: run.runId});
@@ -400,9 +433,19 @@ function askLiveDigests(state: SidebarState, refresh: boolean): SidebarStep {
   return {state: {...state, live, lastDigestToken: token}, requests};
 }
 
+/** The host a `digestKey` names. */
+function hostOfKey(key: string): HostKey {
+  return key.slice(0, key.indexOf(' ')) as HostKey;
+}
+
+/** Whether a host answers in `next` that did not in `before`: reads it failed may now succeed. */
+function reconnected(before: SidebarState, next: SidebarState): boolean {
+  return hostsComeUp(before.listings, next.listings).length > 0;
+}
+
 /** The project listings the dashboard still needs: every known project's runs, on every screen. */
-function askAllRuns(state: SidebarState): SidebarStep {
-  const asked = askProjectRuns(state.allRuns, state.listings, state.recent);
+function askAllRuns(state: SidebarState, retryFailed: boolean): SidebarStep {
+  const asked = askProjectRuns(state.allRuns, state.listings, state.recent, retryFailed);
   return asked.requests.length === 0
     ? same(state)
     : {state: {...state, allRuns: asked.all}, requests: asked.requests};
@@ -514,8 +557,10 @@ function label(host: HostKey): string {
 }
 
 /** The newest record of each run in `runs`, by run id. */
-function newestByRun(runs: readonly HostRun[]): Map<string, HostRun> {
-  const newest = new Map<string, HostRun>();
+function newestByRun<T extends {readonly runId: string; readonly startedAt: number}>(
+  runs: readonly T[],
+): Map<string, T> {
+  const newest = new Map<string, T>();
   for (const run of runs) {
     const known = newest.get(run.runId);
     if (known === undefined || known.startedAt < run.startedAt) newest.set(run.runId, run);
@@ -543,9 +588,12 @@ export function titleOf(
 export function liveRows(state: SidebarState): RunRow[] {
   return state.listings.flatMap(listing => {
     if (listing.kind !== 'listed') return [];
-    return [...newestByRun(listing.live).values()].map(server => {
+    return [...newestByRun(liveRuns(listing)).values()].map(server => {
       const run: RunRef = {host: listing.host, runId: server.runId};
-      const title = titleOf(state, run, server.projectRoot);
+      const title =
+        server.projectRoot === undefined
+          ? 'Unknown project'
+          : titleOf(state, run, server.projectRoot);
       const detail = `${label(listing.host)} · ${liveDetail(server)}`;
       const trail = liveTrail(state.live[digestKey(run)]?.entry ?? null);
       return {
@@ -553,9 +601,11 @@ export function liveRows(state: SidebarState): RunRow[] {
         title,
         detail,
         trail,
-        tooltip: [title, trail === null ? detail : `${detail} · ${trail}`, `run ${run.runId}`].join(
-          '\n',
-        ),
+        tooltip: [
+          title,
+          trail === null ? detail : `${detail} · ${trail}`,
+          ...(server.projectRoot === undefined ? [] : [`run ${run.runId}`]),
+        ].join('\n'),
         status: liveStatus(server),
         look: liveLook(server),
         problem: null,
@@ -651,12 +701,12 @@ export function recentRow(state: SidebarState, recent: RecentRun, clock: Clock):
   const entry = slot?.kind === 'read' ? slot.entry : undefined;
   const read = entry?.kind === 'read' ? entry : undefined;
   const registered = ended === undefined ? null : endedLook(ended);
-  const found = registered ?? (read === undefined || !read.over ? null : digestLook(read));
+  const found = read === undefined ? registered : digestLook(read);
   const {look, status, result, problem, kind} = reading(found, read, slot, listing);
   const began = beganAt(entry, ended, clock);
   const detail = began === null ? result : `${began} · ${result}`;
   const trail = read === undefined ? null : trailWords(read, kind);
-  const reason = (ended === undefined ? null : endReason(ended)) ?? read?.endSummary ?? null;
+  const reason = recentEndReason(read, ended);
   const tooltip = [
     title,
     trail === null ? detail : `${detail} · ${trail}`,
@@ -752,9 +802,7 @@ function recentProblems(state: SidebarState, live: readonly RunRow[]): string[] 
 
 function dashboardProblems(state: SidebarState, live: readonly RunRow[]): string[] {
   const problems: string[] = [];
-  const refs = dashboardRefs(state);
-  if (refs.length > DASHBOARD_RUNS) problems.push('the dashboard shows more than its limit');
-  for (const {host, run} of refs) {
+  for (const {host, run} of dashboardRefs(state)) {
     const ref: RunRef = {host, runId: run.runId};
     if (state.archived.some(archived => sameRun(archived, ref))) {
       problems.push(`archived ${run.runId} is on the dashboard`);
@@ -790,4 +838,12 @@ export function sidebarInvariants(state: SidebarState): string[] {
     ...dashboardProblems(state, live),
     ...liveProblems(live),
   ];
+}
+
+function recentEndReason(
+  read: RunDigestEntry | undefined,
+  ended: HostRun | undefined,
+): string | null {
+  if (read?.kind === 'read') return read.endSummary ?? null;
+  return ended === undefined ? null : endReason(ended);
 }

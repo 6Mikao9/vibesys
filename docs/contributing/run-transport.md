@@ -35,7 +35,7 @@ read path and journal projection from the native core and control work still to 
 | Store records for every event kind ([inventory](#event-inventory)) | schemas and typed journal projection built; the native core producer remains unbuilt | 2 |
 | Skeleton keyframes, `run.head`, `~/.vibesys/runs/<run_id>` link | writers, discovery and converted head/keyframe publication built; legacy-only epochs have no native headline | 2 |
 | `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
-| Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; pre-trace and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
+| Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; journals that predate the run trace convert with the events they have, and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
 | Intents as records (`IntentState`), Pause/Pause now, relaunch epochs | inbox outcomes, Pause and Resume epochs built over the current saved-state resume path; native state recovery remains unbuilt | 3 |
 | Chat sessions as processes with their own log; `HostCall` | built behind the per-host switch; reuses the existing auxiliary chat agent, prompts and read tools | 3 |
@@ -134,13 +134,25 @@ length) immutable and cacheable. There is no second, sealed copy.
 with each span's versions by sequence (status, verdict, attrs), the metric series, the stream
 index and the epoch list. The run writes a keyframe at its checkpoints (a bounded number of
 records, a lifecycle change, an epoch end). The `Skeleton` call returns the latest keyframe plus
-the log records after it, so opening a run reads a keyframe, not the log.
+the log records after it, so opening a run reads a keyframe, not the log. A run that ends or parks
+ends on a keyframe, so its reply has no records after it. On the wire the keyframe names each
+epoch's schema descriptors by hash and carries a descriptor set only when the reader has not
+listed it, since every epoch of a run repeats one set.
 
 **`run.head`.** The headline a list row draws: lifecycle, strategy name, objective and best result
 against the input, counts of work units, token and cost totals, a bounded point list for the tile
 chart, and whether the run needs its user. The run writes it, computing the headline from the same
 metric points a client plots; no reader folds a journal for it.
 This deletes the second (Python) copy of the summary fold.
+
+The canonical epoch comes from committed `EpochStarted` records. Process metadata
+never supplies it. For retained phase-1 heads whose epoch cache is zero, `WatchRuns`
+decodes the published log prefix into its response without rewriting either file.
+An explicit zero committed sequence admits no records; an absent sequence retains
+the phase-1 complete-prefix rule. Without a log the epoch remains unknown. Native
+heads with a populated epoch cache avoid this scan. Python observation readers use
+`read_run_head`, which decodes missing caches through the same committed-prefix fold
+as `read_current_epoch`; clients consume the canonical response field directly. Lock probes still decide liveness independently.
 
 ## Intents and epochs
 
@@ -242,7 +254,8 @@ connect; a release build later downloads the released binary instead. It is stat
 | `HostCall` | unary | typed host operations, including `relaunch` of an existing run; `vibesys host <method>` with protobuf on stdin and stdout |
 | `Attach` | bidi | reserved |
 
-The gateway reads records as framed bytes; it reads protos only for `run.head` and its own API.
+The gateway preserves framed record bodies. Its store read boundary supplies semantic upgrades
+for retained records and keyframes before serving them.
 
 ## Versions and upgrades
 
@@ -254,8 +267,28 @@ match by construction; a mismatch means a stale copy on the host, and the app re
 
 **Store (`vibesys.store.v1` and core state).** Additive changes only, enforced by `buf breaking`
 in CI. New code must read data written by the last 7 days of nightlies; a CI test resumes saved
-runs from each. A semantic break bumps the package version and ships one upgrade function. A newer
-writer is refused by name, never read as if it were older.
+runs from each. The retained-writer corpus is checked through Python head reads, gateway
+Skeleton/Tail/WatchRuns, and the client screen projections. A semantic break bumps the package
+version and ships one upgrade function. A newer writer is refused by name, never read as if it
+were older.
+
+The store read boundary restores the input measurement of pre-field runs from their recorded
+input gate or spanless objective point. It adds the typed fact to versioned declarations; a
+record can carry the amendment alongside its original body. The fact takes effect at the
+measurement's sequence, including during historical seeking. Explicit measured or unmeasured
+facts take precedence. Heads get their missing input value from this same upgrade; retained
+files are unchanged and readers require no writer restart.
+
+Run discovery recovers an older index entry's missing project address from the committed epoch
+headers through the same bounded observation memo. No address backfill or writer restart is
+required. If no project can be recovered, the listing and dashboard retain the run with an
+unknown project and expose no project control address.
+
+The same observation boundary restores unstated performance and terminal presentation from
+previous-writer committed prefixes. Head, keyframe and Skeleton readers share the projection;
+the card and page consume those facts. Keyframes and Skeleton replies carry the exact-prefix
+read head, while stored files remain unchanged. Explicit writer-stated facts win. The Go
+retained reader is checked against the Python core's generated performance histories.
 
 **Development mode.** The laptop tree builds the UI and the gateway; the host checkout runs the
 runs. They may diverge as long as store changes stay additive. The operator updates the host

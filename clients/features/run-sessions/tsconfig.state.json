@@ -23,6 +23,9 @@
     },
     {
       "path": "../../libs/runs/tsconfig.chat.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.lib.json"
     }
   ]
 }

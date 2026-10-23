@@ -10,8 +10,10 @@ import {
   type DashboardRow,
   dashboardRows,
   digestKey,
+  projectRunGaps,
   recentNotice,
   runLabels,
+  runProjectRoot,
   runsKnown,
   type Screen,
   type SidebarState,
@@ -35,12 +37,8 @@ import {
   NewRunScreen,
   type NewRunSnapshot,
 } from '@vibesys/feature-new-run/renderer';
-import {
-  type RunPageNavigation,
-  type RunPagePage,
-  useRunPage,
-} from '@vibesys/feature-run-page/renderer';
-import {RUN_ROUTE, routeQuery, runRecord} from '@vibesys/feature-run-page/state';
+import type {RunPageNavigation, RunPagePage} from '@vibesys/feature-run-page/renderer';
+import {RUN_ROUTE, routeQuery} from '@vibesys/feature-run-page/state';
 import {
   createGroupingStore,
   type GroupingStore,
@@ -56,21 +54,14 @@ import {
 } from '@vibesys/feature-settings/renderer';
 import {shownTheme} from '@vibesys/feature-settings/state';
 import {createUsageStore, type SpendRunRef, UsageScreen} from '@vibesys/feature-usage/renderer';
-import {
-  type HostKey,
-  hostFromKey,
-  hostLabel,
-  problemWord,
-  recordedProjectRoot,
-} from '@vibesys/hosts';
-import {settled, type WelcomeBridge} from '@vibesys/ipc';
+import {type HostKey, hostFromKey, hostLabel, hostsComeUp, problemWord} from '@vibesys/hosts';
+import {gatewayBridge, settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
-import {type JSX, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
+import {type JSX, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
-import {RunWithChat} from './run-chat.js';
 import {runCounts, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
@@ -173,6 +164,7 @@ export function createShellStores(
     machineSettings.dispatch({type: 'hosts', hosts});
   });
   followCompute(newRun.store, machineSettings);
+  rereadOnReconnect(sidebar.store, machineSettings);
   let {recent, selection} = sidebar.store.getState();
   sidebar.store.subscribe(() => {
     const next = sidebar.store.getState();
@@ -240,6 +232,28 @@ function followCompute(
 }
 
 /**
+ * A machine's Settings reading that failed because the machine was unreachable is read again when
+ * its connection comes up, so the user need not press Retry.
+ */
+function rereadOnReconnect(
+  sidebar: ShellStores['sidebar']['store'],
+  machineSettings: ShellStores['machineSettings'],
+): void {
+  let listings = sidebar.getState().listings;
+  sidebar.subscribe(() => {
+    const next = sidebar.getState().listings;
+    const up = hostsComeUp(listings, next);
+    listings = next;
+    for (const host of up) {
+      const view = machineSettings.getState().views[host];
+      for (const what of ['compute', 'logins'] as const) {
+        if (view?.[what].kind === 'failed') machineSettings.dispatch({type: 'refresh', host, what});
+      }
+    }
+  });
+}
+
+/**
  * New run opened for a machine (Machines' "New run here") starts on it; opened to run a run again,
  * it starts from that run as the recent list records it (its place and options).
  */
@@ -279,14 +293,8 @@ function RunRoute(props: {
 }): JSX.Element {
   const {run, sidebar, stores, place} = props;
   const recent = sidebar.recent.find(each => sameRun(each, run));
-  const record = useMemo(
-    () => runRecord(sidebar.listings, run, recent),
-    [sidebar.listings, run, recent],
-  );
-  const project =
-    record.kind === 'live' || record.kind === 'ended'
-      ? (recordedProjectRoot(record.run.projectRoot) ?? '')
-      : '';
+  const projectRoot = runProjectRoot(sidebar, run);
+  const project = projectRoot ?? '';
   const unavailableWindow = place.unavailable['open-window'];
   const seed = useMemo(
     () => ({
@@ -297,52 +305,25 @@ function RunRoute(props: {
     }),
     [run.host, run.runId, project, recent?.task, unavailableWindow],
   );
-  const gateway = typeof window === 'undefined' ? undefined : window.vibesysGateway;
-  const legacy = (toggle?: import('react').ReactNode) => (
-    <LegacyRunRoute seed={seed} record={record} stores={stores} place={place} toolbar={toggle} />
-  );
+  const ports = typeof window === 'undefined' ? undefined : window.vibesysGateway;
+  const gateway = useMemo(() => (ports === undefined ? undefined : gatewayBridge(ports)), [ports]);
   return gateway === undefined ? (
-    legacy()
+    <Page>
+      <Card>
+        <EmptyState title="Run service unavailable" />
+      </Card>
+    </Page>
   ) : (
     <GatewayRun
       key={`${run.host}/${run.runId}`}
       seed={seed}
+      projectRoot={projectRoot}
       bridge={gateway}
-      settings={stores.bridge}
       schedule={stores.schedule}
       address={stores.page.address}
-      legacy={legacy}
+      navigation={place.navigation(run)}
     />
   );
-}
-
-function LegacyRunRoute(props: {
-  readonly seed: import('@vibesys/feature-run-page/state').RunPageSeed;
-  readonly record: import('@vibesys/feature-run-page/state').RunRecord;
-  readonly stores: ShellStores;
-  readonly place: RunPlace;
-  readonly toolbar?: import('react').ReactNode;
-}): JSX.Element {
-  const {seed, record, stores, place} = props;
-  const run = seed.identity;
-  const page = useRunPage({
-    seed,
-    record,
-    bridge: stores.bridge,
-    navigation: place.navigation(run),
-    schedule: stores.schedule,
-    page: stores.page,
-  });
-  if (page === null)
-    return (
-      <Page>
-        {props.toolbar ? <Card>{props.toolbar}</Card> : null}
-        <Card>
-          <EmptyState title="Opening the run" />
-        </Card>
-      </Page>
-    );
-  return <RunWithChat page={page} run={run} bridge={stores.bridge} toolbar={props.toolbar} />;
 }
 
 /** The unfinished New run the dashboard offers, or null when there is not one. */
@@ -433,10 +414,12 @@ function RunsRoute(props: {
   readonly tiles: readonly Tile[];
   readonly stores: ShellStores;
   readonly draft: RunsDraft | null;
+  readonly reading: boolean;
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
   const {rows, stores, select} = props;
   const {by, machine} = useStore(stores.grouping);
+  const gaps = projectRunGaps(useStore(stores.sidebar.store).allRuns);
   const runOf = (id: string): RunRef | null =>
     rows.find(each => digestKey(each.row.run) === id)?.row.run ?? null;
   return (
@@ -460,7 +443,21 @@ function RunsRoute(props: {
         ];
       }}
       draft={props.draft}
-      notice={recentNotice(stores.sidebar.store.getState().skippedRecent)}
+      reading={props.reading}
+      newRun={() => select({kind: 'new-run'})}
+      notice={
+        gaps.length === 0
+          ? recentNotice(stores.sidebar.store.getState().skippedRecent)
+          : {
+              title: 'Run list incomplete',
+              body: gaps
+                .map(
+                  gap =>
+                    `${hostLabel(hostFromKey(gap.host))}: ${gap.project}: ${gap.refusal?.detail ?? 'Reading runs'}`,
+                )
+                .join('; '),
+            }
+      }
     />
   );
 }
@@ -478,6 +475,9 @@ function MachinesRoute(props: {
       state={props.machines}
       dispatch={stores.machines.dispatch}
       runCounts={props.counts}
+      incompleteHosts={
+        new Set(projectRunGaps(useStore(stores.sidebar.store).allRuns).map(gap => gap.host))
+      }
       showRuns={host => {
         stores.grouping.dispatch({
           type: 'filter-machine',
@@ -514,17 +514,6 @@ function UsageRoute(props: {
   );
 }
 
-/** How long the app waits for its machines to say whether they hold runs, in milliseconds. */
-const HOME_WAIT_MS = 4000;
-
-/** Whether the wait for the machines' listings is over: they all answered, or `HOME_WAIT_MS` passed. */
-function useListingsWaited(schedule: Schedule): boolean {
-  const [waited, setWaited] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one wait for the window's life; `schedule` is the window's own timers.
-  useEffect(() => schedule(() => setWaited(true), HOME_WAIT_MS), []);
-  return waited;
-}
-
 /** The window: the rail and the selected screen. */
 export function Shell(props: {
   readonly stores: ShellStores;
@@ -538,23 +527,17 @@ export function Shell(props: {
   const tiles = useMemo(() => tilesOf(rows.map(row => runInput(row, Date.now()))), [rows]);
   const counts = useMemo(() => runCounts(rows), [rows]);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
-  const waited = useListingsWaited(props.stores.schedule);
   const machinesListed = machineCounts(machinesState).listed;
   const known = runsKnown(
     sidebarState,
     machinesListed ? machinesState.machines.map(each => each.host) : null,
   );
-  // With no run on any machine the home is New run, and Runs is not offered; until the machines
-  // have answered (bounded by `HOME_WAIT_MS`) the home screen waits blank instead of flashing.
-  const homeless = known === 'none' || (known === 'unknown' && waited);
-  const home: Screen = homeless ? {kind: 'new-run'} : {kind: 'runs'};
-  const atHome = sidebarState.selection.kind === 'runs';
-  useEffect(() => {
-    if (atHome && homeless) select({kind: 'new-run'});
-  });
+  // The window never changes screen by itself, on a clock or on what a machine says: Runs reads
+  // while the machines answer and says so when they hold no run. Only the mark, pressed, goes to
+  // New run when none is known.
+  const home: Screen = known === 'none' ? {kind: 'new-run'} : {kind: 'runs'};
   const draft = runsDraft(newRunState, select, newRun.dispatch);
   const screen = (selected: Screen): JSX.Element => {
-    if (selected.kind === 'runs' && known === 'unknown' && !waited) return <Page>{null}</Page>;
     switch (selected.kind) {
       case 'new-run':
         return (
@@ -583,6 +566,7 @@ export function Shell(props: {
             tiles={tiles}
             stores={props.stores}
             draft={draft}
+            reading={known === 'unknown'}
             select={select}
           />
         );
@@ -610,7 +594,7 @@ export function Shell(props: {
         needsYou: needsYou(tiles).length,
         machineWarning: attention === null ? null : problemWord(attention),
       }}
-      showRuns={known === 'some'}
+      showRuns={known === 'some' || sidebarState.selection.kind === 'runs'}
       home={home}
       screen={screen}
     />

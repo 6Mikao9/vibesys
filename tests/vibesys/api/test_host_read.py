@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import cast
 
 from server.host_api import HelperErrorCode
-from server.host_helper_requests import read_failure_category
+from server.host_operation_reads import read_failure_category
 from vibesys.api.host_operations.api import ReadSource, execute_host_read
 from vs_proto.api import (
     FailureCategory,

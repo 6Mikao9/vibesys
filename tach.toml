@@ -89,7 +89,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness", "vibesys.comparisons"]
+depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_compute_runtime", "server.host_helper_readers", "server.host_agent_logins", "server.host_compute", "server.host_preflight", "server.host_examples", "server.host_harness", "server.host_operation_reads", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
@@ -234,7 +234,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
+depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api", "server.host_run_reads"]
 
 [[modules]]
 # The read-only servers Chat reads ended runs through: found by run, started on demand.
@@ -269,23 +269,23 @@ depends_on = ["server.host_api", "server.host_compute", "server.host_machine_fac
 [[modules]]
 # A machine's compute settings: Slurm clusters in one file, the Modal token, connection tests.
 # Files and commands come through seams; Pydantic, the standard library and vs_slurm otherwise.
-path = "server.host_helper_compute"
-depends_on = ["server.host_api", "server.host_compute", "server.host_helper_slurm", "server.host_machine_facts", "vs_sim.api"]
+path = "server.host_compute_runtime"
+depends_on = ["server.host_compute", "server.host_envelope", "server.host_slurm", "server.host_machine_facts", "vs_sim.api"]
 
 [[modules]]
 # What vs_slurm says about a cluster of the compute settings; loaded only by a compute request.
-path = "server.host_helper_slurm"
+path = "server.host_slurm"
 depends_on = ["server.host_compute", "vs_slurm"]
 
 [[modules]]
-# Each agent harness's login on a machine, as helper messages. Pydantic only.
+# Provider login facts and bounded process ownership shared by native commands and the helper.
 path = "server.host_agent_logins"
-depends_on = ["server.host_envelope"]
+depends_on = ["server.host_envelope", "vs_agent", "vs_sim.api"]
 
 [[modules]]
 # Where results are measured and a machine's compute settings, as helper messages. Pydantic only.
 path = "server.host_compute"
-depends_on = ["server.host_envelope", "server.host_machine_facts"]
+depends_on = ["server.host_envelope", "server.host_machine_facts", "vs_proto"]
 
 [[modules]]
 # The host helper's MachineProbe on a real host: hardware, Docker, harness CLIs, checkouts.
@@ -307,12 +307,12 @@ depends_on = ["server.host_envelope", "server.host_run_summary"]
 # A run's digest (ideas, best ratio, duration, ending) folded from its journal in one pass.
 # Light: the record contracts and the decoder only.
 path = "server.run_digest"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_run_dashboard", "server.host_run_summary"]
+depends_on = ["vs_proto", "vs_decode.api", "server.host_api", "server.host_run_dashboard", "server.host_run_summary"]
 
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["vs_runlog", "server.host_saved_runs", "vs_proto", "server.host_examples", "server.host_agent_logins", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
+depends_on = ["server.run_digest_store", "vs_runlog", "server.host_saved_runs", "vs_proto", "server.host_examples", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api", "server.host_run_reads"]
 
 [[modules]]
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.
@@ -478,7 +478,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.run.runlog_tee", "vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
+depends_on = ["vibesys.run.runlog_tee", "vibesys.chat", "vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation_identity"
@@ -1945,7 +1945,7 @@ depends_on = ["vibesys.run"]
 
 [[interfaces]]
 from = ["vibesys.api.transport"]
-expose = ["ConversionResult", "ConversionStatus", "RunConversion", "convert_run", "convert_runs"]
+expose = ["ConversionResult", "ConversionStatus", "RunConversion", "convert_run", "convert_runs", "iter_conversions"]
 
 [[modules]]
 path = "vibesys.records"
@@ -2005,7 +2005,7 @@ depends_on = ["vibesys", "vibesys.api.auxiliary", "vs_project", "vs_proto", "vs_
 
 [[interfaces]]
 from = ["vibesys.chat"]
-expose = ["_lifecycle.SessionAction", "_lifecycle.SessionLifecycle", "_session.ChatRuntime", "_session.ChatSession", "_session.run_head"]
+expose = ["_lifecycle.SessionAction", "_lifecycle.SessionLifecycle", "_session.ChatRuntime", "_session.ChatSession", "_session.run_head", "_session.create_session", "_legacy.import_legacy_chat"]
 
 [[modules]]
 path = "vibesys.api.chat"
@@ -2013,7 +2013,7 @@ depends_on = ["vibesys.chat"]
 
 [[interfaces]]
 from = ["vibesys.api.chat"]
-expose = ["ChatRuntime", "ChatSession", "SessionAction", "SessionLifecycle", "run_head"]
+expose = ["ChatRuntime", "ChatSession", "SessionAction", "SessionLifecycle", "create_session", "import_legacy_chat", "run_head"]
 
 [[modules]]
 path = "vibesys.api.host_relaunch"
@@ -2142,3 +2142,50 @@ depends_on = ["vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
 [[interfaces]]
 from = ["vibesys.api.host_terminate"]
 expose = ["pause_now", "serve_terminate", "terminate_run"]
+
+[[modules]]
+path = "server.host_operation_reads"
+depends_on = ["server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations", "server.host_run_reads", "server.host_run_wire", "server.host_run_summary", "server.registry", "server.run_summary", "vs_sim.api"]
+
+[[interfaces]]
+from = ["server.host_operation_reads"]
+expose = ["HostReadFacts", "HostReadSource", "ReadRefusedError", "read_failure_category", "answer_registered_read"]
+
+[[modules]]
+# The reads of a project's runs (listing, digests, usage window), shared by the helper's runs.list
+# and usage.window and the registered ListRunDigests and UsageWindow. Light, like the helper.
+path = "server.host_run_reads"
+depends_on = ["server.host_api", "server.host_envelope", "server.host_examples", "server.host_run_dashboard", "server.host_run_summary", "server.registry", "server.run_digest", "server.run_summary", "server.usage_window", "vs_sim.api"]
+
+[[interfaces]]
+from = ["server.host_run_reads"]
+expose = ["ProjectRun", "RunProjects", "RunFacts", "run_summaries", "project_runs", "usage_window_reply"]
+
+[[modules]]
+# The digests and the usage window restated as the registered reads' messages.
+path = "server.host_run_wire"
+depends_on = ["server.host_api", "server.host_run_dashboard", "server.host_run_summary", "vs_proto"]
+
+[[interfaces]]
+from = ["server.host_run_wire"]
+expose = ["digests_response", "usage_response"]
+
+[[interfaces]]
+from = ["server.host_compute_runtime"]
+expose = ["MachineCompute", "ConfigFiles", "OsConfigFiles", "CONFIG_DIRECTORY", "COMPUTE_FILE", "SLURM_FILE", "parse_sinfo", "accelerator_of_gpu_model", "render_toml", "remote_command"]
+
+[[interfaces]]
+from = ["server.host_slurm"]
+expose = ["slurm_config_of", "operator_document", "operator_cluster"]
+
+[[interfaces]]
+from = ["server.host_agent_logins"]
+expose = ["AccountLogin", "AgentLibraryLogins", "AgentLogin", "AgentLoginsListReply", "AgentLoginsListRequest", "AgentLoginsStartReply", "AgentLoginsStartRequest", "ApiKeyLogin", "HeldLogin", "LoginBounds", "LoginHow", "LoginStartResult", "LoginStarted", "LoginStarter", "LoginState", "LoginUnavailable", "LoginUnavailableReason", "harness_binaries", "host_logins", "launch_environment", "login_instruction"]
+
+[[modules]]
+path = "server.run_digest_store"
+depends_on = ["server.host_api", "server.run_digest", "vs_proto", "vs_runlog"]
+
+[[interfaces]]
+from = ["server.run_digest_store"]
+expose = ["read_digest"]

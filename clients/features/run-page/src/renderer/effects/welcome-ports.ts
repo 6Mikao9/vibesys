@@ -275,10 +275,13 @@ export function welcomeRunPorts(
       );
       return result.ok ? spanReply(result.value) : {kind: 'failed', message: result.error};
     },
-    resumeEnded: () => {
+    resumeEnded: async () => {
       const project = recordedProjectRoot(target.project());
-      if (project === undefined) return;
-      void settled(bridge.resume(host, project, exactResumeRunId(target.run.runId)));
+      if (project === undefined) throw new Error('The run has no recorded project root.');
+      const result = await settled(
+        bridge.resume(host, project, exactResumeRunId(target.run.runId)),
+      );
+      if (!result.ok) throw new Error(result.error);
     },
     openWindow: () => navigation.openWindow(),
     now: () => page.now(),

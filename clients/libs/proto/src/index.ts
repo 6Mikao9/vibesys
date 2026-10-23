@@ -16,6 +16,7 @@ export {
 } from './generated/vibesys/api/v1/host_mutate_generated_pb.js';
 export {
   BlobResultSchema,
+  DescriptorSetSchema,
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   type HelloRequest,
@@ -23,6 +24,9 @@ export {
   type HelloResponse,
   HelloResponseSchema,
   HostService,
+  ListChatSessionsRequestSchema,
+  type ListChatSessionsResponse,
+  ListChatSessionsResponseSchema,
   RunLiveness,
   SkeletonRequestSchema,
   type SkeletonResponse,
@@ -50,6 +54,8 @@ export {
   WatchResponseSchema,
 } from './generated/vibesys/api/v1/host_watch_generated_pb.js';
 export {CheckoutStatus} from './generated/vibesys/core/v1/vocabulary_pb.js';
+export * from './generated/vibesys/desktop/v1/gateway_pb.js';
+export * from './generated/vibesys/desktop/v1/settings_pb.js';
 export * from './generated/vibesys/host/v1/failure_pb.js';
 export * from './generated/vibesys/host/v1/operations_pb.js';
 export * from './generated/vibesys/search/v1/attrs_pb.js';
@@ -73,9 +79,10 @@ export {
 export * from './generated/vibesys/store/v1/skeleton_pb.js';
 export * from './generated/vibesys/store/v1/span_pb.js';
 export * from './generated/vibesys/store/v1/transcript_pb.js';
+export {ClientReplaySchema} from './generated/vibesys/testing/v1/client_replay_pb.js';
 export {HOST_UNSUPPORTED_MESSAGE, OperationFailed} from './operation-failure.js';
 export type {Accepted, OperationSignal, OperationTransport} from './operations.js';
+export {outcomePresentation, projectLifecycle} from './outcome.js';
 export {projectMessage} from './project.js';
 export {API_SCHEMA_HASH, HOST_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from './schema-hashes.js';
-
-export {validatedFromBinary, validateHostPayload} from './validation.js';
+export {validatedExactFromBinary, validatedFromBinary, validateHostPayload} from './validation.js';

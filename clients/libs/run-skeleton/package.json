@@ -46,10 +46,12 @@
   "devDependencies": {
     "@types/bun": "1.4.2",
     "fake-indexeddb": "^6.2.6",
+    "fast-check": "4.10.2",
     "typescript": "^5.8.3"
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.16.0",
+    "@noble/hashes": "2.0.1",
     "@vibesys/machine": "workspace:*",
     "@vibesys/proto": "workspace:*",
     "@vibesys/store": "workspace:*",

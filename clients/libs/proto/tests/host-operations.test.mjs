@@ -29,6 +29,11 @@ const routes = new Map(
     ],
     [host.operationPolicies.ListCompute.id, host.ListComputeRequestSchema, host.acceptListCompute],
     [
+      host.operationPolicies.ListAgentLogins.id,
+      host.ListAgentLoginsRequestSchema,
+      host.acceptListAgentLogins,
+    ],
+    [
       host.operationPolicies.PreflightRun.id,
       host.PreflightRunRequestSchema,
       host.acceptPreflightRun,

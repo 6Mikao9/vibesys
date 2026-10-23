@@ -32,11 +32,13 @@ import {
   SshLink,
   TAIL_METHOD,
 } from '@vibesys/connection';
+import {decodeGatewayReply, encodeGatewayRequest} from '@vibesys/ipc';
 import {
   API_SCHEMA_HASH,
   HelloRequestSchema,
   HelloResponseSchema,
   RecordSchema,
+  SkeletonRequestSchema,
   TailRequestSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
@@ -105,27 +107,9 @@ for (const mode of ['socket', 'connect pipe'] as const) {
       // Main-process readiness and Playwright's renderer debugger use separate connections.
       // Observe the target document's load in Playwright before evaluating in its context.
       await page.waitForURL('app://vibesys/gateway.html', {waitUntil: 'load'});
-      const hello = await page.evaluate(
-        async request => {
-          const bridge = (window as unknown as GatewayRenderer).vibesysGateway;
-          return [
-            ...(await bridge.unary(
-              'local',
-              '/vibesys.api.v1.HostService/Hello',
-              new Uint8Array(request),
-            ).result),
-          ];
-        },
-        [
-          ...toBinary(
-            HelloRequestSchema,
-            create(HelloRequestSchema, {apiSchemaHash: API_SCHEMA_HASH}),
-          ),
-        ],
-      );
-      expect(fromBinary(HelloResponseSchema, new Uint8Array(hello)).apiSchemaHash).toBe(
-        API_SCHEMA_HASH,
-      );
+      await helloGateway(page);
+      // A refusal reaches the renderer with its gRPC status, so a missing run is not a dead link.
+      expect(await missingRunStatus(page)).toBe(5);
       await startTail(page);
       const initial = await page.evaluate(() =>
         (window as unknown as GatewayRenderer).gatewayRead(),
@@ -157,6 +141,65 @@ for (const mode of ['socket', 'connect pipe'] as const) {
       }
     }
   });
+}
+
+async function helloGateway(page: Page): Promise<void> {
+  const hello = await page.evaluate(
+    async request => {
+      const bridge = (window as unknown as GatewayRenderer).vibesysGateway;
+      return await new Promise<number[]>((resolve, reject) => {
+        let call: {cancel(): void} | undefined;
+        call = bridge.open(
+          new Uint8Array(request),
+          bytes => {
+            call?.cancel();
+            resolve([...bytes]);
+          },
+          error => reject(new Error(error)),
+        );
+      });
+    },
+    [
+      ...encodeGatewayRequest({
+        kind: 'unary',
+        host: 'local',
+        method: '/vibesys.api.v1.HostService/Hello',
+        bytes: toBinary(
+          HelloRequestSchema,
+          create(HelloRequestSchema, {apiSchemaHash: API_SCHEMA_HASH}),
+        ),
+      }),
+    ],
+  );
+  const helloReply = decodeGatewayReply(new Uint8Array(hello));
+  if (helloReply.case !== 'bytes') throw new Error('gateway ended without Hello');
+  expect(fromBinary(HelloResponseSchema, helloReply.value).apiSchemaHash).toBe(API_SCHEMA_HASH);
+}
+
+async function missingRunStatus(page: Page): Promise<number | null> {
+  const request = encodeGatewayRequest({
+    kind: 'unary',
+    host: 'local',
+    method: '/vibesys.api.v1.HostService/Skeleton',
+    bytes: toBinary(SkeletonRequestSchema, create(SkeletonRequestSchema, {runId: 'run-missing'})),
+  });
+  const reply = await page.evaluate(
+    async bytes =>
+      await new Promise<number[]>((resolve, reject) => {
+        let call: {cancel(): void} | undefined;
+        call = (window as unknown as GatewayRenderer).vibesysGateway.open(
+          new Uint8Array(bytes),
+          value => {
+            call?.cancel();
+            resolve([...value]);
+          },
+          error => reject(new Error(error)),
+        );
+      }),
+    [...request],
+  );
+  const decoded = decodeGatewayReply(new Uint8Array(reply));
+  return decoded.case === 'end' ? (decoded.value.status ?? null) : null;
 }
 
 function deferred<T>() {
@@ -286,12 +329,14 @@ for (const damage of ['truncated', 'corrupt'] as const) {
 }
 
 interface GatewayRenderer {
-  vibesysGateway: import('@vibesys/ipc').GatewayBridge;
+  vibesysGateway: import('@vibesys/ipc').GatewayPortBridge;
   gatewayRead(): Promise<number[]>;
   gatewayCancel(): void;
 }
 function sequences(bytes: number[]): bigint[] {
-  return fromBinary(TailResponseSchema, new Uint8Array(bytes)).records.map(
+  const reply = decodeGatewayReply(new Uint8Array(bytes));
+  if (reply.case !== 'bytes') throw new Error('gateway ended without Tail data');
+  return fromBinary(TailResponseSchema, reply.value).records.map(
     bytes => fromBinary(RecordSchema, bytes).seq,
   );
 }
@@ -309,10 +354,8 @@ async function startTail(page: Page): Promise<void> {
         if (ended !== undefined) return Promise.reject(new Error(ended));
         return new Promise((resolve, reject) => waiting.push({resolve, reject}));
       };
-      const call = target.vibesysGateway.stream(
-        'local',
-        request.method,
-        new Uint8Array(request.bytes),
+      const call = target.vibesysGateway.open(
+        new Uint8Array(request),
         bytes => {
           const waiter = waiting.shift();
           if (waiter === undefined) queued.push([...bytes]);
@@ -325,11 +368,16 @@ async function startTail(page: Page): Promise<void> {
       );
       target.gatewayCancel = () => call.cancel();
     },
-    {
-      method: TAIL_METHOD,
-      bytes: [
-        ...toBinary(TailRequestSchema, create(TailRequestSchema, {runId: 'run-a', fromSeq: 1n})),
-      ],
-    },
+    [
+      ...encodeGatewayRequest({
+        kind: 'stream',
+        host: 'local',
+        method: TAIL_METHOD,
+        bytes: toBinary(
+          TailRequestSchema,
+          create(TailRequestSchema, {runId: 'run-a', fromSeq: 1n}),
+        ),
+      }),
+    ],
   );
 }

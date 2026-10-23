@@ -24,6 +24,7 @@ from vs_runlog._fold import append_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame, read_frame
 from vs_runlog._head import project_head
 from vs_runlog._lock import RunLock, hold_writer_identity
+from vs_runlog._upgrade import InputUpgrade
 from vs_sim.api import CloseOnce, ReleaseStack
 
 CHECKPOINT_RECORDS = 256
@@ -161,7 +162,10 @@ class FileRunLogWriter:
         self.sequence = 0
         self._epoch = CurrentEpoch()
         self._path = path
-        self._skeleton = Keyframe()
+        # The writer folds every record of the log, recovered ones included.
+        self._skeleton = Keyframe(failures_tracked=True, records_tracked=True)
+        # The input fact a retained record leaves implicit, advanced once per record.
+        self._upgrade = InputUpgrade()
         self._checkpoint_seq = 0
         self._process: RunProcess | None = None
         self._resources = ReleaseStack()
@@ -213,6 +217,7 @@ class FileRunLogWriter:
                     message = f"non-dense run.log sequence: {record.seq} after {self.sequence}"
                     raise ValueError(message)
                 append_skeleton(self._skeleton, record)
+                self._upgrade.observe(record)
                 self.sequence = record.seq
                 self._epoch = current_epoch((record,), self._epoch)
             if self.sequence < committed:
@@ -350,6 +355,7 @@ class FileRunLogWriter:
             self._sync(self._stream.fileno())
         for record, offset in batch:
             append_skeleton(self._skeleton, record)
+            self._upgrade.observe(record)
             self._skeleton.log_offset = offset
             if (
                 record.body
@@ -382,6 +388,11 @@ class FileRunLogWriter:
     def _publish_head(self) -> None:
         head = self._headline(self._skeleton, self._process)
         if head is not None:
+            objective = head.objective
+            if objective is not None and not objective.has_field("input_value"):
+                measured = self._upgrade.measured
+                if measured is not None:
+                    objective.input_value = measured
             validate(head)
             publish(self._path.parent / "run.head", head.to_binary(), sync=self._sync)
 
@@ -428,7 +439,11 @@ class FileRunLogWriter:
 
 
 def install_run_log(
-    staged: Path, destination: Path, *, prepare: Callable[[], None] | None = None
+    staged: Path,
+    destination: Path,
+    *,
+    prepare: Callable[[], None] | None = None,
+    sync: FileSync | None = None,
 ) -> None:
     """Install a quiescent conversion with its head and keyframes.
 
@@ -440,24 +455,29 @@ def install_run_log(
     if staged.parent == destination.parent:
         message = "staged run.log needs a separate disposable directory"
         raise ValueError(message)
+    durable = OsFileSync() if sync is None else sync
     lock = RunLock(destination.parent / "run.lock")
     try:
         if prepare is not None:
             prepare()
+        sync_directory(staged.parent, sync=durable)
         keyframes = destination.parent / "keyframes"
         if keyframes.exists():
             keyframes.replace(staged.parent / "previous-keyframes")
+            sync_directory(destination.parent, sync=durable)
         staged.replace(destination)
+        sync_directory(destination.parent, sync=durable)
         staged_keyframes = staged.parent / "keyframes"
         if staged_keyframes.exists():
             staged_keyframes.replace(keyframes)
+            sync_directory(destination.parent, sync=durable)
         head = destination.parent / "run.head"
         staged_head = staged.parent / "run.head"
         if staged_head.exists():
             staged_head.replace(head)
         else:
             head.unlink(missing_ok=True)
-        sync_directory(destination.parent)
+        sync_directory(destination.parent, sync=durable)
     finally:
         lock.close()
 
@@ -482,8 +502,9 @@ class FileRunContent:
     Every file handle is scoped to one operation.
     """
 
-    def __init__(self, blobs: Path, streams: Path) -> None:
+    def __init__(self, blobs: Path, streams: Path, *, sync: FileSync | None = None) -> None:
         """Use layout paths supplied by the project, without discovering a project."""
+        self._sync = OsFileSync() if sync is None else sync
         self._blobs = blobs
         self._streams = streams
 
@@ -498,13 +519,13 @@ class FileRunContent:
             with path.open("xb") as stream:
                 stream.write(content)
                 stream.flush()
-                os.fsync(stream.fileno())
+                self._sync(stream.fileno())
         except FileExistsError:
             if path.read_bytes() != content:
                 message = f"blob {digest} conflicts with existing content"
                 raise ValueError(message) from None
-        sync_directory(self._blobs)
-        sync_directory(self._blobs.parent)
+        sync_directory(self._blobs, sync=self._sync)
+        sync_directory(self._blobs.parent, sync=self._sync)
 
     def append_stream(self, stream_id: str, offset: int, content: bytes) -> None:
         """Append once at an exact offset, or verify a previously written prefix."""
@@ -526,66 +547,6 @@ class FileRunContent:
             stream.seek(0, 2)
             stream.write(content[len(existing) :])
             stream.flush()
-            os.fsync(stream.fileno())
-        sync_directory(self._streams)
-        sync_directory(self._streams.parent)
-
-
-def read_run_head(path: Path) -> RunHead:
-    """Read the validated writer observation beside ``path``, never recovery state."""
-    head = RunHead.from_binary(path.with_name("run.head").read_bytes())
-    validate(head)
-    return head
-
-
-def read_current_epoch(path: Path) -> CurrentEpoch | None:
-    """Derive an external reader's epoch from exactly the head's committed prefix.
-
-    A complete frame can precede its fsync and head publication. Native readers
-    cannot treat that frame as a published epoch. Phase 1 logs without a head
-    retain their legacy complete-record rule.
-    """
-    head_path = path.parent / "run.head"
-    head = read_run_head(path) if head_path.exists() else None
-    if not path.exists():
-        if head is not None:
-            message = f"{path}: run.head exists without run.log"
-            raise ValueError(message)
-        return None
-    with path.open("rb") as stream:
-        return _read_epoch_prefix(RunLogReader(stream), head, path)
-
-
-def _read_epoch_prefix(reader: RunLogReader, head: RunHead | None, path: Path) -> CurrentEpoch:
-    limit = None if head is None or not head.has_field("committed_seq") else head.committed_seq
-    if limit == 0:
-        return CurrentEpoch()
-    facts = CurrentEpoch()
-    through = 0
-    for record in reader:
-        if limit is not None and record.seq > limit:
-            break
-        if head is None and not _legacy_epoch_record(record):
-            return CurrentEpoch()
-        facts = current_epoch((record,), facts)
-        through = record.seq
-        if through == limit:
-            break
-    if reader.stop.reason is RunLogStopReason.CORRUPTION:
-        message = f"{path}: {reader.stop.detail}"
-        raise ValueError(message)
-    if limit is not None and through < limit:
-        message = f"{path}: committed sequence {limit} exceeds log sequence {through}"
-        raise ValueError(message)
-    return facts
-
-
-def _legacy_epoch_record(record: Record) -> bool:
-    body = record.body
-    return bool(
-        body
-        and (
-            body.field == "legacy_event"
-            or (body.field == "epoch_started" and body.value.run is None)
-        )
-    )
+            self._sync(stream.fileno())
+        sync_directory(self._streams, sync=self._sync)
+        sync_directory(self._streams.parent, sync=self._sync)

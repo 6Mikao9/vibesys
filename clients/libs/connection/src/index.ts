@@ -8,6 +8,7 @@
  */
 
 export {connectionStatus} from './connection-status.js';
+export {hostListingFromRuns, watchedListing} from './run-listing.js';
 export {controlDirectory, installAskpass} from './shell/askpass.js';
 export {
   type ConnectionLease,
@@ -28,19 +29,21 @@ export {GatewayCalls} from './shell/gateway-calls.js';
 export {localGateway} from './shell/gateway-local.js';
 export {
   GATEWAY_DIRECTORY,
+  GATEWAY_STDERR_BYTES,
   type GatewayTarget,
   gatewayArtifact,
   gatewayProcess,
   gatewayTarget,
   provisionGateway,
 } from './shell/gateway-provision.js';
-export {GrpcDecoder, GrpcError, grpcFrame} from './shell/grpc.js';
+export {GrpcDecoder, grpcFrame} from './shell/grpc.js';
 export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
 export {HostConnection, type LogsLease} from './shell/host-connection.js';
 export {HOST_UNSUPPORTED_MESSAGE, isHostUnsupported} from './shell/host-unsupported.js';
 export {type Link, LocalLink, SshLink} from './shell/link.js';
 export {LoginActor, type LoginPorts, type LoginStart} from './shell/login-actor.js';
 export {fromChild, type SpawnedProcess} from './shell/process.js';
+export {type RegistryRunCatalog, registryRunCatalog} from './shell/registry-catalog.js';
 export {
   type RegistryClusterPorts,
   type RegistryClusters,
@@ -58,6 +61,12 @@ export {
   registryTransport,
   requireCheckout,
 } from './shell/registry-reads.js';
+export {
+  digestEntries,
+  type RegistryRunReads,
+  registryRunReads,
+  usageWindowEntry,
+} from './shell/registry-run-reads.js';
 export {type RegistrySavedRuns, registrySavedRuns} from './shell/registry-saved-runs.js';
 export {
   type CompletedPaths,
@@ -71,5 +80,13 @@ export {
   type RegistryStartPorts,
   registryStart,
 } from './shell/registry-start.js';
-export {type RunWatch, type RunWatchPorts, runWatch} from './shell/run-watch.js';
+export {
+  RUN_WATCH_LEASE_MS,
+  type RunsPhase,
+  type RunsState,
+  type RunWatch,
+  type RunWatchPorts,
+  runWatch,
+  type WatchedRun,
+} from './shell/run-watch.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

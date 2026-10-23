@@ -1,7 +1,7 @@
 """Read-only inspection of one candidate directory.
 
 The gateway chooses the executable and argv. This module only interprets the
-files a checkout holds: its project declaration, helper entrypoint, task
+files a checkout holds: its project declaration, native host entrypoint, task
 directory and git HEAD. It does not launch a command.
 """
 
@@ -23,7 +23,7 @@ _PATH_LIMIT_BYTES = 4096
 _COMMIT_HEX_LENGTH = 40
 MINIMUM_VERSION = host_operations.MIN_CHECKOUT_VERSION
 _MINIMUM = tuple(int(part) for part in MINIMUM_VERSION.split("."))
-_HELPER_ENTRY = Path("src") / "entrypoints" / "host_helper.py"
+_HOST_ENTRY = Path("src") / "entrypoints" / "host.py"
 
 
 class _ProjectDeclaration(BaseModel):
@@ -108,7 +108,7 @@ def inspect_candidate(request: pb.InspectCandidateRequest) -> pb.InspectCandidat
     identity = pb.CandidateIdentity(
         root=str(root),
         version=version,
-        compatible=(root / _HELPER_ENTRY).is_file(),
+        compatible=(root / _HOST_ENTRY).is_file(),
         vibesys_project=response.vibesys_project,
         git_repository=response.git_repository,
     )

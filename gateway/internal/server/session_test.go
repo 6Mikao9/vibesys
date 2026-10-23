@@ -14,10 +14,14 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"testing/quick"
+	"time"
 )
 
 func TestSessionDiscoveryTailFenceAndBlobReads(t *testing.T) {
@@ -113,5 +117,79 @@ func TestSessionListingRespectsSkeletonBudget(t *testing.T) {
 	_, err := client(t, f, false).Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"})
 	if status.Code(err) != codes.ResourceExhausted {
 		t.Fatalf("listing budget: %v", err)
+	}
+}
+
+func TestChatCreationHostCallUsesGeneratedDispatchAndIdentity(t *testing.T) {
+	for _, id := range []string{"thread-a", "thread_2", "0"} {
+		t.Run(id, func(t *testing.T) {
+			runner := hostcommand.FakeRunner{Program: func(_ context.Context, c hostcommand.Command) (hostcommand.Result, error) {
+				if len(c.Args) != 2 || c.Args[1] != "create-chat-session" {
+					t.Fatalf("command: %v", c.Args)
+				}
+				request := &apiv1.HostCallRequest{}
+				if err := proto.Unmarshal(c.Input, request); err != nil {
+					t.Fatal(err)
+				}
+				if request.GetCreateChatSession().GetSessionId() != id {
+					t.Fatalf("identity: %v", request)
+				}
+				return hostcommand.Result{Output: encode(t, &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_CreateChatSession{CreateChatSession: &apiv1.CreateChatSessionResponse{SessionId: id}}})}, nil
+			}}
+			f := startWithConfig(t, server.Config{HostRunner: runner})
+			response, err := client(t, f, false).HostCall(f.ctx, &apiv1.HostCallRequest{Checkout: "/src/vibesys", Method: &apiv1.HostCallRequest_CreateChatSession{CreateChatSession: &apiv1.CreateChatSessionRequest{ProjectRoot: "/project", RunId: "run-1", SessionId: id, Provider: "claude", Model: "opus"}}})
+			if err != nil || response.GetCreateChatSession().GetSessionId() != id {
+				t.Fatalf("response: %v %v", response, err)
+			}
+		})
+	}
+}
+
+func TestGeneratedChatListingUsesOnlyCommittedSessionPrefixes(t *testing.T) {
+	f := start(t)
+	writeFrames(t, f, 1)
+	peer := client(t, f, false)
+	property := func(commits [8]uint8) bool {
+		root := filepath.Join(f.run, "sessions")
+		if err := os.RemoveAll(root); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]string{}
+		for index, value := range commits {
+			id := fmt.Sprintf("thread-%d", index)
+			dir := filepath.Join(root, id)
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			created := &storev1.Record{Seq: 1, Epoch: 1, At: timestamppb.New(time.Unix(int64(index), 0)), Body: &storev1.Record_Chat{Chat: &storev1.ChatRecord{Event: &storev1.ChatRecord_Created{Created: &storev1.ChatSessionCreated{Id: id, Provider: "claude", Model: "opus"}}}}}
+			text := strings.Repeat("界", int(value)+1)
+			question := &storev1.Record{Seq: 2, Epoch: 1, Body: &storev1.Record_Chat{Chat: &storev1.ChatRecord{Event: &storev1.ChatRecord_Message{Message: &storev1.ChatMessage{RequestId: "q-1", Role: storev1.ChatRole_CHAT_ROLE_USER, Content: &storev1.ChatMessage_Text{Text: text}}}}}}
+			write(t, filepath.Join(dir, "session.log"), false, append(append([]byte(runlog.Magic), frame(encode(t, created))...), frame(encode(t, question))...))
+			committed := uint64(value % 3)
+			write(t, filepath.Join(dir, "run.head"), false, encode(t, head(proto.Uint64(committed))))
+			if committed > 0 {
+				want[id] = ""
+			}
+			if committed == 2 {
+				title := []rune(text)
+				if len(title) > 120 {
+					title = title[:120]
+				}
+				want[id] = string(title)
+			}
+		}
+		response, err := peer.ListChatSessions(f.ctx, &apiv1.ListChatSessionsRequest{RunId: "run-1"})
+		if err != nil {
+			t.Log(err)
+			return false
+		}
+		got := map[string]string{}
+		for _, session := range response.Sessions {
+			got[session.Id] = session.Title
+		}
+		return reflect.DeepEqual(got, want)
+	}
+	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(0))}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -58,6 +58,7 @@
     "react-dom": "19.1.1",
     "typescript": "^5.8.3",
     "@vibesys/proto": "workspace:*",
-    "@bufbuild/protobuf": "2.16.0"
+    "@bufbuild/protobuf": "2.16.0",
+    "fast-check": "4.10.2"
   }
 }

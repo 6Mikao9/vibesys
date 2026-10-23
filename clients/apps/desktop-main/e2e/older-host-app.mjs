@@ -82,7 +82,7 @@ const started = app.whenReady().then(async () => {
     log,
   });
   await settings.updateHosts(current =>
-    withHostSettings(current, LOCAL, {...settingsFor(current, LOCAL), checkout, runTransportV2: true}),
+    withHostSettings(current, LOCAL, {...settingsFor(current, LOCAL), checkout}),
   );
   const manager = new ConnectionManager({
     linkFor: () => new LocalLink(),
@@ -91,7 +91,6 @@ const started = app.whenReady().then(async () => {
     log,
   });
   const calls = new GatewayCalls(
-    async host => host === hostKey(LOCAL),
     () => ({
       dial: async () => gatewayProcess(fromChild(spawn(binary, ['connect', '--root', root], {stdio: 'pipe'})), realTimers),
     }),
@@ -109,14 +108,12 @@ const started = app.whenReady().then(async () => {
     closed: () => {},
     fatal: error => log(error.message),
   });
-  const transportV2 = async id => settingsFor((await settings.hosts()).settings, id)?.runTransportV2 === true;
   const setup = registrySetup({unary: (id, bytes, signal) => calls.unary(hostKey(id), READ_METHOD, bytes, signal)});
   const hosts = new Hosts({
     manager,
     settings,
     localCheckout: checkout,
     sshConfigPath: join(root, 'ssh_config'),
-    transportV2,
     setup,
     runs: {start() {}, cancel() {}},
     savedRuns: registrySavedRuns({
@@ -132,7 +129,6 @@ const started = app.whenReady().then(async () => {
     removeHost: id => hosts.remove(id),
     checkout: id => hosts.checkout(id),
     connection: id => hosts.connection(id),
-    transportV2,
     registry: registryReads({
       checkout: id => hosts.checkout(id),
       unary: (id, bytes, signal) => calls.unary(hostKey(id), READ_METHOD, bytes, signal),

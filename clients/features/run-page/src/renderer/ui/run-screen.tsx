@@ -102,7 +102,7 @@ function LevelBody(props: {
  * a step opens and the breadcrumb appears.
  */
 const BREADCRUMB_ROW: readonly Crumb[] = [
-  {id: 'back', label: 'Run', press: () => undefined},
+  {id: 'back', label: 'Run'},
   {id: 'here', label: 'Here'},
 ];
 
@@ -117,7 +117,6 @@ function reason(offer: Offer): {disabledReason?: string} {
 
 /** The chat panel the app hosts beside the run: whether it is open, the button's press, the panel. */
 export interface RunChatSlot {
-  readonly minimumMain?: 'wide';
   readonly open: boolean;
   readonly toggle: () => void;
   readonly panel: ReactNode;
@@ -133,11 +132,11 @@ function RunFacts(props: {readonly header: ReturnType<typeof headerView>}): JSX.
   const {header} = props;
   return (
     <>
-      <FactLine fit="parent" wrap>
+      <FactLine fit="parent">
         <Fact>
           <Chip label={header.status.label} tone={header.status.tone} dot />
         </Fact>
-        <Fact title={header.subtitle}>
+        <Fact shrink title={header.subtitle}>
           <Text variant="code" tone="muted">
             {header.subtitle}
           </Text>
@@ -185,47 +184,47 @@ function Header(props: {
     {id: 'again', label: 'Run again with changes', press: () => dispatch({type: 'run-again'})},
   ];
   return (
-    <Row justify="between" align="start" wrap>
-      {/* Grown from no width: the actions keep the title's row and the title's lines wrap instead. */}
-      <Stack gap="space-2" grow>
-        <Text as="h1" variant="heading">
-          {header.title}
-        </Text>
-        <RunFacts header={header} />
-      </Stack>
-      <Row gap="space-2">
-        {props.toolbar}
-        {chat === undefined ? null : (
-          <Button
-            variant={chat.open ? 'primary' : 'secondary'}
-            icon="chat"
-            label="Chat"
-            expanded={chat.open}
-            press={chat.toggle}
-            {...(chat.unavailable === undefined ? {} : {disabledReason: chat.unavailable})}
-          />
-        )}
-        {header.pause.shown ? (
-          <Button
-            variant="secondary"
-            text="Pause"
-            press={() => dispatch({type: 'pause'})}
-            {...reason(header.pause)}
-          />
-        ) : null}
-        {header.pauseNow.shown ? (
-          <Button
-            variant="danger"
-            text="Pause now"
-            press={() => dispatch({type: 'ask-pause-now'})}
-            {...reason(header.pauseNow)}
-          />
-        ) : null}
-        {state.readOnly === true ? null : (
+    <Stack gap="space-2">
+      <Row justify="between" align="start" wrap>
+        {/* Grown from no width: the actions keep the title's row and the title's lines wrap instead. */}
+        <Stack gap="space-2" grow>
+          <Text as="h1" variant="heading">
+            {header.title}
+          </Text>
+          <RunFacts header={header} />
+        </Stack>
+        <Row gap="space-2" wrap align="start">
+          {chat === undefined ? null : (
+            <Button
+              variant={chat.open ? 'primary' : 'secondary'}
+              icon="chat"
+              label="Chat"
+              expanded={chat.open}
+              press={chat.toggle}
+              {...(chat.unavailable === undefined ? {} : {disabledReason: chat.unavailable})}
+            />
+          )}
+          {header.pause.shown ? (
+            <Button
+              variant="secondary"
+              text="Pause"
+              press={() => dispatch({type: 'pause'})}
+              {...reason(header.pause)}
+            />
+          ) : null}
+          {header.pauseNow.shown ? (
+            <Button
+              variant="danger"
+              text="Pause now"
+              press={() => dispatch({type: 'ask-pause-now'})}
+              {...reason(header.pauseNow)}
+            />
+          ) : null}
           <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
-        )}
+        </Row>
       </Row>
-    </Row>
+      {props.toolbar}
+    </Stack>
   );
 }
 
@@ -270,45 +269,57 @@ function EndedBanner(props: {
 }): JSX.Element | null {
   const {state, dispatch} = props;
   const ended = endedView(state);
-  // The header already says Finished. Logs and Run again remain in the run controls.
-  if (ended === null || ended.title === 'Finished') return null;
-  if (state.readOnly === true) {
-    const reason = state.record.kind === 'ended' ? state.record.run.reason : null;
-    return reason ? (
-      <Banner tone={ended.tone} title={state.lifecycleWord ?? ended.title} body={reason} />
-    ) : null;
-  }
-  return (
-    <Banner
-      tone={ended.tone}
-      title={ended.title}
-      body={ended.reason}
-      actions={
-        <>
-          {ended.resume === null ? null : (
-            <Button
-              variant="primary"
-              text={ended.resume}
-              press={() => dispatch({type: 'resume-ended'})}
-            />
-          )}
-          <Button
-            variant="secondary"
-            text="View logs"
-            press={() => {
-              dispatch({type: 'view-logs'});
-              props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
-            }}
-          />
-          <Button
-            variant="secondary"
-            text="Run again"
-            press={() => dispatch({type: 'run-again'})}
-          />
-        </>
-      }
-    />
+  if (ended === null) return null;
+  const logsAndAgain = (
+    <>
+      <Button
+        variant="secondary"
+        text="View logs"
+        press={() => {
+          dispatch({type: 'view-logs'});
+          props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
+        }}
+      />
+      <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
+    </>
   );
+  if (state.readOnly === true) {
+    // Resume belongs to the run controls, which know the writer; logs and Run again need no writer.
+    const reason = state.record.kind === 'ended' ? state.record.run.reason : null;
+    if (ended.title === 'Finished') return <Row gap="space-2">{logsAndAgain}</Row>;
+    return (
+      <Banner
+        tone={ended.tone}
+        title={state.lifecycleWord ?? ended.title}
+        body={reason ?? ''}
+        actions={logsAndAgain}
+      />
+    );
+  }
+  const actions = (
+    <>
+      {ended.resume === null ? null : (
+        <Button
+          variant="primary"
+          text={ended.resume}
+          quietReason
+          {...(state.resumeStatus?.pending ? {disabledReason: 'Waiting for the run to start'} : {})}
+          press={() => dispatch({type: 'resume-ended'})}
+        />
+      )}
+      <Button
+        variant="secondary"
+        text="View logs"
+        press={() => {
+          dispatch({type: 'view-logs'});
+          props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
+        }}
+      />
+      <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
+    </>
+  );
+  if (ended.title === 'Finished') return <Row gap="space-2">{actions}</Row>;
+  return <Banner tone={ended.tone} title={ended.title} body={ended.reason} actions={actions} />;
 }
 
 function Startup(props: {readonly state: RunPageState}): JSX.Element | null {
@@ -480,11 +491,7 @@ export function RunScreen(props: {
 }): JSX.Element {
   const {chat, ...rest} = props;
   return (
-    <Dock
-      label="Chat"
-      {...(chat?.minimumMain ? {minimumMain: chat.minimumMain} : {})}
-      side={chat?.open === true ? chat.panel : null}
-    >
+    <Dock label="Chat" side={chat?.open === true ? chat.panel : null}>
       <RunScreenBody {...rest} chat={chat} />
     </Dock>
   );
@@ -509,6 +516,19 @@ function RunHeader(
         />
       ) : null}
     </Stack>
+  );
+}
+
+function CommandStatus({state}: {readonly state: RunPageState}): JSX.Element {
+  return (
+    <>
+      {state.resumeStatus === null ? null : (
+        <Banner tone="neutral" title="Resume" body={state.resumeStatus.message} />
+      )}
+      {state.notice === null ? null : (
+        <Banner tone="err" title="The run did not take the command" body={state.notice} />
+      )}
+    </>
   );
 }
 
@@ -583,15 +603,13 @@ function RunScreenBody(props: {
           names={names}
           dispatch={dispatch}
           chat={props.chat}
-          toolbar={props.toolbar}
           scrubber={traceArrival(state) === 'arrived' && before === null}
         />
       }
     >
+      {props.toolbar}
       <PauseNowBanner state={state} dispatch={dispatch} />
-      {state.notice === null ? null : (
-        <Banner tone="err" title="The run did not take the command" body={state.notice} />
-      )}
+      <CommandStatus state={state} />
       <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
       {problem === null ? null : (
         <Banner tone="warn" title="The run’s history is not available" body={problem} />

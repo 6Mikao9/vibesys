@@ -117,7 +117,7 @@ function portsOver(host: FakeJournalHost, cache: TracePageCache): RunPagePorts {
     ),
     readSummary: () => Promise.resolve(summaryReplyOf(host.journal)),
     readSpan: unsupported,
-    resumeEnded: ignore,
+    resumeEnded: () => Promise.resolve(),
     openWindow: ignore,
     now: () => 0,
     archive: ignore,

@@ -162,12 +162,19 @@ test('the Fake host answers exactly the commands a real older checkout rejects, 
     );
     answered.push(commandOf(field.name));
   }
-  expect([...answered].sort()).toEqual([...rejected].sort());
-  // The commands the older checkout provides are the host-call ones, which the Fake does not serve.
+  // Host calls ride the HostCall envelope, which the Fake does not serve; every other rejected
+  // command is a Read, Mutate or Watch method it answers.
   const hostCalls = (HostCallRequestSchema.oneofs[0]?.fields ?? []).map(field =>
     commandOf(field.name),
   );
-  expect([...hostCalls].sort()).toEqual([...corpus.provided].sort());
+  const unserved = new Set(hostCalls);
+  expect([...answered].sort()).toEqual(
+    [...rejected.filter(command => !unserved.has(command))].sort(),
+  );
+  // A host call is either provided by the older checkout or rejected by it, never both or neither.
+  expect([...hostCalls].sort()).toEqual(
+    [...corpus.provided, ...rejected.filter(command => unserved.has(command))].sort(),
+  );
 });
 
 test('no failure message carries what the host wrote, whatever its category', () => {

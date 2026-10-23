@@ -28,7 +28,6 @@ export type CoreMethods =
   | 'preferences'
   | 'setAppearance'
   | 'setNotifications'
-  | 'runTransportV2'
   | 'onHostSettingsChanged'
   | 'archive'
   | 'runDigests'
@@ -191,7 +190,6 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
     seed.listings.map(listing => [(listing as {host: string}).host, listing]),
   );
   let recent = seed.recent;
-  const transportSettings = new Map<string, boolean>();
   const push = (event: string, value: unknown): void => {
     sequence += 1;
     for (const listener of listeners[event] ?? []) listener({sequence, value});
@@ -229,13 +227,6 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
         store({...preferences, appearance}),
       setNotifications: (enabled: boolean) => store({...preferences, notifications: {enabled}}),
       onHostSettingsChanged: on('hostSettings'),
-      runTransportV2: (host: string, enabled?: boolean) => {
-        if (enabled !== undefined) {
-          transportSettings.set(host, enabled);
-          push('hostSettings', null);
-        }
-        return ok(transportSettings.get(host) ?? false);
-      },
       archive: (run: {host: string; runId: string}, archived: boolean) => {
         const others = preferences.archived.filter(
           each => each.host !== run.host || each.runId !== run.runId,
@@ -310,12 +301,20 @@ export function installRequestBound(limit: number): void {
  * host's answer to what a run's journal says (`seed.digests`), or that it offers none.
  */
 export function installFakeDigests(seed: FakeBridgeSeed): void {
-  const digests = seed.digests;
+  let digests = seed.digests;
+  Object.assign(window, {
+    fakeRunDigests: {
+      set: (next: typeof digests) => {
+        digests = next;
+      },
+    },
+  });
   Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
     runDigests: (host: string, _project: string, runIds: readonly string[]) => {
-      if (digests === undefined || seed.digestless?.includes(host) === true)
+      const current = digests;
+      if (current === undefined || seed.digestless?.includes(host) === true)
         return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
-      const runs = new Map(runIds.flatMap(id => (id in digests ? [[id, digests[id]]] : [])));
+      const runs = new Map(runIds.flatMap(id => (id in current ? [[id, current[id]]] : [])));
       return Promise.resolve({ok: true, value: {kind: 'digests', runs}});
     },
   });

@@ -20,13 +20,13 @@ import {
   validateHostPayload,
 } from '@vibesys/proto';
 import {Seeded} from '@vibesys/store/testing';
+import {GrpcError} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import {expect} from 'expect';
 import {
   GatewayCalls,
   GatewayConnection,
   GrpcDecoder,
-  GrpcError,
   grpcFrame,
   HELLO_METHOD,
   MUTATE_METHOD,
@@ -168,22 +168,17 @@ describe('gateway public transport', () => {
   });
 });
 
-test('generic bridge opt-in gates dialing and two live calls share a single host session', {
+test('two live calls share a single host session', {
   timeout: 15000,
 }, async () => {
   const fake = new FakeGateway();
   const clock = new FakeClock();
-  let enabled = false;
+  const failures: string[] = [];
   const calls = new GatewayCalls(
-    async () => enabled,
     () => fake,
     clock.schedule,
+    (_host, diagnostic) => failures.push(diagnostic),
   );
-  await expect(
-    calls.unary('local', HELLO_METHOD, new Uint8Array(), new AbortController().signal),
-  ).rejects.toThrow('off');
-  expect(fake.forces).toEqual([]);
-  enabled = true;
   const first = new AbortController();
   const second = new AbortController();
   const one = calls
@@ -198,8 +193,11 @@ test('generic bridge opt-in gates dialing and two live calls share a single host
     first.abort();
     await one;
     expect(fake.forces).toEqual([false]);
+    // The caller's own cancellation is not a failure; losing the session is.
+    expect(failures).toEqual([]);
     calls.disable('local');
     expect(await two).toContain('closed');
+    expect(failures.map(failure => failure.split(' ')[0])).toEqual([TAIL_METHOD]);
     expect(clock.pendingDelays()).toEqual([]);
   } finally {
     first.abort();
@@ -207,26 +205,6 @@ test('generic bridge opt-in gates dialing and two live calls share a single host
     calls.disable('local');
     fake.close();
   }
-});
-
-test('disabling a host fences an opt-in read already in flight', {timeout: 15000}, async () => {
-  const fake = new FakeGateway();
-  const clock = new FakeClock();
-  let release = (_enabled: boolean): void => {};
-  const enabled = new Promise<boolean>(resolve => {
-    release = resolve;
-  });
-  const calls = new GatewayCalls(
-    () => enabled,
-    () => fake,
-    clock.schedule,
-  );
-  const call = calls.unary('local', HELLO_METHOD, new Uint8Array(), new AbortController().signal);
-  calls.disable('local');
-  release(true);
-  await expect(call).rejects.toThrow('cancelled');
-  expect(fake.forces).toEqual([]);
-  fake.close();
 });
 
 test('unary deadlines cancel a peer that leaves its response open without replaying the call', {
@@ -249,40 +227,12 @@ test('unary deadlines cancel a peer that leaves its response open without replay
   }
 });
 
-test('cancellation settles while a host-setting read is pending and discards its late answer', {
+test('closing the bridge cancels live Tail calls', {
   timeout: 15000,
 }, async () => {
   const fake = new FakeGateway();
   const clock = new FakeClock();
-  let release = (_enabled: boolean): void => {};
-  const enabled = new Promise<boolean>(resolve => {
-    release = resolve;
-  });
-  const calls = new GatewayCalls(
-    () => enabled,
-    () => fake,
-    clock.schedule,
-  );
-  const abort = new AbortController();
-  const call = calls.unary('local', HELLO_METHOD, new Uint8Array(), abort.signal);
-  abort.abort();
-  await expect(call).rejects.toThrow('cancelled');
-  release(true);
-  expect(fake.forces).toEqual([]);
-  expect(clock.pendingDelays()).toEqual([]);
-  fake.close();
-});
-
-test('closing the bridge cancels calls waiting on settings and live Tail calls', {
-  timeout: 15000,
-}, async () => {
-  const fake = new FakeGateway();
-  const clock = new FakeClock();
-  const calls = new GatewayCalls(
-    async () => true,
-    () => fake,
-    clock.schedule,
-  );
+  const calls = new GatewayCalls(() => fake, clock.schedule);
   const result = calls
     .stream('local', TAIL_METHOD, request(), new AbortController().signal, () => {})
     .catch(error => String(error));
@@ -369,6 +319,18 @@ function hostCallRequest(method: string): Uint8Array {
       }),
     );
   }
+  if (method === 'createChatSession') {
+    return toBinary(
+      HostCallRequestSchema,
+      create(HostCallRequestSchema, {
+        checkout: '/checkout',
+        method: {
+          case: 'createChatSession',
+          value: {...project, sessionId: 'thread-a', provider: 'claude', model: 'opus'},
+        },
+      }),
+    );
+  }
   throw new Error(`no host-call payload for ${method}`);
 }
 
@@ -408,11 +370,18 @@ const cluster = {
 const deadlineInputs = {
   listTasks: {project: '/project'},
   listSavedRuns: {project: '/project'},
+  listRunDigests: {project: '/project'},
+  usageWindow: {
+    project: '/project',
+    since: {seconds: 1n, nanos: 0},
+    until: {seconds: 2n, nanos: 0},
+  },
   listHarnesses: {},
   listExamples: {},
   getTaskGoal: {project: '/project', task: 'bench'},
   describeMachine: {},
   listCompute: {},
+  listAgentLogins: {},
   preflightRun: {project: '/project'},
   inspectCandidate: {path: '/candidate', selectionRevision: 1n},
   completePaths: {prefix: '/manual/'},

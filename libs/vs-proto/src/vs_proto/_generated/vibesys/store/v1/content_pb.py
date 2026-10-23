@@ -11,10 +11,13 @@ from typing import Literal, TYPE_CHECKING, TypeAlias
 from protobuf import Enum, Message
 from protobuf._codegen import file_desc
 
+from . import lifecycle_pb
 from ....buf.validate import validate_pb
 
 if TYPE_CHECKING:
-    from protobuf import DescFile
+    from protobuf import DescFile, Oneof
+
+    from .lifecycle_pb import StartupStage
 
 
 _MetricPointFields: TypeAlias = Literal["series", "span", "value", "clock"]
@@ -65,7 +68,7 @@ class MetricPoint(Message[_MetricPointFields]):
         value: float
         clock: float
 
-_StreamRefFields: TypeAlias = Literal["id", "kind", "span", "title", "state", "length"]
+_StreamRefFields: TypeAlias = Literal["id", "kind", "span", "title", "state", "length", "owner"]
 
 class StreamRef(Message[_StreamRefFields]):
     """
@@ -101,9 +104,15 @@ class StreamRef(Message[_StreamRefFields]):
             ```proto
             optional uint64 length = 6;
             ```
+        owner:
+            Additive: absent on historical log references. A transcript cannot carry it.
+
+            ```proto
+            optional vibesys.store.v1.StreamOwner owner = 7;
+            ```
     """
 
-    __slots__ = ("id", "kind", "span", "title", "state", "length")
+    __slots__ = ("id", "kind", "span", "title", "state", "length", "owner")
 
     if TYPE_CHECKING:
 
@@ -116,6 +125,7 @@ class StreamRef(Message[_StreamRefFields]):
             title: str = "",
             state: StreamState | None = None,
             length: int | None = None,
+            owner: StreamOwner | None = None,
         ) -> None:
             pass
 
@@ -125,6 +135,7 @@ class StreamRef(Message[_StreamRefFields]):
         title: str
         state: StreamState
         length: int
+        owner: StreamOwner | None
 
 _BlobRefFields: TypeAlias = Literal["sha256", "size", "media_type"]
 
@@ -211,6 +222,77 @@ class BlobAttached(Message[_BlobAttachedFields]):
         role: str
         blob: BlobRef | None
 
+_StreamOwnerFields: TypeAlias = Literal["startup", "gate", "tool_build", "narration"]
+
+class StreamOwner(Message[_StreamOwnerFields]):
+    """
+    Semantic log ownership is independent of a stream's display title. Older logs
+    have no owner and remain unattributed; transcript ownership uses StreamRef.span.
+
+    ```proto
+    message vibesys.store.v1.StreamOwner
+    ```
+
+    Attributes:
+        kind:
+            ```proto
+            oneof kind
+            ```
+    """
+
+    __slots__ = ("kind",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            kind: Oneof[Literal["startup"], StartupStage] | Oneof[Literal["gate"], GateStreamOwner] | Oneof[Literal["tool_build"], str] | Oneof[Literal["narration"], bool] | None = None,
+        ) -> None:
+            pass
+
+        kind: Oneof[Literal["startup"], StartupStage] | Oneof[Literal["gate"], GateStreamOwner] | Oneof[Literal["tool_build"], str] | Oneof[Literal["narration"], bool] | None
+
+_GateStreamOwnerFields: TypeAlias = Literal["execution", "gate", "attempt"]
+
+class GateStreamOwner(Message[_GateStreamOwnerFields]):
+    """
+    ```proto
+    message vibesys.store.v1.GateStreamOwner
+    ```
+
+    Attributes:
+        execution:
+            ```proto
+            string execution = 1;
+            ```
+        gate:
+            ```proto
+            vibesys.store.v1.LogGate gate = 2;
+            ```
+        attempt:
+            ```proto
+            uint32 attempt = 3;
+            ```
+    """
+
+    __slots__ = ("execution", "gate", "attempt")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            execution: str = "",
+            gate: LogGate | None = None,
+            attempt: int = 0,
+        ) -> None:
+            pass
+
+        execution: str
+        gate: LogGate
+        attempt: int
+
 class StreamKind(Enum):
     """
     ```proto
@@ -271,19 +353,58 @@ class StreamState(Enum):
     FAILED = 3
     DEGRADED = 4
 
+class LogGate(Enum):
+    """
+    ```proto
+    enum vibesys.store.v1.LogGate
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            LOG_GATE_UNSPECIFIED = 0
+            ```
+        BUILD:
+            ```proto
+            LOG_GATE_BUILD = 1
+            ```
+        ACCURACY:
+            ```proto
+            LOG_GATE_ACCURACY = 2
+            ```
+        BENCHMARK:
+            ```proto
+            LOG_GATE_BENCHMARK = 3
+            ```
+        VALIDATION:
+            ```proto
+            LOG_GATE_VALIDATION = 4
+            ```
+    """
+
+    UNSPECIFIED = 0
+    BUILD = 1
+    ACCURACY = 2
+    BENCHMARK = 3
+    VALIDATION = 4
+
 
 _DESC = file_desc(
-    b'\n\x1evibesys/store/v1/content.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto"\xa8\x01\n\x0bMetricPoint\x12#\n\x06series\x18\x01 \x01(\tR\x06seriesB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12$\n\x04span\x18\x02 \x01(\tH\x00R\x04spanB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12\x1d\n\x05value\x18\x03 \x01(\x01R\x05valueB\x07\xbaH\x04\x12\x02@\x01\x12&\n\x05clock\x18\x04 \x01(\x01R\x05clockB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00B\x07\n\x05_span"\x97\x04\n\tStreamRef\x12\x1b\n\x02id\x18\x01 \x01(\tR\x02idB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12<\n\x04kind\x18\x02 \x01(\x0e2\x1c.vibesys.store.v1.StreamKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12$\n\x04span\x18\x03 \x01(\tH\x00R\x04spanB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12\x1f\n\x05title\x18\x04 \x01(\tR\x05titleB\t\xbaH\x06r\x04(\x80\x80\x04\x12?\n\x05state\x18\x05 \x01(\x0e2\x1d.vibesys.store.v1.StreamStateR\x05stateB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1b\n\x06length\x18\x06 \x01(\x04H\x01R\x06length\x88\x01\x01B\x07\n\x05_spanB\t\n\x07_length:\xf5\x01\xbaH\xf1\x01\x1a\x9a\x01\n\rstream.length\x12Plength is absent for transcripts and opened logs, and required when a log closes\x1a7has(this.length) == (this.kind == 1 && this.state != 1)\x1aR\n\x0bstream.span\x12!span is required for a transcript\x1a this.kind != 2 || has(this.span)"x\n\x07BlobRef\x12-\n\x06sha256\x18\x01 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12\x12\n\x04size\x18\x02 \x01(\x04R\x04size\x12*\n\nmedia_type\x18\x03 \x01(\tR\tmediaTypeB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04"\x87\x01\n\x0cBlobAttached\x12\x1f\n\x04span\x18\x01 \x01(\tR\x04spanB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1f\n\x04role\x18\x02 \x01(\tR\x04roleB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x125\n\x04blob\x18\x03 \x01(\x0b2\x19.vibesys.store.v1.BlobRefR\x04blobB\x06\xbaH\x03\xc8\x01\x01*Z\n\nStreamKind\x12\x1b\n\x17STREAM_KIND_UNSPECIFIED\x10\x00\x12\x13\n\x0fSTREAM_KIND_LOG\x10\x01\x12\x1a\n\x16STREAM_KIND_TRANSCRIPT\x10\x02*\x90\x01\n\x0bStreamState\x12\x1c\n\x18STREAM_STATE_UNSPECIFIED\x10\x00\x12\x17\n\x13STREAM_STATE_OPENED\x10\x01\x12\x16\n\x12STREAM_STATE_ENDED\x10\x02\x12\x17\n\x13STREAM_STATE_FAILED\x10\x03\x12\x19\n\x15STREAM_STATE_DEGRADED\x10\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n\x1evibesys/store/v1/content.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a vibesys/store/v1/lifecycle.proto"\xa8\x01\n\x0bMetricPoint\x12#\n\x06series\x18\x01 \x01(\tR\x06seriesB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12$\n\x04span\x18\x02 \x01(\tH\x00R\x04spanB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12\x1d\n\x05value\x18\x03 \x01(\x01R\x05valueB\x07\xbaH\x04\x12\x02@\x01\x12&\n\x05clock\x18\x04 \x01(\x01R\x05clockB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00B\x07\n\x05_span"\xb5\x05\n\tStreamRef\x12\x1b\n\x02id\x18\x01 \x01(\tR\x02idB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12<\n\x04kind\x18\x02 \x01(\x0e2\x1c.vibesys.store.v1.StreamKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12$\n\x04span\x18\x03 \x01(\tH\x00R\x04spanB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12\x1f\n\x05title\x18\x04 \x01(\tR\x05titleB\t\xbaH\x06r\x04(\x80\x80\x04\x12?\n\x05state\x18\x05 \x01(\x0e2\x1d.vibesys.store.v1.StreamStateR\x05stateB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1b\n\x06length\x18\x06 \x01(\x04H\x01R\x06length\x88\x01\x01\x128\n\x05owner\x18\x07 \x01(\x0b2\x1d.vibesys.store.v1.StreamOwnerH\x02R\x05owner\x88\x01\x01B\x07\n\x05_spanB\t\n\x07_lengthB\x08\n\x06_owner:\xcf\x02\xbaH\xcb\x02\x1aX\n\x0cstream.owner\x12$semantic owner belongs only to a log\x1a"!has(this.owner) || this.kind == 1\x1a\x9a\x01\n\rstream.length\x12Plength is absent for transcripts and opened logs, and required when a log closes\x1a7has(this.length) == (this.kind == 1 && this.state != 1)\x1aR\n\x0bstream.span\x12!span is required for a transcript\x1a this.kind != 2 || has(this.span)"x\n\x07BlobRef\x12-\n\x06sha256\x18\x01 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12\x12\n\x04size\x18\x02 \x01(\x04R\x04size\x12*\n\nmedia_type\x18\x03 \x01(\tR\tmediaTypeB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04"\x87\x01\n\x0cBlobAttached\x12\x1f\n\x04span\x18\x01 \x01(\tR\x04spanB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1f\n\x04role\x18\x02 \x01(\tR\x04roleB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x125\n\x04blob\x18\x03 \x01(\x0b2\x19.vibesys.store.v1.BlobRefR\x04blobB\x06\xbaH\x03\xc8\x01\x01"\xf4\x01\n\x0bStreamOwner\x12F\n\x07startup\x18\x01 \x01(\x0e2\x1e.vibesys.store.v1.StartupStageH\x00R\x07startupB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x127\n\x04gate\x18\x02 \x01(\x0b2!.vibesys.store.v1.GateStreamOwnerH\x00R\x04gate\x12,\n\ntool_build\x18\x03 \x01(\tH\x00R\ttoolBuildB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\'\n\tnarration\x18\x04 \x01(\x08H\x00R\tnarrationB\x07\xbaH\x04j\x02\x08\x01B\r\n\x04kind\x12\x05\xbaH\x02\x08\x01"\x91\x01\n\x0fGateStreamOwner\x12)\n\texecution\x18\x01 \x01(\tR\texecutionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x129\n\x04gate\x18\x02 \x01(\x0e2\x19.vibesys.store.v1.LogGateR\x04gateB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x18\n\x07attempt\x18\x03 \x01(\rR\x07attempt*Z\n\nStreamKind\x12\x1b\n\x17STREAM_KIND_UNSPECIFIED\x10\x00\x12\x13\n\x0fSTREAM_KIND_LOG\x10\x01\x12\x1a\n\x16STREAM_KIND_TRANSCRIPT\x10\x02*\x90\x01\n\x0bStreamState\x12\x1c\n\x18STREAM_STATE_UNSPECIFIED\x10\x00\x12\x17\n\x13STREAM_STATE_OPENED\x10\x01\x12\x16\n\x12STREAM_STATE_ENDED\x10\x02\x12\x17\n\x13STREAM_STATE_FAILED\x10\x03\x12\x19\n\x15STREAM_STATE_DEGRADED\x10\x04*\x7f\n\x07LogGate\x12\x18\n\x14LOG_GATE_UNSPECIFIED\x10\x00\x12\x12\n\x0eLOG_GATE_BUILD\x10\x01\x12\x15\n\x11LOG_GATE_ACCURACY\x10\x02\x12\x16\n\x12LOG_GATE_BENCHMARK\x10\x03\x12\x17\n\x13LOG_GATE_VALIDATION\x10\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
+        lifecycle_pb.desc(),
     ],
     {
         "MetricPoint": MetricPoint,
         "StreamRef": StreamRef,
         "BlobRef": BlobRef,
         "BlobAttached": BlobAttached,
+        "StreamOwner": StreamOwner,
+        "GateStreamOwner": GateStreamOwner,
         "StreamKind": StreamKind,
         "StreamState": StreamState,
+        "LogGate": LogGate,
     },
 )
 

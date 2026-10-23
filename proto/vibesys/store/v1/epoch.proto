@@ -40,7 +40,32 @@ message RunDescription {
   }];
   // Strategy run configuration, described by EpochStarted.descriptors.
   optional google.protobuf.Any detail = 9;
+  // What the input's objective measurement is, once the writer knows. Absent only while the input
+  // has been neither measured nor given up on. Readers display it and never pick among gates.
+  optional InputMeasurement input_measurement = 10;
 }
+
+// The input's measurement of the headline objective: one fact per run, written once.
+message InputMeasurement {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    MeasuredInput measured = 1;
+    // The input was not measured (its measurement failed or the run has no input gate to read).
+    UnmeasuredInput unmeasured = 2;
+  }
+}
+
+message MeasuredInput {
+  string series = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  double value = 2 [(buf.validate.field).double.finite = true];
+  // The input gate whose reading this is. Empty for retained spanless input points.
+  string span = 3 [(buf.validate.field).string = {max_bytes: 65536}];
+}
+
+message UnmeasuredInput {}
 
 message Evaluator {
   string name = 1 [(buf.validate.field).string = {

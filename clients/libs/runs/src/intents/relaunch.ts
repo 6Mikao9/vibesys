@@ -1,18 +1,15 @@
 /** Relaunch uses HostCall; the epoch is confirmed by the host writer. */
-import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {clone, create, equals, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   HostCallRequestSchema,
   HostCallResponseSchema,
-  HostService,
   type Lifecycle,
   LifecycleSchema,
   RelaunchRefusal,
   type RelaunchRequest,
   RelaunchRequestSchema,
   type RelaunchResponse,
-  RunLiveness,
-  WatchRunsRequestSchema,
-  WatchRunsResponseSchema,
+  type RunLiveness,
 } from '@vibesys/proto';
 import {refusalMessage} from './refusal.js';
 
@@ -88,33 +85,21 @@ export interface RelaunchObservation {
   readonly lifecycle?: Lifecycle;
 }
 
-/** Use the latest writer facts, never the scrubbed timeline position. */
-export function relaunchTarget(
-  observation: RelaunchObservation,
-  liveness: RelaunchLiveness,
-): RelaunchTarget | null {
-  const live = liveness.epoch === observation.epoch ? liveness.value : RunLiveness.UNSPECIFIED;
-  if (observation.epoch < 1n || liveness.epoch > observation.epoch || live === RunLiveness.ALIVE)
-    return null;
-  const state = observation.lifecycle?.state;
-  if (state?.case === 'parked') return {epoch: observation.epoch, state: 'parked'};
-  if (state?.case === 'ended') {
-    return {epoch: observation.epoch, state: 'ended'};
-  }
-  return live === RunLiveness.INTERRUPTED ? {epoch: observation.epoch, state: 'interrupted'} : null;
+/** The page's one reading of the writer: the controls and the header both project these facts. */
+export interface RunWriterFacts {
+  readonly observation: RelaunchObservation | undefined;
+  readonly liveness: RelaunchLiveness;
+  /** The host spoke within the liveness lease. */
+  readonly fresh: boolean;
 }
 
-export const RUN_LIVENESS_METHOD = `/${HostService.typeName}/${HostService.method.watchRuns.name}`;
-export function livenessRequest(): Uint8Array {
-  return toBinary(WatchRunsRequestSchema, create(WatchRunsRequestSchema));
-}
-export function livenessResponse(bytes: Uint8Array, runId: string): RelaunchLiveness | null {
-  const response = fromBinary(WatchRunsResponseSchema, bytes);
-  if (response.runId !== runId) return null;
-  return {
-    epoch: BigInt(response.head?.epoch || response.head?.process?.epoch || 0),
-    value: response.removed ? RunLiveness.UNSPECIFIED : response.liveness,
-  };
+export function sameRelaunchObservation(a: RelaunchObservation, b: RelaunchObservation): boolean {
+  return (
+    a.epoch === b.epoch &&
+    (a.lifecycle === undefined || b.lifecycle === undefined
+      ? a.lifecycle === b.lifecycle
+      : equals(LifecycleSchema, a.lifecycle, b.lifecycle))
+  );
 }
 
 export function copyRelaunchObservation(value: RelaunchObservation): RelaunchObservation {
@@ -122,4 +107,15 @@ export function copyRelaunchObservation(value: RelaunchObservation): RelaunchObs
     epoch: value.epoch,
     ...(value.lifecycle ? {lifecycle: clone(LifecycleSchema, value.lifecycle)} : {}),
   };
+}
+
+/** A successor epoch is durable confirmation, even when the request reply was lost. */
+export function confirmedRelaunchEpoch(
+  request: RelaunchRequest,
+  observation: RelaunchObservation,
+  liveness: RelaunchLiveness,
+  historyEpoch: bigint,
+): bigint | null {
+  const epoch = [observation.epoch, liveness.epoch, historyEpoch].reduce((a, b) => (a > b ? a : b));
+  return epoch > request.expectedEpoch ? epoch : null;
 }

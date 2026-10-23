@@ -8,7 +8,7 @@ import {recordedProjectRoot} from '@vibesys/hosts';
 import {settled} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import type {CoreState} from '@vibesys/run-state';
-import {useEffect, useMemo, useState, useSyncExternalStore} from 'react';
+import {useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {
   createFactsReader,
   createRunReader,
@@ -72,6 +72,8 @@ export function useRunPage(options: RunPageOptions): {
   readonly modelNames: ModelNames;
 } | null {
   const {seed, record, bridge, navigation, schedule, page} = options;
+  const latestProject = useRef(seed.title.project);
+  latestProject.current = seed.title.project;
   const [store, setStore] = useState<RunPageStore | null>(null);
   const key = `${seed.identity.host} ${seed.identity.runId}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the store belongs to one run (`key`). Listing `seed`, `bridge`, `navigation` and `schedule` would dispose the store, its followers and its stop bound whenever the caller passes a new but equal object; a ref copy of them would hide the same choice less visibly. The record reaches the store through the effect below.
@@ -88,7 +90,7 @@ export function useRunPage(options: RunPageOptions): {
       if (current !== undefined && (current.kind === 'live' || current.kind === 'ended')) {
         return recordedProjectRoot(current.run.projectRoot) ?? '';
       }
-      return '';
+      return latestProject.current;
     };
     const ports = welcomeRunPorts(
       bridge,

@@ -5,7 +5,7 @@ import {
   Direction,
   DrainGoal,
   type Lifecycle,
-  Outcome,
+  outcomePresentation,
   type RunHead,
   StreamKind,
   StreamState,
@@ -13,7 +13,8 @@ import {
 import type {CoreState} from '../state.js';
 import {skeletonCore} from './core.js';
 import {baselineFacts, capacityIntervals, comparisonFacts, inputFailures} from './facts.js';
-import {measuredSpans} from './readings.js';
+import {streamOwner} from './logs.js';
+import {inputMeasurement, measuredSpans} from './readings.js';
 import {screenSpans} from './spans.js';
 import {type StartupStep, startupSteps} from './startup.js';
 import type {SkeletonContent, StoreHistory, StoreView} from './types.js';
@@ -25,6 +26,8 @@ export interface HeadlineReading {
   readonly series: {readonly name: string; readonly unit: string} | undefined;
   readonly inputValue: number | undefined;
   readonly bestValue: number | undefined;
+  readonly leader: string | undefined;
+  readonly measured: number | undefined;
 }
 
 export function readHeadline(head: RunHead | undefined, seq: bigint): HeadlineReading | undefined {
@@ -35,7 +38,13 @@ export function readHeadline(head: RunHead | undefined, seq: bigint): HeadlineRe
       ? {name: objective.series.name, unit: objective.series.unit}
       : undefined,
     inputValue: objective.inputValue,
-    bestValue: objective.bestValue,
+    bestValue: head.performanceStated ? objective.bestValue : undefined,
+    measured: head.performanceStated
+      ? head.performance[0]?.ideas.filter(idea => idea.measurementSeq !== undefined).length
+      : undefined,
+    leader: head.performanceStated
+      ? head.performance[0]?.points.filter(point => point.newBest).at(-1)?.idea
+      : undefined,
   };
 }
 
@@ -49,6 +58,8 @@ export interface SkeletonReading {
   readonly comparisons: ReturnType<typeof comparisonFacts>;
   readonly baselines: ReturnType<typeof baselineFacts>;
   readonly pauses: ReturnType<typeof capacityIntervals>;
+  /** The input's measured value of the objective metric, apart from any idea's measurement. */
+  readonly input: number | null;
   readonly inputFailures: ReturnType<typeof inputFailures>;
   readonly startup: readonly StartupStep[];
   readonly streams: readonly LogStream[];
@@ -69,21 +80,22 @@ function lifecycleStatus(lifecycle: Lifecycle | undefined): RunStatus | null {
       return 'stopping';
     case 'parked':
       return 'paused';
-    case 'ended':
-      switch (lifecycle.state.value.outcome) {
-        case Outcome.FINISHED:
-          return 'completed';
-        case Outcome.FAILED:
-          return 'failed';
-        case Outcome.STOPPED:
-        case Outcome.INTERRUPTED:
-          return 'stopped';
-        default:
-          return null;
-      }
+    case 'ended': {
+      const status = endedPresentation(lifecycle).status;
+      if (status !== 'completed' && status !== 'failed' && status !== 'stopped')
+        throw new Error(`ended.presentation.status: unknown outcome ${status}`);
+      return status;
+    }
     default:
       return null;
   }
+}
+
+/** Seven-day retained lifecycles read the schema's vocabulary without a second mapping. */
+function endedPresentation(lifecycle: Lifecycle | undefined) {
+  const ended = lifecycle?.state.case === 'ended' ? lifecycle.state.value : undefined;
+  if (!ended) throw new Error('ended.outcome: absent lifecycle');
+  return ended.presentation ?? outcomePresentation(ended.outcome);
 }
 
 export function lifecycleState(lifecycle: Lifecycle | undefined) {
@@ -93,8 +105,8 @@ export function lifecycleState(lifecycle: Lifecycle | undefined) {
       ? 'Paused'
       : state?.case === 'draining' && state.value.goal === DrainGoal.PARK
         ? 'Pausing'
-        : state?.case === 'ended' && state.value.outcome === Outcome.INTERRUPTED
-          ? 'Interrupted'
+        : state?.case === 'ended'
+          ? endedPresentation(lifecycle).word
           : undefined;
   const reason =
     state?.case === 'ended'
@@ -161,19 +173,24 @@ export function readSkeleton(
     comparisons: comparisonFacts(view),
     baselines: baselineFacts(view),
     pauses: capacityIntervals(view),
+    input: inputMeasurement(view),
     inputFailures: inputFailures(skeleton, view),
     startup: startupSteps(skeleton, view.seq),
     latest: times.reduce<number | null>(
       (last, time) => (last === null ? time : Math.max(last, time)),
       null,
     ),
-    core: skeletonCore(view, content),
+    // Transcript frames have no journal cursor; only the current view can include their bytes.
+    core: skeletonCore(view, {
+      ...content,
+      transcripts: view.seq === skeleton.throughSeq ? (content?.transcripts ?? {}) : {},
+    }),
     phase: lifecycleStatus(view.lifecycle),
     streams: skeleton.streams
       .filter(stream => stream.kind === StreamKind.LOG)
       .map(stream => ({
         id: stream.id,
-        owner: {kind: 'run', span_id: stream.span ?? null},
+        owner: streamOwner(stream),
         command: stream.title,
         retained_start: 0,
         size: screenSequence(stream.length ?? 0n),
@@ -197,3 +214,6 @@ export function skeletonPositions(skeleton: StoreHistory): readonly number[] {
   for (const history of skeleton.metrics) for (const point of history.points) seqs.add(point.seq);
   return [...seqs].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map(screenSequence);
 }
+
+export {coreIdeaKey, coreIdeaMeasurements} from './idea-readings.js';
+export {type PerformanceDecision, type PerformanceReading, readPerformance} from './performance.js';

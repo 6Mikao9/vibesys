@@ -6,6 +6,7 @@
 import type {RunEvent} from '@vibesys/contracts';
 import {ownProjectionInput, type ReadonlyProjection} from './publication.js';
 import {type RoundKey, roundKeyFor, roundNumberFor} from './round-key.js';
+import {beforeStructuredReply} from './transcript-reply-suffix.js';
 
 type RunEventData = NonNullable<RunEvent['data']>;
 type TypedReply = NonNullable<Extract<RunEventData, {kind: 'agent_execution_finished'}>['reply']>;
@@ -973,6 +974,11 @@ export const RUN_TRANSCRIPT = `${TOOL_KEY_SEPARATOR}run`;
 /** How far back a reply looks for the turn's streamed text; turns that run together interleave. */
 const REPLY_SCAN = 500;
 
+function replyPrefix(text: string, reply: TranscriptEntry, raw: string): string | undefined {
+  if (text.endsWith(raw)) return text.slice(0, text.length - raw.length).trimEnd();
+  return reply.reply ? beforeStructuredReply(text, reply.reply.value) : undefined;
+}
+
 /**
  * Folds a turn's typed reply over its own streamed text: a structured turn's final assistant text
  * is the reply's raw JSON, so the typed entry takes that text's place (or what is left of the
@@ -992,8 +998,8 @@ function foldReply(
       if (entry === undefined || entry.kind !== 'assistant' || entry.invocationId !== turn)
         continue;
       const text = entry.content.trimEnd();
-      if (!text.endsWith(raw)) break;
-      const rest = text.slice(0, text.length - raw.length).trimEnd();
+      const rest = replyPrefix(text, reply, raw);
+      if (rest === undefined) break;
       if (rest === '') {
         entries[at] = reply;
         index?.record(reply, at);

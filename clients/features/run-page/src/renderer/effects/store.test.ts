@@ -4,6 +4,7 @@ import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import type {LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
 import type {AbortSignalLike} from '@vibesys/transport';
+import fc from 'fast-check';
 import {
   ageWords,
   clockAt,
@@ -68,6 +69,17 @@ class FakeApp {
   fail: string | null = null;
   /** This window's clock, which the test advances by hand. */
   wallMs = 0;
+  resumeReply: 'accepted' | 'failed' | 'pending' = 'accepted';
+  finishResume: (() => void) | undefined;
+
+  resume(): Promise<void> {
+    this.asked.push('resume');
+    if (this.resumeReply === 'failed') return Promise.reject(new Error('Host unavailable'));
+    if (this.resumeReply === 'accepted') return Promise.resolve();
+    return new Promise(resolve => {
+      this.finishResume = resolve;
+    });
+  }
 
   session(): LiveSession {
     return {
@@ -120,7 +132,7 @@ function fakePorts(_stops: boolean[], app = new FakeApp()): RunPagePorts {
     readTrace: () => Promise.resolve({kind: 'unsupported'}),
     readSummary: () => Promise.resolve({kind: 'unsupported'}),
     readSpan: () => Promise.resolve({kind: 'unsupported'}),
-    resumeEnded: ignore,
+    resumeEnded: () => app.resume(),
     openWindow: ignore,
     now: () => app.wallMs,
     archive: ignore,
@@ -532,4 +544,55 @@ test('chat reaches the run only through its attached session', async () => {
     'chat:control',
   ]);
   store.dispose();
+});
+
+test('property: legacy Resume immediately reports progress, bounds unanswered requests, reports refusals and ignores late replies', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.constantFrom('completed', 'failed', 'stopped'),
+      fc.boolean(),
+      fc.constantFrom('accepted', 'failed', 'pending'),
+      fc.integer({min: 1, max: 34999}),
+      async (status, resumable, reply, elapsed) => {
+        const clock = new FakeClock();
+        const app = new FakeApp();
+        app.resumeReply = reply;
+        const store = createRunPageStore(SEED, fakePorts([], app), clock.schedule);
+        const run: HostRun = {
+          ...running(),
+          status,
+          phase: status,
+          end: {outcome: status === 'completed' ? 'adopted' : status, reason: '', resumable},
+        };
+        try {
+          store.dispatch({type: 'record', record: {kind: 'ended', run}});
+          store.dispatch({type: 'resume-ended'});
+          expect(store.getState().resumeStatus?.pending).toBe(true);
+          expect(store.getState().resumeStatus?.message).toContain('Waiting for the run');
+          store.dispatch({type: 'resume-ended'});
+          expect(app.asked.filter(each => each === 'resume')).toHaveLength(1);
+          await settled();
+          if (reply === 'failed') {
+            expect(store.getState().resumeStatus?.message).toContain('Host unavailable');
+            expect(store.getState().resumeStatus?.pending).toBe(false);
+          } else {
+            clock.advance(elapsed);
+            store.dispatch({type: 'record', record: {kind: 'ended', run}});
+            expect(store.getState().resumeStatus?.pending).toBe(true);
+            clock.advance(35000 - elapsed);
+            expect(store.getState().resumeStatus?.message).toContain('not confirmed');
+            app.finishResume?.();
+            await settled();
+            expect(store.getState().resumeStatus?.message).toContain('not confirmed');
+          }
+          store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+          expect(store.getState().resumeStatus).toBeNull();
+        } finally {
+          store.dispose();
+        }
+        expect(clock.pending).toBe(0);
+      },
+    ),
+    {numRuns: 24, seed: 34365},
+  );
 });

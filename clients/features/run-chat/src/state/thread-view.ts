@@ -52,7 +52,9 @@ export function threadEntries(core: CoreState): readonly ThreadEntry[] {
   return core.chatThreads
     .filter(
       thread =>
-        thread.id !== DEFAULT_THREAD || (core.chatTranscripts[DEFAULT_THREAD]?.length ?? 0) > 0,
+        thread.id !== DEFAULT_THREAD ||
+        thread.provider !== null ||
+        (core.chatTranscripts[DEFAULT_THREAD]?.length ?? 0) > 0,
     )
     .map(thread => ({
       id: thread.id,

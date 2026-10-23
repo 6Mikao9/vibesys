@@ -5,39 +5,30 @@ import {
   HostCallRequestSchema,
   HostCallResponseSchema,
   HostService,
+  IntentAction,
   type IntentState,
+  IntentStateSchema,
+  IntentStep,
   type PostIntentRequest,
   PostIntentRequestSchema,
   type PostIntentResponse,
+  ReadRequestSchema,
   RecordSchema,
   SteerMode,
   SteerTargetKind,
-  TailRequestSchema,
-  TailResponseSchema,
   TerminateRunOutcome,
 } from '@vibesys/proto';
+import type {RunIntentAction} from './controls.js';
+import type {RunReference} from './reference.js';
 import {refusalMessage} from './refusal.js';
 
 export type {IntentState, PostIntentRequest, PostIntentResponse} from '@vibesys/proto';
-export {IntentStep} from '@vibesys/proto';
+export {IntentAction, IntentStep} from '@vibesys/proto';
 
 export const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
 export const INTENT_TAIL_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;
 
-const referenceBrand: unique symbol = Symbol('RunReference');
-
-/** An addressed run; only the validating constructor can supply the project path. */
-export interface RunReference {
-  readonly [referenceBrand]: true;
-  readonly projectRoot: string;
-  readonly runId: string;
-}
-
-export function runReference(projectRoot: string, runId: string): RunReference {
-  if (projectRoot.trim() === '') throw new Error('run.projectRoot is required');
-  if (runId.trim() === '') throw new Error('run.runId is required');
-  return {[referenceBrand]: true, projectRoot, runId};
-}
+export {type RunReference, runReference} from './reference.js';
 
 export function addressedIntent(
   reference: RunReference,
@@ -57,7 +48,7 @@ export function addressedIntent(
 /** The visible controls' defaults. The host surface accepts every typed intent. */
 export function runIntent(
   identity: RunReference & Pick<PostIntentRequest, 'requestId' | 'expectedEpoch'>,
-  action: 'pause' | 'pauseNow' | 'steer',
+  action: RunIntentAction,
   text = '',
 ): PostIntentRequest {
   switch (action) {
@@ -74,8 +65,6 @@ export function runIntent(
       });
   }
 }
-
-export type RunIntentAction = Parameters<typeof runIntent>[1];
 
 /** Take ownership before a mutable generated request enters control state. */
 export function copyIntent(request: PostIntentRequest): PostIntentRequest {
@@ -95,6 +84,14 @@ export function configuredHostCall(bytes: Uint8Array, checkout: string | null): 
   const request = fromBinary(HostCallRequestSchema, bytes);
   request.checkout = checkout;
   return toBinary(HostCallRequestSchema, request);
+}
+
+/** A read names the host's saved checkout as well; renderer bytes cannot choose another. */
+export function configuredRead(bytes: Uint8Array, checkout: string | null): Uint8Array {
+  if (checkout === null) throw new Error('No checkout configured for this host');
+  const request = fromBinary(ReadRequestSchema, bytes);
+  request.checkout = checkout;
+  return toBinary(ReadRequestSchema, request);
 }
 
 /** A typed negative HostCall reply, distinct from an uncertain transport failure. */
@@ -163,33 +160,58 @@ export function intentAdmissionWarning(response: PostIntentResponse): string | n
   return [order, observation].filter(value => value !== null).join(' ');
 }
 
-export function intentTailRequest(runId: string): Uint8Array {
-  return toBinary(TailRequestSchema, create(TailRequestSchema, {runId}));
-}
+/** Writer position accompanies outcomes so earlier epochs remain history after a relaunch. */
+export type IntentOutcome = IntentState & {
+  readonly epoch?: bigint;
+  readonly sequence?: bigint;
+  readonly source?: 'epoch-started';
+};
 
-export function intentTailResponse(bytes: Uint8Array): readonly IntentState[] {
-  return fromBinary(TailResponseSchema, bytes).records.flatMap(bytes => {
+/** Intent outcomes among records the run's one reader already delivered. */
+export function intentOutcomes(records: readonly Uint8Array[]): readonly IntentOutcome[] {
+  return records.flatMap(bytes => {
     const record = fromBinary(RecordSchema, bytes);
-    return record.body.case === 'intent' ? [record.body.value] : [];
+    const position = {epoch: BigInt(record.epoch), sequence: record.seq};
+    if (record.body.case === 'intent') return [{...record.body.value, ...position}];
+    // A committed successor epoch confirms a relaunch even without an IntentState row.
+    if (record.body.case === 'epochStarted' && record.epoch > 1)
+      return [
+        {
+          ...create(IntentStateSchema, {
+            controlId: String(record.epoch),
+            action: IntentAction.RESUME,
+            step: IntentStep.APPLIED,
+          }),
+          ...position,
+          source: 'epoch-started' as const,
+        },
+      ];
+    return [];
   });
 }
 
 export {
+  type RunIntentAction,
+  relaunchTarget,
+  type WriterControls,
+  type WriterFacts,
+  writerControls,
+} from './controls.js';
+export {
+  confirmedRelaunchEpoch,
   copyRelaunch,
   copyRelaunchObservation,
   hostRelaunchRequest,
   hostRelaunchResponse,
-  livenessRequest,
-  livenessResponse,
   type RelaunchLiveness,
   type RelaunchObservation,
   RelaunchRefusal,
   type RelaunchRequest,
   type RelaunchResponse,
   type RelaunchTarget,
-  RUN_LIVENESS_METHOD,
   RunLiveness,
+  type RunWriterFacts,
   relaunchLabel,
   relaunchRequest,
-  relaunchTarget,
+  sameRelaunchObservation,
 } from './relaunch.js';

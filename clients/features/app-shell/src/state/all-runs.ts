@@ -9,11 +9,16 @@ import type {HostKey, HostListing, ListedRun} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 
 /** What is known of one project's runs on one machine. */
+export interface ProjectRunRefusal {
+  readonly kind: 'unreachable';
+  readonly detail: string;
+}
+
 type ProjectRunsSlot =
-  | {readonly kind: 'loading'; readonly token: number}
+  | {readonly kind: 'loading'; readonly token: number; readonly refusal?: ProjectRunRefusal}
   | {readonly kind: 'listed'; readonly runs: readonly ListedRun[]}
   /** The machine did not list the project's runs (unreachable, or the project is gone). */
-  | {readonly kind: 'failed'};
+  | {readonly kind: 'failed'; readonly refusal: ProjectRunRefusal};
 
 export interface AllRunsState {
   /** Each project's listing, by `projectKey`. */
@@ -65,6 +70,7 @@ export function askProjectRuns(
   all: AllRunsState,
   listings: readonly HostListing[],
   recent: readonly RecentRun[],
+  retryFailed = false,
 ): {readonly all: AllRunsState; readonly requests: readonly ListProjectRuns[]} {
   const projects: Record<string, ProjectRunsSlot> = {...all.projects};
   const requests: ListProjectRuns[] = [];
@@ -73,9 +79,14 @@ export function askProjectRuns(
     if (listing.kind !== 'listed') continue;
     for (const project of knownProjects(listing, recent, listing.host)) {
       const key = projectKey(listing.host, project);
-      if (projects[key] !== undefined) continue;
+      const previous = projects[key];
+      if (previous !== undefined && !(retryFailed && previous.kind === 'failed')) continue;
       token += 1;
-      projects[key] = {kind: 'loading', token};
+      projects[key] = {
+        kind: 'loading',
+        token,
+        ...(previous?.kind === 'failed' ? {refusal: previous.refusal} : {}),
+      };
       requests.push({kind: 'list-project-runs', token, host: listing.host, project});
     }
   }
@@ -91,13 +102,19 @@ export function projectRunsListed(
     readonly host: HostKey;
     readonly project: string;
     readonly runs: readonly ListedRun[] | null;
+    readonly error?: string;
   },
 ): AllRunsState {
   const key = projectKey(answer.host, answer.project);
   const slot = all.projects[key];
   if (slot?.kind !== 'loading' || slot.token !== answer.token) return all;
   const next: ProjectRunsSlot =
-    answer.runs === null ? {kind: 'failed'} : {kind: 'listed', runs: answer.runs};
+    answer.runs === null
+      ? {
+          kind: 'failed',
+          refusal: {kind: 'unreachable', detail: answer.error ?? 'The project could not be listed'},
+        }
+      : {kind: 'listed', runs: answer.runs};
   return {...all, projects: {...all.projects, [key]: next}};
 }
 
@@ -167,4 +184,17 @@ export function reportedRunRefs(
     }
   }
   return refs;
+}
+
+/** Missing project listings remain named while waiting, after refusal, and during retry. */
+export function projectRunGaps(all: AllRunsState): readonly {
+  readonly host: HostKey;
+  readonly project: string;
+  readonly refusal: ProjectRunRefusal | null;
+}[] {
+  return Object.entries(all.projects).flatMap(([key, slot]) => {
+    if (slot.kind === 'listed') return [];
+    const [host, project] = JSON.parse(key) as [HostKey, string];
+    return [{host, project, refusal: slot.refusal ?? null}];
+  });
 }

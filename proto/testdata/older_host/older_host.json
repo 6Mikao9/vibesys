@@ -14,6 +14,12 @@
       "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'copy-project' (choose from 'convert-run', 'convert-runs')\n"
     },
     {
+      "command": "create-chat-session",
+      "exit_code": 2,
+      "stdout_bytes": 0,
+      "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'create-chat-session' (choose from 'convert-run', 'convert-runs')\n"
+    },
+    {
       "command": "create-example",
       "exit_code": 2,
       "stdout_bytes": 0,
@@ -44,6 +50,12 @@
       "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'inspect-destination' (choose from 'convert-run', 'convert-runs')\n"
     },
     {
+      "command": "list-agent-logins",
+      "exit_code": 2,
+      "stdout_bytes": 0,
+      "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'list-agent-logins' (choose from 'convert-run', 'convert-runs')\n"
+    },
+    {
       "command": "list-compute",
       "exit_code": 2,
       "stdout_bytes": 0,
@@ -60,6 +72,12 @@
       "exit_code": 2,
       "stdout_bytes": 0,
       "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'list-harnesses' (choose from 'convert-run', 'convert-runs')\n"
+    },
+    {
+      "command": "list-run-digests",
+      "exit_code": 2,
+      "stdout_bytes": 0,
+      "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'list-run-digests' (choose from 'convert-run', 'convert-runs')\n"
     },
     {
       "command": "list-saved-runs",
@@ -114,6 +132,12 @@
       "exit_code": 2,
       "stdout_bytes": 0,
       "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'test-cluster' (choose from 'convert-run', 'convert-runs')\n"
+    },
+    {
+      "command": "usage-window",
+      "exit_code": 2,
+      "stdout_bytes": 0,
+      "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'usage-window' (choose from 'convert-run', 'convert-runs')\n"
     }
   ],
   "provided": [

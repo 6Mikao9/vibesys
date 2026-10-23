@@ -49,12 +49,11 @@ for (const width of [1000, 1440, 1920]) {
           },
         }),
       ];
-      await page.addInitScript(
-        installGateway,
+      await installGateway(
+        page,
         wire({...fixture, records, initialCount: records.length}, RunLiveness.ALIVE),
       );
       await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
-      await page.getByRole('switch', {name: 'Run transport v2'}).check();
       await expect(
         page.getByText(paused ? 'Paused by you' : 'Running', {exact: true}).first(),
       ).toBeVisible();
@@ -81,9 +80,8 @@ for (const width of [1000, 1440, 1920]) {
   }
   test(`finished history survives follower loss at ${width}px`, async ({page}) => {
     await page.setViewportSize({width, height: 900});
-    await page.addInitScript(installGateway, wire(storeRunFixture('short')));
+    await installGateway(page, wire(storeRunFixture('short')));
     await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
-    await page.getByRole('switch', {name: 'Run transport v2'}).check();
     await expect(page.getByText('Finished', {exact: true}).first()).toBeVisible();
     await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.disconnect());
     await expect(page.getByText('Finished', {exact: true}).first()).toBeVisible();
@@ -93,12 +91,11 @@ for (const width of [1000, 1440, 1920]) {
 }
 
 test('live connection loss remains visible', async ({page}) => {
-  await page.addInitScript(installGateway, wire(storeRunFixture('live')));
+  await installGateway(page, wire(storeRunFixture('live')));
   await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
-  await page.getByRole('switch', {name: 'Run transport v2'}).check();
   await expect(page.getByText('Running', {exact: true}).first()).toBeVisible();
   await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.disconnect());
-  await expect(page.getByText('Disconnected', {exact: true})).toBeVisible();
+  await expect(page.getByText('Reconnecting', {exact: true})).toBeVisible();
 });
 
 test('liveness app-window contact sheet', async ({page}) => {

@@ -5,7 +5,7 @@
 ``project.copy_out`` answer. Pydantic and the standard library only, like
 ``server.host_api``, which embeds them in the helper's messages.
 
-Public surface: ``ExampleSummary``, ``ExampleTask`` and what it holds, ``TaskGoal`` with
+Public surface: ``ProjectLookupError``, ``ExampleSummary``, ``ExampleTask`` and what it holds, ``TaskGoal`` with
 ``bounded_goal``, ``ExampleList``, ``CreatedProject``, and a project's tasks: ``TaskSummary``,
 ``TaskList``, ``TasksListRequest``, ``TasksListReply``, ``ProjectTaskGoalRequest``,
 ``ProjectTaskGoalReply``, and what a destination holds: ``ExampleDestination``,
@@ -19,12 +19,22 @@ from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from server.host_envelope import HelperReplyBase, HelperRequestBase
+from server.host_envelope import HelperErrorCode, HelperReplyBase, HelperRequestBase
 from server.host_preflight import Backend
 from vs_project.api import AcceleratorVendor, ExampleDomain, ModelMaker
 
 GOAL_MAX_CHARS: Final = 32_000
 """The most goal text an ``ExampleTask`` carries; a longer ``OBJECTIVE.md`` is cut and flagged."""
+
+
+class ProjectLookupError(Exception):
+    """A project's tasks or runs could not be read; ``code`` says why and ``path`` where."""
+
+    def __init__(self, code: HelperErrorCode, path: str, message: str) -> None:
+        """Name the failure ``code`` for ``path``; ``message`` is for a person."""
+        super().__init__(message)
+        self.code = code
+        self.path = path
 
 
 class ExampleModel(BaseModel):

@@ -121,9 +121,17 @@ def usage(projection: Projection) -> None:
     if not isinstance(data, e.TurnUsageData):
         message = "turn_usage_recorded requires TurnUsageData"
         raise TypeError(message)
+    # The journal assigns one sequence across all owners and event kinds. Resolve ownership
+    # only after deduplication: a late span binding must not rename an already-counted source.
+    # Unstamped historical observations (0) have no durable replay identity.
+    sequence = projection.event.sequence
+    if sequence > 0 and (
+        sequence <= projection.state.source_through or sequence in projection.state.source_pending
+    ):
+        return
     span, attrs = turn(projection)
     attrs.ended_at = p.Timestamp.from_datetime(projection.event.timestamp)
-    attrs.usage = p.TokenUsage(
+    increment = p.TokenUsage(
         input=data.input_tokens,
         cache_read=data.cache_read_input_tokens,
         cache_creation=data.cache_creation_input_tokens,
@@ -132,6 +140,19 @@ def usage(projection: Projection) -> None:
         cost_usd=data.total_cost_usd,
         duration_ms=data.duration_ms,
     )
+    total = attrs.usage if attrs.usage is not None else p.TokenUsage()
+    for name in (
+        "input",
+        "cache_read",
+        "cache_creation",
+        "output",
+        "reasoning",
+        "cost_usd",
+        "duration_ms",
+    ):
+        if increment.has_field(name):
+            setattr(total, name, (getattr(total, name) or 0) + getattr(increment, name))
+    attrs.usage = total
     update_turn(projection, span, attrs)
 
 

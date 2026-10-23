@@ -14,7 +14,9 @@
  * The reader is the page's cache, not its state: the store keeps the log (`TraceLog`), and every
  * model is a function of the log and the sequence.
  */
+
 import type {RunEvent, RunOverview} from '@vibesys/contracts';
+import type {LoadProgress} from '@vibesys/run-skeleton';
 import type {ComparisonBaseline, CoreState} from '@vibesys/run-state';
 import {AgentFold, type AgentGraph, agentGraph} from '@vibesys/run-state/agents';
 import {CandidateFold, type CandidateTree, candidateTree} from '@vibesys/run-state/candidates';
@@ -25,6 +27,7 @@ import type {Direction} from './direction.js';
 import {failuresAt, type GateFailure} from './input-gates.js';
 import {overviewAt, type TraceLog, traceAt} from './live.js';
 import {withLiveBest} from './live-best.js';
+import type {PerformanceFold} from './performance.js';
 import {NO_PAUSES, type QuotaPauseSpan} from './quota-pauses.js';
 import {settleIdeas} from './settled-ideas.js';
 import {latestTime} from './span-reading.js';
@@ -56,8 +59,18 @@ function sameFacts(a: RunFacts, b: RunFacts): boolean {
 
 /** The run at one sequence. */
 export interface RunModel {
+  /** Whether the reader has caught up with the committed prefix. */
+  readonly progress?: LoadProgress | undefined;
+  readonly loadFailure?: string | undefined;
+  /**
+   * The input's measured value of the objective metric, read from the input gate itself: known
+   * before any idea is measured, when no idea's measurement carries it.
+   */
+  readonly input?: number | null;
   /** The writer's headline at exactly this committed prefix, when available. */
   readonly headline?: HeadlineReading | undefined;
+  /** The writer's metric series, including measurements with no idea owner. */
+  readonly series?: ReadonlyMap<string, PerformanceFold>;
   /** The sequence shown; null at the live end. */
   readonly at: number | null;
   readonly trace: RunTrace;

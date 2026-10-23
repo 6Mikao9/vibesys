@@ -16,6 +16,7 @@ from server.host_api import (
     HelperErrorCode,
     LiveInstanceRecord,
 )
+from server.host_examples import ProjectLookupError
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
@@ -23,7 +24,7 @@ from server.host_helper_os import (
     ProjectStopIntents,
     SubprocessRunLauncher,
 )
-from server.host_helper_requests import PathHints, ProjectLookupError, ScannedEntry
+from server.host_helper_requests import PathHints, ScannedEntry
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import FakeGitRepositories, run_execution_record
 from vs_sim.api import ProbeResult, ProcessSpec

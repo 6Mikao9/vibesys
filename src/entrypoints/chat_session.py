@@ -85,13 +85,19 @@ def serve(request: ChatMessageRequest, runtime: ChatRuntime, readers: RunReaders
         agents = reader.open_auxiliary_agents(sink=session.observe)
         owned.callback(agents.close)
 
+        configuration = session.configuration(
+            ChatSessionCreated(
+                id=request.session_id, provider=ready.agent_provider, model=ready.agent_model
+            )
+        )
+
         def open_agent() -> ManagedAgent:
             return agents.create_auxiliary_agent(
                 AuxiliaryAgentLaunch(
                     role="chat",
                     member_id=request.session_id,
-                    provider=ready.agent_provider,
-                    model=ready.agent_model,
+                    provider=configuration.provider,
+                    model=configuration.model,
                     system_prompt=experiment_chat_system_prompt(),
                     continuation_prompt=experiment_chat_continuation_prompt(),
                     skills=AuxiliarySkills.CHAT,
@@ -106,9 +112,7 @@ def serve(request: ChatMessageRequest, runtime: ChatRuntime, readers: RunReaders
             )
 
         session.serve(
-            ChatSessionCreated(
-                id=request.session_id, provider=ready.agent_provider, model=ready.agent_model
-            ),
+            configuration,
             open_agent,
         )
 

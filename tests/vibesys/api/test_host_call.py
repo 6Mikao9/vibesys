@@ -821,13 +821,16 @@ def pause_payload(project: tuple[Project, str], epoch: int = 1) -> bytes:
 
 
 @pytest.mark.parametrize("mode", ["held", "unsupported", "absent", "unknown", "changed", "foreign"])
+@pytest.mark.parametrize("head_epoch", [0, 1])
 def test_pause_now_keeps_process_outcomes_distinct_without_ending_the_run(
-    project: tuple[Project, str], sim: Sim, mode: str
+    project: tuple[Project, str], sim: Sim, mode: str, head_epoch: int
 ) -> None:
     owner, run_id = project
     journal, threads = native_journal(project, sim)
     head = p.RunHead.from_binary(Project.run_head_path_for(owner.root, run_id).read_bytes())
     assert head.process is not None
+    head.epoch = head_epoch
+    Project.run_head_path_for(owner.root, run_id).write_bytes(head.to_binary())
     signaller = FakeProcessSignaller(
         set() if mode == "absent" else {head.process.pid},
         held_locks={

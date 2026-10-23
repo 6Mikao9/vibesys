@@ -4,7 +4,7 @@
  * Streams come from the page state, joined to spans by the stream owner's `span_id`
  * (`state/scoped-logs.ts`). The shell follows the shown stream (`streamToFollow`): a view runs no effects.
  */
-import {Banner, EmptyState, LogPane, PickList, PickRow} from '@vibesys/ui';
+import {Banner, Button, EmptyState, LogPane, PickList, PickRow} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {type RunPageAction, type RunPageState, stepKicker} from '../../../../state/index.js';
 import {
@@ -145,13 +145,27 @@ function StreamLogs(props: LogsViewProps): JSX.Element {
       <EmptyState title="No logs to show" body={props.emptyLabelsOnly ? '' : 'Choose a stream.'} />
     );
   const pane = (
-    <LogPane
-      key={stream.id}
-      label={stream.label}
-      lines={paneLines(state, shown)}
-      size="fill"
-      start={stream.live ? 'tail' : 'top'}
-    />
+    <>
+      {state.logProblem?.streamId === shown ? (
+        <Banner
+          tone="warn"
+          title={state.logProblem.message}
+          actions={
+            <Button
+              text="Retry log"
+              press={() => dispatch({type: 'select-stream', streamId: shown})}
+            />
+          }
+        />
+      ) : null}
+      <LogPane
+        key={stream.id}
+        label={stream.label}
+        lines={paneLines(state, shown)}
+        size="fill"
+        start={stream.live ? 'tail' : 'top'}
+      />
+    </>
   );
   if (scope.kind !== 'run' && logs.streams.length === 1) return pane;
   // The pane body is a column: the stream rows take their own height, the log fills the rest.

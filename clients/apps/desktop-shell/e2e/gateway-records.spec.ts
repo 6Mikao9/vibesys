@@ -15,14 +15,9 @@ for (const kind of ['short', 'live', 'blobs'] as const)
     test(`store Run screen ${kind} at ${width}px`, async ({page}) => {
       await page.setViewportSize({width, height: 900});
       const fixture = storeRunFixture(kind);
-      await page.addInitScript(installGateway, wire(fixture));
+      await installGateway(page, wire(fixture));
       await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
-      const toggle = page.getByRole('switch', {name: 'Run transport v2'});
-      await expect(toggle).not.toBeChecked();
-      expect(
-        await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.calls()),
-      ).toEqual([]);
-      await toggle.check();
+      await expect(page.getByRole('switch', {name: 'Run transport v2'})).toHaveCount(0);
       await expect(page.getByRole('heading', {name: 'queue-rs · mpmc'})).toBeVisible();
       await expect(page.getByRole('button', {name: /Idea 1/}).first()).toBeVisible();
       const range = page.getByRole('slider');
@@ -76,24 +71,20 @@ for (const kind of ['short', 'live', 'blobs'] as const)
       await expect(page.getByRole('region', {name: 'Implement', exact: true})).toBeVisible();
       await expect(page.getByText('No transcript', {exact: true})).toBeVisible();
       await capture('step');
-      await toggle.uncheck();
-      await expect(page.getByRole('button', {name: 'Chat', exact: true})).toBeVisible();
+      await page.getByRole('button', {name: 'Settings', exact: true}).click();
       expect(
         await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.active()),
       ).toBe(0);
     });
   }
 
-test('the host switch survives missing legacy history and usage retains its model and dates', async ({
+test('native history opens without legacy history and usage retains its model and dates', async ({
   page,
 }) => {
   await page.setViewportSize({width: 1440, height: 900});
-  await page.addInitScript(installGateway, wire(storeRunFixture('short')));
-  await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'}, {summary: 'gone'});
-  await expect(page.getByText('Could not load this run', {exact: true})).toBeVisible();
-  const toggle = page.getByRole('switch', {name: 'Run transport v2'});
-  await expect(toggle).not.toBeChecked();
-  await toggle.check();
+  await installGateway(page, wire(storeRunFixture('short')));
+  await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
+  await expect(page.getByRole('switch', {name: 'Run transport v2'})).toHaveCount(0);
   await page.getByRole('radio', {name: 'Usage', exact: true}).click();
   await page.getByRole('radio', {name: 'Model', exact: true}).click();
   await page.getByRole('radio', {name: 'Tokens', exact: true}).click();
@@ -106,12 +97,9 @@ test('the host switch survives missing legacy history and usage retains its mode
     await page.screenshot({path: join(shots, file)});
     sheet.push({name: 'Usage by model, dated', file});
   }
-  await toggle.uncheck();
-  await expect(page.getByText('Could not load this run', {exact: true})).toBeVisible();
-  await expect(toggle).not.toBeChecked();
-  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toHaveCount(0);
-  await toggle.check();
-  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeVisible();
+
+  // A finished run offers Resume: every ending can be resumed.
+  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
 });
 
 test('store Run app-window contact sheet', async ({page}) => {

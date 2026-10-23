@@ -108,6 +108,7 @@ export interface TimelineRows {
 
 /** The roles whose turns are drawn on the rows in view (by name) and whether any gate is. */
 interface TimelineLegend {
+  readonly failedLane?: true;
   readonly roles: readonly {readonly role: string; readonly series: number}[];
   readonly gates: boolean;
   /** Whether a pause (a turn held on a provider's quota) is drawn. */
@@ -297,7 +298,10 @@ function legendOfSegments(segments: readonly StepSegment[]): TimelineLegend {
 }
 
 function legendOf(rows: readonly TimelineRow[]): TimelineLegend {
-  return legendOfSegments(rows.filter(row => !row.lane).flatMap(row => row.segments));
+  return {
+    ...legendOfSegments(rows.filter(row => !row.lane).flatMap(row => row.segments)),
+    ...(rows.some(row => row.lane) ? {failedLane: true as const} : {}),
+  };
 }
 
 /** A legend's entries for a `SwatchLegend`: each role by its color, a gate hatched, a pause grey. */
@@ -311,6 +315,7 @@ export function legendItems(legend: TimelineLegend): readonly {
     ...legend.roles.map(({role, series}) => ({label: roleName(role), series})),
     ...(legend.gates ? [{label: 'Gate', hatched: true}] : []),
     ...(legend.pauses ? [{label: 'Quota pause', muted: true}] : []),
+    ...(legend.failedLane ? [{label: 'Failed ideas', muted: true}] : []),
   ];
 }
 

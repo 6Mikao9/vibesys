@@ -6,6 +6,15 @@ rules fail. Decoding preserves unknown fields for additive store evolution.
 The two schema hashes identify the canonical descriptors, not generated code.
 """
 
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vs_proto._generated.vibesys.testing.v1.client_replay_pb import (
+        ClientReplay,
+        ClientReplayBatch,
+    )
+
 from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 from protovalidate import ValidationError
@@ -20,6 +29,8 @@ from vs_proto._generated.vibesys.api.v1.host_call_pb import (
     ChatMessageRequest,
     ChatMessageResponse,
     ConfigurationFailed,
+    CreateChatSessionRequest,
+    CreateChatSessionResponse,
     HostCallRequest,
     HostCallResponse,
     PauseIntent,
@@ -39,6 +50,7 @@ from vs_proto._generated.vibesys.api.v1.host_mutate_generated_pb import (
 )
 from vs_proto._generated.vibesys.api.v1.host_pb import (
     BlobResult,
+    DescriptorSet,
     GetBlobsRequest,
     GetBlobsResponse,
     HelloRequest,
@@ -76,6 +88,8 @@ from vs_proto._generated.vibesys.core.v1 import replay_workspace_pb as replay_wo
 from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
 from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
 from vs_proto._generated.vibesys.core.v1.vocabulary_pb import CheckoutStatus
+from vs_proto._generated.vibesys.desktop.v1 import gateway_pb as desktop_gateway
+from vs_proto._generated.vibesys.desktop.v1 import settings_pb as desktop_settings
 from vs_proto._generated.vibesys.host.v1 import admission_receipt_generated_pb as admission
 from vs_proto._generated.vibesys.host.v1 import evaluation_receipts_pb as evaluation_receipts
 from vs_proto._generated.vibesys.host.v1 import operation_options_pb as operation_options
@@ -131,8 +145,11 @@ from vs_proto._generated.vibesys.store.v1.common_pb import (
 from vs_proto._generated.vibesys.store.v1.content_pb import (
     BlobAttached,
     BlobRef,
+    GateStreamOwner,
+    LogGate,
     MetricPoint,
     StreamKind,
+    StreamOwner,
     StreamRef,
     StreamState,
 )
@@ -147,10 +164,13 @@ from vs_proto._generated.vibesys.store.v1.environment_attrs_pb import (
 )
 from vs_proto._generated.vibesys.store.v1.epoch_pb import (
     Evaluator,
+    InputMeasurement,
+    MeasuredInput,
     MetricSeriesDecl,
     Objective,
     RunDescription,
     SpanKindDecl,
+    UnmeasuredInput,
 )
 from vs_proto._generated.vibesys.store.v1.intent_pb import (
     IntentAction,
@@ -172,6 +192,7 @@ from vs_proto._generated.vibesys.store.v1.lifecycle_pb import (
     RunFailure,
     RunFailureKind,
     Running,
+    RunOutcomePresentation,
     StageState,
     Starting,
     StartupStage,
@@ -191,12 +212,18 @@ from vs_proto._generated.vibesys.store.v1.record_pb import (
 from vs_proto._generated.vibesys.store.v1.skeleton_pb import (
     EpochVersion,
     HeadlineObjective,
+    IdeaDecision,
+    IdeaOutcome,
+    IdeaPerformance,
     Keyframe,
     LifecycleVersion,
     MetricHistory,
     MetricVersion,
+    PerformanceRefusal,
+    RunAddress,
     RunHead,
     RunProcess,
+    SeriesPerformance,
     SpanHistory,
     SpanVersion,
 )
@@ -227,6 +254,7 @@ from vs_proto._generated.vibesys.store.v1.transcript_pb import (
 from vs_proto._operation_projection import from_mapping, to_mapping
 from vs_proto._operations import AcceptedRequest, Operation
 from vs_proto._operations import checked as validated_operation_bytes
+from vs_proto._outcomes import outcome_presentation
 from vs_proto._schema_hashes import (
     API_SCHEMA_HASH,
     HOST_SCHEMA_HASH,
@@ -267,9 +295,14 @@ __all__ = [
     "ChatSteerProposed",
     "ChatToken",
     "CheckoutStatus",
+    "ClientReplay",
+    "ClientReplayBatch",
     "ComparisonAttrs",
     "ComparisonVerdict",
     "ConfigurationFailed",
+    "CreateChatSessionRequest",
+    "CreateChatSessionResponse",
+    "DescriptorSet",
     "Direction",
     "DrainGoal",
     "Draining",
@@ -287,6 +320,7 @@ __all__ = [
     "FrameworkSource",
     "GateAttrs",
     "GateStage",
+    "GateStreamOwner",
     "GateSubject",
     "GetBlobsRequest",
     "GetBlobsResponse",
@@ -296,8 +330,12 @@ __all__ = [
     "Hold",
     "HostCallRequest",
     "HostCallResponse",
+    "IdeaDecision",
+    "IdeaOutcome",
+    "IdeaPerformance",
     "InputFailure",
     "InputFailureKind",
+    "InputMeasurement",
     "IntentAction",
     "IntentState",
     "IntentStep",
@@ -306,6 +344,8 @@ __all__ = [
     "LegacyEvent",
     "Lifecycle",
     "LifecycleVersion",
+    "LogGate",
+    "MeasuredInput",
     "MetricHistory",
     "MetricPoint",
     "MetricSeriesDecl",
@@ -323,6 +363,7 @@ __all__ = [
     "Parked",
     "PauseIntent",
     "PauseNowIntent",
+    "PerformanceRefusal",
     "PlanningAttrs",
     "PostIntentRequest",
     "PostIntentResponse",
@@ -337,11 +378,13 @@ __all__ = [
     "RelaunchRequest",
     "RelaunchResponse",
     "ReplayStore",
+    "RunAddress",
     "RunDescription",
     "RunFailure",
     "RunFailureKind",
     "RunHead",
     "RunLiveness",
+    "RunOutcomePresentation",
     "RunProcess",
     "Running",
     "RuntimeType",
@@ -349,6 +392,7 @@ __all__ = [
     "SearchRunDescription",
     "SearchRunFailure",
     "Selection",
+    "SeriesPerformance",
     "SeriesRole",
     "SetParallelismIntent",
     "Severity",
@@ -371,6 +415,7 @@ __all__ = [
     "SteerTargetKind",
     "Stop",
     "StreamKind",
+    "StreamOwner",
     "StreamRef",
     "StreamState",
     "TailRequest",
@@ -385,6 +430,7 @@ __all__ = [
     "TranscriptText",
     "TranscriptToolCall",
     "TranscriptToolResult",
+    "UnmeasuredInput",
     "ValidationError",
     "WaitCondition",
     "WaitKind",
@@ -408,6 +454,8 @@ __all__ = [
     "core_leaves",
     "core_value_options",
     "core_vocabulary",
+    "desktop_gateway",
+    "desktop_settings",
     "evaluation_receipts",
     "from_mapping",
     "host_operation_descriptors",
@@ -415,6 +463,7 @@ __all__ = [
     "host_payloads",
     "imported_facts",
     "operation_options",
+    "outcome_presentation",
     "replay",
     "replay_agent",
     "replay_evaluation",
@@ -426,3 +475,12 @@ __all__ = [
     "validated_operation_bytes",
     "validation_rules",
 ]
+
+
+def __getattr__(name: str) -> object:
+    # Fixture-only codecs must not enter the host hello's production import graph.
+    if name in {"ClientReplay", "ClientReplayBatch"}:
+        return getattr(
+            import_module("vs_proto._generated.vibesys.testing.v1.client_replay_pb"), name
+        )
+    raise AttributeError(name)

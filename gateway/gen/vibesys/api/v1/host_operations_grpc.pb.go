@@ -42,6 +42,10 @@ const (
 	HostOperationsService_ChatMessage_FullMethodName        = "/vibesys.api.v1.HostOperationsService/ChatMessage"
 	HostOperationsService_ListSavedRuns_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ListSavedRuns"
 	HostOperationsService_TerminateRun_FullMethodName       = "/vibesys.api.v1.HostOperationsService/TerminateRun"
+	HostOperationsService_ListAgentLogins_FullMethodName    = "/vibesys.api.v1.HostOperationsService/ListAgentLogins"
+	HostOperationsService_CreateChatSession_FullMethodName  = "/vibesys.api.v1.HostOperationsService/CreateChatSession"
+	HostOperationsService_ListRunDigests_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ListRunDigests"
+	HostOperationsService_UsageWindow_FullMethodName        = "/vibesys.api.v1.HostOperationsService/UsageWindow"
 )
 
 // HostOperationsServiceClient is the client API for HostOperationsService service.
@@ -84,6 +88,12 @@ type HostOperationsServiceClient interface {
 	// Native discovery does not migrate the helper's runs.list summary contract.
 	ListSavedRuns(ctx context.Context, in *v1.ListSavedRunsRequest, opts ...grpc.CallOption) (*v1.ListSavedRunsResponse, error)
 	TerminateRun(ctx context.Context, in *v1.TerminateRunRequest, opts ...grpc.CallOption) (*v1.TerminateRunResponse, error)
+	ListAgentLogins(ctx context.Context, in *v1.ListAgentLoginsRequest, opts ...grpc.CallOption) (*v1.ListAgentLoginsResponse, error)
+	CreateChatSession(ctx context.Context, in *CreateChatSessionRequest, opts ...grpc.CallOption) (*CreateChatSessionResponse, error)
+	// The digests and the usage window read each run's journal; they are served beside, not through,
+	// the saved-run listing.
+	ListRunDigests(ctx context.Context, in *v1.ListRunDigestsRequest, opts ...grpc.CallOption) (*v1.ListRunDigestsResponse, error)
+	UsageWindow(ctx context.Context, in *v1.UsageWindowRequest, opts ...grpc.CallOption) (*v1.UsageWindowResponse, error)
 }
 
 type hostOperationsServiceClient struct {
@@ -323,6 +333,46 @@ func (c *hostOperationsServiceClient) TerminateRun(ctx context.Context, in *v1.T
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) ListAgentLogins(ctx context.Context, in *v1.ListAgentLoginsRequest, opts ...grpc.CallOption) (*v1.ListAgentLoginsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.ListAgentLoginsResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_ListAgentLogins_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) CreateChatSession(ctx context.Context, in *CreateChatSessionRequest, opts ...grpc.CallOption) (*CreateChatSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateChatSessionResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_CreateChatSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) ListRunDigests(ctx context.Context, in *v1.ListRunDigestsRequest, opts ...grpc.CallOption) (*v1.ListRunDigestsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.ListRunDigestsResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_ListRunDigests_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) UsageWindow(ctx context.Context, in *v1.UsageWindowRequest, opts ...grpc.CallOption) (*v1.UsageWindowResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.UsageWindowResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_UsageWindow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostOperationsServiceServer is the server API for HostOperationsService service.
 // All implementations must embed UnimplementedHostOperationsServiceServer
 // for forward compatibility.
@@ -363,6 +413,12 @@ type HostOperationsServiceServer interface {
 	// Native discovery does not migrate the helper's runs.list summary contract.
 	ListSavedRuns(context.Context, *v1.ListSavedRunsRequest) (*v1.ListSavedRunsResponse, error)
 	TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error)
+	ListAgentLogins(context.Context, *v1.ListAgentLoginsRequest) (*v1.ListAgentLoginsResponse, error)
+	CreateChatSession(context.Context, *CreateChatSessionRequest) (*CreateChatSessionResponse, error)
+	// The digests and the usage window read each run's journal; they are served beside, not through,
+	// the saved-run listing.
+	ListRunDigests(context.Context, *v1.ListRunDigestsRequest) (*v1.ListRunDigestsResponse, error)
+	UsageWindow(context.Context, *v1.UsageWindowRequest) (*v1.UsageWindowResponse, error)
 	mustEmbedUnimplementedHostOperationsServiceServer()
 }
 
@@ -438,6 +494,18 @@ func (UnimplementedHostOperationsServiceServer) ListSavedRuns(context.Context, *
 }
 func (UnimplementedHostOperationsServiceServer) TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TerminateRun not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) ListAgentLogins(context.Context, *v1.ListAgentLoginsRequest) (*v1.ListAgentLoginsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAgentLogins not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) CreateChatSession(context.Context, *CreateChatSessionRequest) (*CreateChatSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateChatSession not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) ListRunDigests(context.Context, *v1.ListRunDigestsRequest) (*v1.ListRunDigestsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListRunDigests not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) UsageWindow(context.Context, *v1.UsageWindowRequest) (*v1.UsageWindowResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UsageWindow not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) mustEmbedUnimplementedHostOperationsServiceServer() {}
 func (UnimplementedHostOperationsServiceServer) testEmbeddedByValue()                               {}
@@ -849,6 +917,78 @@ func _HostOperationsService_TerminateRun_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_ListAgentLogins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.ListAgentLoginsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).ListAgentLogins(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_ListAgentLogins_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).ListAgentLogins(ctx, req.(*v1.ListAgentLoginsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_CreateChatSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateChatSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).CreateChatSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_CreateChatSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).CreateChatSession(ctx, req.(*CreateChatSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_ListRunDigests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.ListRunDigestsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).ListRunDigests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_ListRunDigests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).ListRunDigests(ctx, req.(*v1.ListRunDigestsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_UsageWindow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.UsageWindowRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).UsageWindow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_UsageWindow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).UsageWindow(ctx, req.(*v1.UsageWindowRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // HostOperationsService_ServiceDesc is the grpc.ServiceDesc for HostOperationsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -939,6 +1079,22 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TerminateRun",
 			Handler:    _HostOperationsService_TerminateRun_Handler,
+		},
+		{
+			MethodName: "ListAgentLogins",
+			Handler:    _HostOperationsService_ListAgentLogins_Handler,
+		},
+		{
+			MethodName: "CreateChatSession",
+			Handler:    _HostOperationsService_CreateChatSession_Handler,
+		},
+		{
+			MethodName: "ListRunDigests",
+			Handler:    _HostOperationsService_ListRunDigests_Handler,
+		},
+		{
+			MethodName: "UsageWindow",
+			Handler:    _HostOperationsService_UsageWindow_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

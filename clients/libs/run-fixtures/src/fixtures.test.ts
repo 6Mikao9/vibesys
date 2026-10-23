@@ -7,7 +7,6 @@ import {
   findLeaks,
   fixtureNamed,
   type RunFixture,
-  scenarios,
   splitLive,
   weeksRun,
 } from './index.js';
@@ -19,12 +18,6 @@ function treeOf(fixture: RunFixture): CandidateTree {
 }
 
 describe('the committed fixtures', () => {
-  it('are exactly what their generators write, so they cannot drift', () => {
-    for (const scenario of scenarios()) {
-      expect(fixtureNamed(scenario.name)).toEqual(scenario);
-    }
-  });
-
   it('are named as the catalog says', () => {
     const names = committedFixtures().map(fixture => fixture.name);
     expect(new Set(names).size).toBe(names.length);

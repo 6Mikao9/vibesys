@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/epoch.proto.
  */
 export const file_vibesys_store_v1_epoch: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL3N0b3JlL3YxL2Vwb2NoLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIrIECg5SdW5EZXNjcmlwdGlvbhIdCghzdHJhdGVneRgBIAEoCUILukgIcgYQASiAgAQSGgoFaW5wdXQYAiABKAlCC7pICHIGEAEogIAEEjQKCW9iamVjdGl2ZRgDIAEoCzIZLnZpYmVzeXMuc3RvcmUudjEuQmxvYlJlZkIGukgDyAEBEi8KCm9iamVjdGl2ZXMYBCADKAsyGy52aWJlc3lzLnN0b3JlLnYxLk9iamVjdGl2ZRIrChFjb3JyZWN0bmVzc19jaGVjaxgFIAMoCUIQukgNkgEKIghyBhABKICABBIzCglldmFsdWF0b3IYBiABKAsyGy52aWJlc3lzLnN0b3JlLnYxLkV2YWx1YXRvckgAiAEBEigKDmV4cGVjdGVkX3JvbGVzGAggAygJQhC6SA2SAQoiCHIGEAEogIAEEikKBmRldGFpbBgJIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnlIAYgBATqWAbpIkgEajwEKDnJ1bi5vYmplY3RpdmVzEihvYmplY3RpdmVzIG11c3QgaGF2ZSB1bmlxdWUgc2VyaWVzIG5hbWVzGlN0aGlzLm9iamVjdGl2ZXMuYWxsKHgsIHRoaXMub2JqZWN0aXZlcy5maWx0ZXIoeSwgeS5zZXJpZXMgPT0geC5zZXJpZXMpLnNpemUoKSA9PSAxKUIMCgpfZXZhbHVhdG9yQgkKB19kZXRhaWxKBAgHEAhSD21heF93b3Jrc3RyZWFtcyJECglFdmFsdWF0b3ISGQoEbmFtZRgBIAEoCUILukgIcgYQASiAgAQSHAoHdmVyc2lvbhgCIAEoCUILukgIcgYQASiAgAQixAEKCU9iamVjdGl2ZRIbCgZzZXJpZXMYASABKAlCC7pICHIGEAEogIAEEjoKCWRpcmVjdGlvbhgCIAEoDjIbLnZpYmVzeXMuc3RvcmUudjEuRGlyZWN0aW9uQgq6SAeCAQQQASAAOl66SFsaWQoTb2JqZWN0aXZlLmRpcmVjdGlvbhItZGlyZWN0aW9uIG11c3QgYmUgbWF4IG9yIG1pbiBmb3IgYW4gb2JqZWN0aXZlGhN0aGlzLmRpcmVjdGlvbiAhPSAzIqUBCgxTcGFuS2luZERlY2wSGQoEa2luZBgBIAEoCUILukgIcgYQASiAgAQSHwoKYXR0cnNfdHlwZRgCIAEoCUILukgIcgYQASiAgAQSIgoIdmVyZGljdHMYAyADKAlCELpIDZIBCiIIcgYQASiAgAQSIwoJbGlua19yZWxzGAQgAygJQhC6SA2SAQoiCHIGEAEogIAEEhAKCHRpbWVsaW5lGAUgASgIIroBChBNZXRyaWNTZXJpZXNEZWNsEhkKBG5hbWUYASABKAlCC7pICHIGEAEogIAEEhcKBHVuaXQYAiABKAlCCbpIBnIEKICABBI6CglkaXJlY3Rpb24YAyABKA4yGy52aWJlc3lzLnN0b3JlLnYxLkRpcmVjdGlvbkIKukgHggEEEAEgABI2CgRyb2xlGAQgASgOMhwudmliZXN5cy5zdG9yZS52MS5TZXJpZXNSb2xlQgq6SAeCAQQQASAAQkFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_any, file_vibesys_store_v1_common, file_vibesys_store_v1_content]);
+  fileDesc("Chx2aWJlc3lzL3N0b3JlL3YxL2Vwb2NoLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIowFCg5SdW5EZXNjcmlwdGlvbhIdCghzdHJhdGVneRgBIAEoCUILukgIcgYQASiAgAQSGgoFaW5wdXQYAiABKAlCC7pICHIGEAEogIAEEjQKCW9iamVjdGl2ZRgDIAEoCzIZLnZpYmVzeXMuc3RvcmUudjEuQmxvYlJlZkIGukgDyAEBEi8KCm9iamVjdGl2ZXMYBCADKAsyGy52aWJlc3lzLnN0b3JlLnYxLk9iamVjdGl2ZRIrChFjb3JyZWN0bmVzc19jaGVjaxgFIAMoCUIQukgNkgEKIghyBhABKICABBIzCglldmFsdWF0b3IYBiABKAsyGy52aWJlc3lzLnN0b3JlLnYxLkV2YWx1YXRvckgAiAEBEigKDmV4cGVjdGVkX3JvbGVzGAggAygJQhC6SA2SAQoiCHIGEAEogIAEEikKBmRldGFpbBgJIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnlIAYgBARJCChFpbnB1dF9tZWFzdXJlbWVudBgKIAEoCzIiLnZpYmVzeXMuc3RvcmUudjEuSW5wdXRNZWFzdXJlbWVudEgCiAEBOpYBukiSARqPAQoOcnVuLm9iamVjdGl2ZXMSKG9iamVjdGl2ZXMgbXVzdCBoYXZlIHVuaXF1ZSBzZXJpZXMgbmFtZXMaU3RoaXMub2JqZWN0aXZlcy5hbGwoeCwgdGhpcy5vYmplY3RpdmVzLmZpbHRlcih5LCB5LnNlcmllcyA9PSB4LnNlcmllcykuc2l6ZSgpID09IDEpQgwKCl9ldmFsdWF0b3JCCQoHX2RldGFpbEIUChJfaW5wdXRfbWVhc3VyZW1lbnRKBAgHEAhSD21heF93b3Jrc3RyZWFtcyKQAQoQSW5wdXRNZWFzdXJlbWVudBIzCghtZWFzdXJlZBgBIAEoCzIfLnZpYmVzeXMuc3RvcmUudjEuTWVhc3VyZWRJbnB1dEgAEjcKCnVubWVhc3VyZWQYAiABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlVubWVhc3VyZWRJbnB1dEgAQg4KBXN0YXRlEgW6SAIIASJdCg1NZWFzdXJlZElucHV0EhsKBnNlcmllcxgBIAEoCUILukgIcgYQASiAgAQSFgoFdmFsdWUYAiABKAFCB7pIBBICQAESFwoEc3BhbhgDIAEoCUIJukgGcgQogIAEIhEKD1VubWVhc3VyZWRJbnB1dCJECglFdmFsdWF0b3ISGQoEbmFtZRgBIAEoCUILukgIcgYQASiAgAQSHAoHdmVyc2lvbhgCIAEoCUILukgIcgYQASiAgAQixAEKCU9iamVjdGl2ZRIbCgZzZXJpZXMYASABKAlCC7pICHIGEAEogIAEEjoKCWRpcmVjdGlvbhgCIAEoDjIbLnZpYmVzeXMuc3RvcmUudjEuRGlyZWN0aW9uQgq6SAeCAQQQASAAOl66SFsaWQoTb2JqZWN0aXZlLmRpcmVjdGlvbhItZGlyZWN0aW9uIG11c3QgYmUgbWF4IG9yIG1pbiBmb3IgYW4gb2JqZWN0aXZlGhN0aGlzLmRpcmVjdGlvbiAhPSAzIqUBCgxTcGFuS2luZERlY2wSGQoEa2luZBgBIAEoCUILukgIcgYQASiAgAQSHwoKYXR0cnNfdHlwZRgCIAEoCUILukgIcgYQASiAgAQSIgoIdmVyZGljdHMYAyADKAlCELpIDZIBCiIIcgYQASiAgAQSIwoJbGlua19yZWxzGAQgAygJQhC6SA2SAQoiCHIGEAEogIAEEhAKCHRpbWVsaW5lGAUgASgIIroBChBNZXRyaWNTZXJpZXNEZWNsEhkKBG5hbWUYASABKAlCC7pICHIGEAEogIAEEhcKBHVuaXQYAiABKAlCCbpIBnIEKICABBI6CglkaXJlY3Rpb24YAyABKA4yGy52aWJlc3lzLnN0b3JlLnYxLkRpcmVjdGlvbkIKukgHggEEEAEgABI2CgRyb2xlGAQgASgOMhwudmliZXN5cy5zdG9yZS52MS5TZXJpZXNSb2xlQgq6SAeCAQQQASAAQkFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_any, file_vibesys_store_v1_common, file_vibesys_store_v1_content]);
 
 /**
  * Epoch-local run identity and objective. Objectives are ordered headline first.
@@ -68,6 +68,14 @@ export type RunDescription = Message<"vibesys.store.v1.RunDescription"> & {
    * @generated from field: optional google.protobuf.Any detail = 9;
    */
   detail?: Any | undefined;
+
+  /**
+   * What the input's objective measurement is, once the writer knows. Absent only while the input
+   * has been neither measured nor given up on. Readers display it and never pick among gates.
+   *
+   * @generated from field: optional vibesys.store.v1.InputMeasurement input_measurement = 10;
+   */
+  inputMeasurement?: InputMeasurement | undefined;
 };
 
 /**
@@ -76,6 +84,81 @@ export type RunDescription = Message<"vibesys.store.v1.RunDescription"> & {
  */
 export const RunDescriptionSchema: GenMessage<RunDescription> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_epoch, 0);
+
+/**
+ * The input's measurement of the headline objective: one fact per run, written once.
+ *
+ * @generated from message vibesys.store.v1.InputMeasurement
+ */
+export type InputMeasurement = Message<"vibesys.store.v1.InputMeasurement"> & {
+  /**
+   * @generated from oneof vibesys.store.v1.InputMeasurement.state
+   */
+  state: {
+    /**
+     * @generated from field: vibesys.store.v1.MeasuredInput measured = 1;
+     */
+    value: MeasuredInput;
+    case: "measured";
+  } | {
+    /**
+     * The input was not measured (its measurement failed or the run has no input gate to read).
+     *
+     * @generated from field: vibesys.store.v1.UnmeasuredInput unmeasured = 2;
+     */
+    value: UnmeasuredInput;
+    case: "unmeasured";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message vibesys.store.v1.InputMeasurement.
+ * Use `create(InputMeasurementSchema)` to create a new message.
+ */
+export const InputMeasurementSchema: GenMessage<InputMeasurement> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_epoch, 1);
+
+/**
+ * @generated from message vibesys.store.v1.MeasuredInput
+ */
+export type MeasuredInput = Message<"vibesys.store.v1.MeasuredInput"> & {
+  /**
+   * @generated from field: string series = 1;
+   */
+  series: string;
+
+  /**
+   * @generated from field: double value = 2;
+   */
+  value: number;
+
+  /**
+   * The input gate whose reading this is. Empty for retained spanless input points.
+   *
+   * @generated from field: string span = 3;
+   */
+  span: string;
+};
+
+/**
+ * Describes the message vibesys.store.v1.MeasuredInput.
+ * Use `create(MeasuredInputSchema)` to create a new message.
+ */
+export const MeasuredInputSchema: GenMessage<MeasuredInput> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_epoch, 2);
+
+/**
+ * @generated from message vibesys.store.v1.UnmeasuredInput
+ */
+export type UnmeasuredInput = Message<"vibesys.store.v1.UnmeasuredInput"> & {
+};
+
+/**
+ * Describes the message vibesys.store.v1.UnmeasuredInput.
+ * Use `create(UnmeasuredInputSchema)` to create a new message.
+ */
+export const UnmeasuredInputSchema: GenMessage<UnmeasuredInput> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_epoch, 3);
 
 /**
  * @generated from message vibesys.store.v1.Evaluator
@@ -97,7 +180,7 @@ export type Evaluator = Message<"vibesys.store.v1.Evaluator"> & {
  * Use `create(EvaluatorSchema)` to create a new message.
  */
 export const EvaluatorSchema: GenMessage<Evaluator> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_epoch, 1);
+  messageDesc(file_vibesys_store_v1_epoch, 4);
 
 /**
  * @generated from message vibesys.store.v1.Objective
@@ -119,7 +202,7 @@ export type Objective = Message<"vibesys.store.v1.Objective"> & {
  * Use `create(ObjectiveSchema)` to create a new message.
  */
 export const ObjectiveSchema: GenMessage<Objective> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_epoch, 2);
+  messageDesc(file_vibesys_store_v1_epoch, 5);
 
 /**
  * attrs_type is a fully qualified message name in EpochStarted.descriptors.
@@ -159,7 +242,7 @@ export type SpanKindDecl = Message<"vibesys.store.v1.SpanKindDecl"> & {
  * Use `create(SpanKindDeclSchema)` to create a new message.
  */
 export const SpanKindDeclSchema: GenMessage<SpanKindDecl> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_epoch, 3);
+  messageDesc(file_vibesys_store_v1_epoch, 6);
 
 /**
  * A series is declared once per epoch. NONE is for nondirectional resource data.
@@ -193,4 +276,4 @@ export type MetricSeriesDecl = Message<"vibesys.store.v1.MetricSeriesDecl"> & {
  * Use `create(MetricSeriesDeclSchema)` to create a new message.
  */
 export const MetricSeriesDeclSchema: GenMessage<MetricSeriesDecl> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_epoch, 4);
+  messageDesc(file_vibesys_store_v1_epoch, 7);

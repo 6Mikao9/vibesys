@@ -46,9 +46,9 @@ def _checkout(root: Path, version: str) -> None:
         f'[project]\nname = "vibesys"\nversion = "{version}"\n',
         encoding="utf-8",
     )
-    helper = root / "src" / "entrypoints" / "host_helper.py"
-    helper.parent.mkdir(parents=True)
-    helper.write_text("# helper\n", encoding="utf-8")
+    native = root / "src" / "entrypoints" / "host.py"
+    native.parent.mkdir(parents=True)
+    native.write_text("# host entrypoint\n", encoding="utf-8")
     (root / ".vibesys" / "tasks").mkdir(parents=True)
     git = root / ".git"
     git.mkdir()
@@ -144,3 +144,28 @@ def test_standard_pyproject_metadata_does_not_hide_a_checkout(tmp_path: Path) ->
     reply = _result(str(tmp_path))
     assert isinstance(reply, pb.InspectCandidateResponse)
     assert reply.state == pb.CandidateState.FOUND
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("helper", ["absent", "file", "directory"])
+@pytest.mark.parametrize("native", ["absent", "file", "directory"])
+def test_native_checkout_compatibility_does_not_depend_on_the_retired_helper(
+    tmp_path: Path, helper: str, native: str
+) -> None:
+    """Exhaust the entry-kind matrix, including a native checkout with no helper."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "vibesys"\nversion = "999.0.0"\n', encoding="utf-8"
+    )
+    entries = tmp_path / "src" / "entrypoints"
+    entries.mkdir(parents=True)
+    for name, kind in [("host_helper.py", helper), ("host.py", native)]:
+        path = entries / name
+        if kind == "file":
+            path.write_text("# entrypoint\n", encoding="utf-8")
+        elif kind == "directory":
+            path.mkdir()
+    response = _result(str(tmp_path))
+    assert isinstance(response, pb.InspectCandidateResponse)
+    assert response.state == pb.CandidateState.FOUND
+    assert response.identity is not None
+    assert response.identity.compatible is (native == "file")

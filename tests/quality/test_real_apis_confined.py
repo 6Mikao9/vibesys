@@ -904,7 +904,6 @@ REAL_API_EDGES: dict[Key, str] = {
     **{
         (relative, "fs_sync"): f"{_OWN_STORE}: {what}"
         for relative, what in (
-            ("libs/vs-runlog/src/vs_runlog/_file.py", "durable run.log appends"),
             ("libs/vs-runlog/src/vs_runlog/_atomic.py", "atomic head and keyframe publication"),
             ("libs/vs-runlog/src/vs_runlog/_lock.py", "the run lifetime lock"),
             ("libs/vs-project/src/vs_project/_operator_key.py", "the operator key file"),
@@ -1221,6 +1220,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.PROCESS_BOUNDARY,
         "the detached session's process output log",
     ),
+    "src/vibesys/chat/_legacy.py": (
+        EdgeKind.LOG,
+        "the one-shot import that reads the authoritative server journal into session logs",
+    ),
     "src/vibesys/chat/_session.py": (
         EdgeKind.LOG,
         "session log shell: reads the run head and its own answer blobs through Project paths",
@@ -1236,6 +1239,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "libs/vs-runlog/src/vs_runlog/_file.py": (
         EdgeKind.LOG,
         "the run.log file sink and recovery reader; framing stays in the pure _framing module",
+    ),
+    "libs/vs-runlog/src/vs_runlog/_observe.py": (
+        EdgeKind.LOG,
+        "the observation reader of run.head and the committed run.log prefix; the upgrade stays pure",
     ),
     "src/vibesys/run/runlog_conversion.py": (
         EdgeKind.LOG,
@@ -1522,7 +1529,7 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/server/event_index.py": (EdgeKind.STORE, "the event index"),
     "src/server/span_index.py": (EdgeKind.STORE, "the journal's span index"),
     "src/server/events.py": (EdgeKind.STORE, "the run's wire event log"),
-    "src/server/host_helper_compute.py": (
+    "src/server/host_compute_runtime.py": (
         EdgeKind.STORE,
         "the machine's compute settings file and the Modal and Slurm files it reads",
     ),
@@ -1535,6 +1542,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "OS adapter and project pyproject loader for the host helper",
     ),
     "src/server/registry.py": (EdgeKind.STORE, "the server instance registry"),
+    "src/server/run_digest_store.py": (
+        EdgeKind.STORE,
+        "FileProjects reads committed run heads, keyframes and their bounded log suffix",
+    ),
     "src/server/run_summary_cache.py": (
         EdgeKind.STORE,
         "the run summary's cache beside the event journal",

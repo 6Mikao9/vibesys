@@ -398,6 +398,33 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
+name = "native host read adapter selects its Python consumers"
+paths = ["src/server/host_operation_reads.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "protobuf gateway browser fixture selects its client consumers"
+paths = ["clients/apps/desktop-shell/e2e/gateway-preload.ts"]
+jobs = ["clients"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = { dependents_of = "pnpm:@vibesys/app-desktop-shell" }
+
+[[cases]]
+name = "native compute runtime selects its Python consumers"
+paths = ["src/server/host_compute_runtime.py", "src/server/host_slurm.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
 name = "facts importer selects Python verification"
 paths = ["src/vibesys/fact_import/api.py", "src/vibesys/fact_import/_accepted.py", "src/vibesys/api/importing.py", "libs/vs-project/src/vs_project/api/retained.py", "libs/vs-runtime/src/vs_runtime/api/retained.py"]
 jobs = ["python", "real_tiers"]

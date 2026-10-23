@@ -34,8 +34,7 @@ from entrypoints.example_catalog import (
     load_registry,
 )
 from server.host_api import HelperErrorCode
-from server.host_examples import CreatedProject, ExampleDestination
-from server.host_helper_requests import ProjectLookupError
+from server.host_examples import CreatedProject, ExampleDestination, ProjectLookupError
 from vs_project.api import Git
 from vs_sim.api import OsProcesses
 

@@ -16,11 +16,16 @@ export type IdeaResult = 'passed' | 'failed' | 'pending';
 /** One measured idea. */
 export interface PerformancePoint {
   readonly id: string;
+  /** Distinct samples may belong to the same idea. */
+  readonly key?: string;
+  /** A metric can exist without an idea to open. */
+  readonly unowned?: boolean;
   readonly title: string;
   /** Run-clock seconds when the idea was first measured (see `measuredAt`). */
   readonly at: number;
   readonly value: number;
   readonly result: IdeaResult;
+  readonly outcomeWord?: string;
   /** Passed and better than every passed value before it: it sits on the step line. */
   readonly best: boolean;
 }
@@ -32,6 +37,9 @@ interface BestStep {
 }
 
 export interface PerformanceFold {
+  readonly value?: number | undefined;
+  readonly input?: number | undefined;
+  readonly refusal?: string | undefined;
   /** Every measured idea, in the order measured. */
   readonly points: readonly PerformancePoint[];
   /** The best so far: one step per new best, in order, each better than the one before. */

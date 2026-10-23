@@ -4,6 +4,8 @@ import {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   HostService,
+  type Keyframe,
+  KeyframeSchema,
   RecordSchema,
   SkeletonRequestSchema,
   SkeletonResponseSchema,
@@ -33,8 +35,12 @@ interface Cursor {
 }
 
 // Match the gateway's Skeleton reserve and conservative Tail framing budget.
-function boundedRecords(records: readonly StoreRecord[], kind: 'skeleton' | 'tail'): Uint8Array[] {
-  const budget = (1 << 20) - (kind === 'skeleton' ? 32 : 16);
+function boundedRecords(
+  records: readonly StoreRecord[],
+  kind: 'skeleton' | 'tail',
+  reserved = 0,
+): Uint8Array[] {
+  const budget = (1 << 20) - (kind === 'skeleton' ? 32 : 16) - reserved;
   const batch: Uint8Array[] = [];
   let size = 0;
   for (const record of records) {
@@ -54,9 +60,11 @@ function boundedRecords(records: readonly StoreRecord[], kind: 'skeleton' | 'tai
 export class FakeRunTransport implements RunTransport {
   readonly calls: {method: string; request: Uint8Array; signal: AbortSignalLike}[] = [];
   readonly #subscribers = new Set<Subscriber>();
+  readonly #idle = new Set<() => void>();
   readonly #observations: WatchRunsResponse[] = [];
   readonly #closed = new Set<string>();
   readonly #records: StoreRecord[];
+  readonly #keyframe: Uint8Array | undefined;
   #initialCount: number;
   readonly #blobs: Readonly<Record<string, Uint8Array>>;
   readonly #streams: Readonly<Record<string, Uint8Array>>;
@@ -81,17 +89,25 @@ export class FakeRunTransport implements RunTransport {
   constructor(input: {
     records: readonly StoreRecord[];
     initialCount?: number;
+    keyframe?: Keyframe;
     blobs?: Readonly<Record<string, Uint8Array>>;
     streams?: Readonly<Record<string, Uint8Array>>;
     streamChunkBytes?: number;
   }) {
     this.#records = [...input.records];
+    this.#keyframe =
+      input.keyframe === undefined ? undefined : toBinary(KeyframeSchema, input.keyframe);
     this.#initialCount = input.initialCount ?? input.records.length;
     this.#blobs = input.blobs ?? {};
     this.#streams = input.streams ?? {};
     this.#streamChunkBytes = input.streamChunkBytes ?? 65536;
     if (!Number.isSafeInteger(this.#streamChunkBytes) || this.#streamChunkBytes < 1)
       throw new Error('streamChunkBytes must be a positive safe integer');
+  }
+  /** Resolves when every owned iterator has acknowledged cancellation or its end. */
+  whenIdle(): Promise<void> {
+    if (this.#subscribers.size === 0) return Promise.resolve();
+    return new Promise(resolve => this.#idle.add(resolve));
   }
   get activeStreams(): number {
     return this.#subscribers.size;
@@ -127,17 +143,7 @@ export class FakeRunTransport implements RunTransport {
     if (method === `${SERVICE}Skeleton`) {
       const input = fromBinary(SkeletonRequestSchema, request);
       if (!input.runId) throw new Error('run_id required');
-      const records = boundedRecords(this.#records.slice(0, this.#initialCount), 'skeleton');
-      const last = this.#records[records.length - 1];
-      return toBinary(
-        SkeletonResponseSchema,
-        create(SkeletonResponseSchema, {
-          records,
-          committedSeq: this.#records.at(-1)?.seq ?? 0n,
-          nextSeq: last ? last.seq + 1n : (this.#records[0]?.seq ?? 1n),
-          complete: records.length === this.#records.length,
-        }),
-      );
+      return this.skeletonReply();
     }
     if (method === `${SERVICE}GetBlobs`) {
       const input = fromBinary(GetBlobsRequestSchema, request);
@@ -156,6 +162,33 @@ export class FakeRunTransport implements RunTransport {
     }
     throw new Error(`Unknown unary method ${method}`);
   }
+  private skeletonReply(): Uint8Array {
+    const keyframe =
+      this.#keyframe !== undefined && this.#keyframe.length + 32 < 1 << 20
+        ? this.#keyframe
+        : undefined;
+    const through = keyframe === undefined ? -1n : fromBinary(KeyframeSchema, keyframe).throughSeq;
+    const pending = this.#records
+      .slice(0, this.#initialCount)
+      .filter(record => record.seq > through);
+    const records = boundedRecords(pending, 'skeleton', keyframe?.length ?? 0);
+    const last = pending[records.length - 1];
+    return toBinary(
+      SkeletonResponseSchema,
+      create(SkeletonResponseSchema, {
+        ...(keyframe === undefined ? {} : {keyframe}),
+        records,
+        committedSeq: this.#records.at(-1)?.seq ?? 0n,
+        nextSeq: last
+          ? last.seq + 1n
+          : keyframe === undefined
+            ? (this.#records[0]?.seq ?? 1n)
+            : through + 1n,
+        complete: (last?.seq ?? through) === (this.#records.at(-1)?.seq ?? -1n),
+      }),
+    );
+  }
+
   async *stream(
     method: string,
     request: Uint8Array,
@@ -191,6 +224,10 @@ export class FakeRunTransport implements RunTransport {
     } finally {
       registration.detach();
       this.#subscribers.delete(subscriber);
+      if (this.#subscribers.size === 0) {
+        for (const resolve of this.#idle) resolve();
+        this.#idle.clear();
+      }
     }
   }
   private cursor(method: string, request: Uint8Array) {
@@ -209,6 +246,7 @@ export class FakeRunTransport implements RunTransport {
     } else if (method !== `${SERVICE}WatchRuns`) throw new Error(`Unknown stream method ${method}`);
     const current = new Map<string, WatchRunsResponse>();
     for (const response of this.#observations) {
+      if (response.heartbeat || response.initialComplete) continue;
       if (response.removed) current.delete(response.runId);
       else current.set(response.runId, response);
     }
@@ -283,3 +321,5 @@ export class FakeRunTransport implements RunTransport {
     });
   }
 }
+
+export * from './sim-gateway.js';

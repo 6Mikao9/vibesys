@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
+	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -55,5 +57,27 @@ func TestWatchForwardsTheLoginResponse(t *testing.T) {
 	}
 	if stream.sent[0].GetLogin().GetStarted().GetInstruction() != "Open https://a.example/x" {
 		t.Fatalf("instruction %q", stream.sent[0].GetLogin().GetStarted().GetInstruction())
+	}
+}
+
+func TestWatchDeadlineNamesTheCommandAndItsBudget(t *testing.T) {
+	service := &host{config: Config{Root: t.TempDir(), HostRunner: hostcommand.FakeRunner{Program: func(context.Context, hostcommand.Command) (hostcommand.Result, error) {
+		return hostcommand.Result{ExitCode: -1}, context.DeadlineExceeded
+	}}}}
+	stream := &watchStream{ctx: context.Background()}
+	request := &apiv1.WatchRequest{
+		Checkout: "/checkout",
+		Method:   &apiv1.WatchRequest_Login{Login: &hostv1.LoginRequest{RequestId: "request-a", Provider: "claude"}},
+	}
+	if err := service.Watch(request, stream); err != nil {
+		t.Fatal(err)
+	}
+	dispatched, _ := hostoperations.DispatchHostWatch(request)
+	want := deadlineMessage("watch", dispatched.CLI, dispatched.Deadline)
+	if len(stream.sent) != 1 || stream.sent[0].GetFailure().GetMessage() != want {
+		t.Fatalf("sent %+v, want %q", stream.sent, want)
+	}
+	if !strings.Contains(want, dispatched.CLI) || !strings.Contains(want, "after") {
+		t.Fatalf("the message %q names no command or budget", want)
 	}
 }

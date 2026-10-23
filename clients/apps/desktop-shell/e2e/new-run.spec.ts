@@ -6,14 +6,17 @@ import {
   exampleCatalogue,
   exampleCatalogueWithoutDetails,
   queueRsCatalogue,
+  storeRunFixture,
 } from '@vibesys/run-fixtures';
 import {rawTextOf} from './checks/screen-check.js';
+import {settled} from './checks/settle.js';
 import {
   installFakeBridge,
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
 } from './fake-bridge.js';
+import {installGateway, wire} from './fake-gateway.js';
 import {installFakeRun} from './fake-run.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {choose, main, NEW_RUN_PAGES, openAt, proceed, question, steps} from './new-run-flow.js';
@@ -330,6 +333,8 @@ for (const {width, height} of WINDOWS) {
     const nexts: unknown[] = [];
     for (const name of ['start', 'domain', 'model', 'review']) {
       await openAt(page, pageNamed(name), seed);
+      // Geometry is meaningful after font swapping and the rendered layout have settled.
+      await settled(page);
       expect(page.viewportSize()).toEqual({width, height});
       const forward = name === 'review' ? 'Start run' : 'Continue';
       const hasBack = name !== 'start';
@@ -654,6 +659,8 @@ test('Run again opens Review with the run as it was started', async ({page}) => 
     initScript(installFakeNewRun, seed),
     initScript(installFakeRun, {streams: [], text: {}}),
   ]);
+  // A recent run is a finished one: the page offers Run again.
+  await installGateway(page, wire(storeRunFixture('short')));
   await page.goto('./shell.html');
   await page
     .getByRole('main')

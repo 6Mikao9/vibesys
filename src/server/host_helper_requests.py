@@ -5,22 +5,22 @@ which calls :func:`answer`, or :func:`connect` for ``run.connect``. Each request
 reads the registry, the project, or the filesystem afresh through
 :class:`HelperHost`, so answering keeps no state between requests. The pure
 decisions it needs (:func:`negotiate`, :func:`select_completions`,
-:func:`run_summaries`, :func:`event_page`, :func:`launch_arguments`,
+:func:`event_page`, :func:`launch_arguments`,
 :func:`refused_argument`, :func:`unvetted_harness`) are public so they can be tested on their own.
 
 Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
 
-Public surface: ``answer``, ``answer_registered_read``, ``apply_registered_cluster``,
-``RegisteredClusterHost``, ``apply_registered_project``, ``RegisteredProjectHost``,
+The reads of a project's runs (``ProjectRun``, ``run_summaries``, ``project_runs``,
+``usage_window_reply``) are ``server.host_run_reads``', shared with the registered reads.
+
+Public surface: ``answer``, ``apply_registered_project``, ``RegisteredProjectHost``,
 ``launch_registered_run``, ``registry_start_request``,
-``read_failure_category``,
 ``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
-``HelperHost``; the interfaces ``Projects``, ``Directories``, ``ClusterCompute``,
+``HelperHost``; the interfaces ``Projects``, ``Directories``,
 ``ProjectMutationExamples``, ``ProjectMutationDirectories``, ``RunLauncher`` and
-``CheckoutProbe`` with the values they exchange (``ProjectRun``,
-``ProjectLookupError``, ``ScannedEntry``, ``Scan``, ``PathHints``);
-``home_relative``, ``without_home``, ``complete_path``, ``select_completions``, ``split_prefix``, ``run_summaries``,
+``CheckoutProbe`` with the values they exchange (``ScannedEntry``, ``Scan``, ``PathHints``);
+``home_relative``, ``without_home``, ``complete_path``, ``select_completions``, ``split_prefix``,
 ``event_page``, ``EventPage``, ``SpanEventPage``, ``TailPage``,
 ``launch_arguments``, ``refused_argument``, ``unvetted_harness``; and the limit
 ``SCAN_LIMIT``.
@@ -48,8 +48,6 @@ from server.host_api import (
     RUN_ENVIRONMENT_FLAG,
     SLURM_CONFIG_FLAG,
     UNVETTED_MODEL_FLAG,
-    AgentLoginsListReply,
-    AgentLoginsListRequest,
     AgentLoginsStartReply,
     AgentLoginsStartRequest,
     Checkout,
@@ -96,7 +94,6 @@ from server.host_api import (
     RunConnectReply,
     RunConnectRequest,
     RunDigest,
-    RunList,
     RunPreflightReply,
     RunPreflightRequest,
     RunsListReply,
@@ -107,18 +104,15 @@ from server.host_api import (
     RunStartRequest,
     RunStopReply,
     RunStopRequest,
-    RunSummary,
 )
 from server.host_compute import (
-    ClusterTestResult,
-    ComputeSettings,
+    ComputeError,
     MeasurementTarget,
     ModalTarget,
     SameMachine,
-    SlurmClusterSettings,
     SlurmTarget,
 )
-from server.host_helper_compute import ComputeError, MachineCompute
+from server.host_examples import ProjectLookupError
 from server.host_helper_logs import HelperLogs, ReadWithdrawal, list_logs, read_log
 from server.host_helper_preflight import (
     PreflightFacts,
@@ -140,7 +134,6 @@ from server.host_machine_facts import (
     MachineDescription,
     RunCounts,
 )
-from server.host_run_dashboard import IdeaVerdict
 from server.host_run_events import (
     RunEventDocument,
     RunEventKinds,
@@ -159,7 +152,6 @@ from server.relay import (
     ChannelEndOutcome,
     dial,
 )
-from server.run_digest import run_attention
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
@@ -172,6 +164,7 @@ if TYPE_CHECKING:
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
     from server.host_api import HarnessChoice, RunDigestUnreadable
     from server.host_compute import MeasurementTarget
+    from server.host_compute_runtime import MachineCompute
     from server.host_examples import (
         CreatedProject,
         ExampleDestination,
@@ -180,13 +173,13 @@ if TYPE_CHECKING:
         TaskList,
     )
     from server.host_helper_readers import Readers
+    from server.host_operation_reads import HostReadSource
     from server.host_operation_types_generated import RegistryReadRequest, UnmigratedHelperRequest
     from server.host_preflight import PreflightReport, RoleOption, RunOptions
+    from server.host_run_reads import ProjectRun
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
-    from server.usage_window import RunUsage
     from vs_project.api import OperatorDialer
-    from vs_proto.api import FailureCategory
     from vs_proto.api import host_payloads as pb
     from vs_sim.api import Clock, Connection
 
@@ -228,26 +221,6 @@ def negotiate(
         version=version,
         features=frozenset(known[name] for name in request.features if name in known),
     )
-
-
-@dataclass(frozen=True)
-class ProjectRun:
-    """One run a project's durable state records."""
-
-    run_id: str
-    task: str | None
-    display_name: str
-    created_at: datetime
-
-
-class ProjectLookupError(Exception):
-    """A project's tasks or runs could not be read; ``code`` says why and ``path`` where."""
-
-    def __init__(self, code: HelperErrorCode, path: str, message: str) -> None:
-        """Name the failure ``code`` for ``path``; ``message`` is for a person."""
-        super().__init__(message)
-        self.code = code
-        self.path = path
 
 
 class Projects(Protocol):
@@ -616,49 +589,6 @@ def _path_error(
     )
 
 
-def run_summaries(
-    root: Path,
-    runs: Iterable[ProjectRun],
-    listing: InstanceList,
-    digests: Mapping[str, RunDigest | RunDigestUnreadable] | None = None,
-    *,
-    now: float | None = None,
-) -> RunList:
-    """Join a project's runs with this host's registry: each run's server and its phase.
-
-    A live server outranks a tombstone; among tombstones the latest ended wins. A run's
-    ``digest`` is the one ``digests`` holds for it, if any. With ``now`` (epoch seconds), each
-    run whose digest carries a dashboard also gets its ``attention`` as of ``now``.
-    """
-    project_root = str(root)
-    live = {
-        record.run_id: record for record in listing.instances if record.project_root == project_root
-    }
-    ended: dict[str, LiveInstanceRecord] = {}
-    for record in sorted(listing.ended, key=lambda record: record.ended_at or 0.0):
-        if record.project_root == project_root:
-            ended[record.run_id] = record
-    summaries = []
-    for run in runs:
-        server = live.get(run.run_id) or ended.get(run.run_id)
-        digest = None if digests is None else digests.get(run.run_id)
-        phase = None if server is None else server.phase
-        judged = isinstance(digest, RunDigest) and digest.dashboard is not None and now is not None
-        summaries.append(
-            RunSummary(
-                run_id=run.run_id,
-                task=run.task,
-                display_name=run.display_name,
-                created_at=run.created_at,
-                phase=phase,
-                instance_id=None if run.run_id not in live else live[run.run_id].id,
-                digest=digest,
-                attention=run_attention(digest, phase=phase, now=now) if judged else None,
-            )
-        )
-    return RunList(project_root=project_root, runs=tuple(summaries))
-
-
 @dataclass(frozen=True)
 class EventPage:
     """One page of recorded events and where the next page starts."""
@@ -903,9 +833,7 @@ def answer(
         if is_registry_read(request):
             return read_reply(
                 request,
-                HelperReadSource(
-                    host, request, describe=describe_machine, preflight=_preflight_facts
-                ),
+                registry_read_source(host, request),
             )
         return _answer(request, host, withdrawal)
     except (ProjectLookupError, ComputeError) as error:
@@ -957,7 +885,6 @@ def _answer(
             | ComputeTestClusterRequest()
             | ComputeAddClusterRequest()
             | ComputeRemoveClusterRequest()
-            | AgentLoginsListRequest()
             | AgentLoginsStartRequest()
         ):
             reply = _machine_reply(request, host)
@@ -984,39 +911,17 @@ def _answer(
 def _project_reply(request: RunsListRequest, host: HelperHost) -> RunsListReply:
     """Answer a project's saved-run listing."""
     project = Path(_host_path(request.project, host.directories))
-    match request:
-        case RunsListRequest(
-            request_id=request_id, digest_runs=digest_runs, with_dashboard=with_dashboard
-        ):
-            root, runs = host.projects.runs(project)
-            known = {run.run_id for run in runs}
-            digests = {
-                run_id: digest
-                for run_id in dict.fromkeys(digest_runs or ())
-                if run_id in known
-                and (digest := host.projects.run_digest(root, run_id)) is not None
-            }
-            if not with_dashboard:
-                digests = {
-                    run_id: digest.model_copy(update={"dashboard": None})
-                    if isinstance(digest, RunDigest)
-                    else digest
-                    for run_id, digest in digests.items()
-                }
-            now = host.clock.now()
-            summaries = run_summaries(
-                root, runs, host.registry.list(), digests, now=now if with_dashboard else None
-            )
-            return RunsListReply(request_id=request_id, runs=summaries)
+    runs = import_module("server.host_run_reads").project_runs(
+        host, project, request.digest_runs or (), with_dashboard=bool(request.with_dashboard)
+    )
+    return RunsListReply(request_id=request.request_id, runs=runs)
 
 
 def _logins_reply(
-    request: AgentLoginsListRequest | AgentLoginsStartRequest, logins: AgentLogins
-) -> AgentLoginsListReply | AgentLoginsStartReply | HelperError:
+    request: AgentLoginsStartRequest, logins: AgentLogins
+) -> AgentLoginsStartReply | HelperError:
     """Answer one read of the harnesses' logins, or a request to start one."""
     request_id = request.request_id
-    if isinstance(request, AgentLoginsListRequest):
-        return AgentLoginsListReply(request_id=request_id, logins=logins.list())
     if request.provider not in logins.providers():
         message = f"this host offers no harness for provider {request.provider!r}"
         return _error(request_id, HelperErrorCode.UNKNOWN_PROVIDER, message)
@@ -1064,13 +969,12 @@ def _machine_reply(
     | ComputeTestClusterRequest
     | ComputeAddClusterRequest
     | ComputeRemoveClusterRequest
-    | AgentLoginsListRequest
     | AgentLoginsStartRequest,
     host: HelperHost,
 ) -> HelperReply | HelperError:
     """Answer what this machine offers, what a path on it holds, or make a project on it."""
     match request:
-        case AgentLoginsListRequest() | AgentLoginsStartRequest():
+        case AgentLoginsStartRequest():
             return _logins_reply(request, host.logins)
         case (
             ComputeTestClusterRequest() | ComputeAddClusterRequest() | ComputeRemoveClusterRequest()
@@ -1154,7 +1058,9 @@ def _run_history_reply(
     if isinstance(request, RunsSummaryRequest):
         return _run_summary_reply(request, host)
     if isinstance(request, UsageWindowRequest):
-        return _usage_window_reply(request, host)
+        return import_module("server.host_run_reads").usage_window_reply(
+            request, host, Path(_host_path(request.project, host.directories))
+        )
     project = Path(_host_path(request.project, host.directories))
     if isinstance(request, RunsEventsForSpanRequest):
         span_page = host.projects.run_span_events(
@@ -1178,42 +1084,6 @@ def _run_history_reply(
             last_sequence=tail.last_sequence,
         )
     return _run_events_reply(request, host)
-
-
-def _usage_window_reply(request: UsageWindowRequest, host: HelperHost) -> UsageWindowReply:
-    """Answer what the named runs spent in the window, from each run's usage records.
-
-    A run's records are its summary's (``Projects.run_summary``, the cache beside the journal) and
-    its bests are the kept points of its digest, so each run costs a cache read and what its journal
-    gained since. A run the project does not have, or whose journal this machine does not hold, is
-    ``missing``.
-    """
-    # lint-waiver: LW-271612 [PLC0415]; the helper answers hello without loading the aggregation.
-    # > `server.usage_window` is a module the helper's start-up budget
-    # > (`tests/e2e/test_host_helper.py`) has no room for, and only a `usage.window` request needs
-    # > it; the request and reply messages stay with the other messages so `host_api` can name them.
-    from server.usage_window import RunUsage, usage_window  # noqa: PLC0415
-
-    project = Path(_host_path(request.project, host.directories))
-    root, known = host.projects.runs(project)
-    tasks = {run.run_id: run.task for run in known}
-    found: list[RunUsage] = []
-    missing: list[str] = []
-    for run_id in dict.fromkeys(request.run_ids):
-        try:
-            records = host.projects.run_summary(project, run_id).fold.records
-        except ProjectLookupError as error:
-            if error.code is not HelperErrorCode.UNKNOWN_RUN:
-                raise
-            missing.append(run_id)
-            continue
-        digest = host.projects.run_digest(root, run_id)
-        points = (
-            digest.dashboard.points if isinstance(digest, RunDigest) and digest.dashboard else ()
-        )
-        bests = [point.at for point in points if point.verdict is IdeaVerdict.KEPT and point.at]
-        found.append(RunUsage(run_id, tasks.get(run_id), records, bests))
-    return usage_window(request, found, missing)
 
 
 def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSummaryReply:
@@ -1473,141 +1343,14 @@ def _error(request_id: str | None, code: HelperErrorCode, message: str) -> Helpe
 _REPLY: TypeAdapter[HelperReply] = TypeAdapter(HelperReply)
 
 
-class _ReadRefusedError(Exception):
-    def __init__(self, refusal: HelperError) -> None:
-        self.refusal = refusal
-        super().__init__(refusal.message)
-
-
-class HelperReadSource:
-    """Translate existing host I/O results at the adapter boundary only."""
-
-    def __init__(
-        self,
-        host: HelperHost,
-        legacy_request: HelperRequest | None,
-        *,
-        describe: Callable[[HelperHost], MachineDescription],
-        preflight: Callable[[RunPreflightRequest, HelperHost], RunPreflightReply | HelperError],
-    ) -> None:
-        """Bind host I/O and the existing machine/preflight probe adapters."""
-        self._host = host
-        self._legacy_request = legacy_request
-        self._describe = describe
-        self._preflight = preflight
-
-    def _path(self, text: str) -> Path:
-        expanded = Path(self._host.directories.expand(text))
-        return (
-            expanded if expanded.is_absolute() else Path(self._host.directories.home()) / expanded
-        )
-
-    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        """Read native discovery through the existing project catalog owner."""
-        request = type(request).from_binary(request.to_binary())
-        request.project = str(self._path(request.project))
-        return self._host.projects.saved_runs(request)
-
-    def tasks(self, project: str) -> pb.TaskList:
-        """Read through the existing project's task owner."""
-        return _wire().from_mapping(
-            _wire().host_payloads.TaskList,
-            self._host.projects.tasks(self._path(project)).model_dump(mode="json"),
-        )
-
-    def harnesses(self) -> list[pb.HarnessOption]:
-        """Project vetted harness facts; ordering belongs to the product handler."""
-        return [
-            _wire().from_mapping(
-                _wire().host_payloads.HarnessOption, option.model_dump(mode="json")
-            )
-            for option in self._host.harnesses()
-        ]
-
-    def installed_harnesses(self) -> tuple[str, ...]:
-        """Observe the installed providers once for display ordering."""
-        return self._host.machine.harness_clis()
-
-    def inspect_destination(self, example: str, destination: str) -> pb.InspectDestinationResponse:
-        """What creating ``example`` would find at ``destination``."""
-        models = import_module("server.host_examples")
-        state, project = self._host.examples.destination(
-            example, Path(_host_path(destination, self._host.directories))
-        )
-        payloads = _wire().host_payloads
-        states = {
-            models.ExampleDestination.ABSENT: payloads.DestinationState.ABSENT,
-            models.ExampleDestination.EMPTY: payloads.DestinationState.EMPTY,
-            models.ExampleDestination.EXAMPLE_PROJECT: payloads.DestinationState.EXAMPLE_PROJECT,
-            models.ExampleDestination.OCCUPIED: payloads.DestinationState.OCCUPIED,
-        }
-        return payloads.InspectDestinationResponse(
-            state=states[state],
-            **({} if project is None else {"project": project}),
-        )
-
-    def examples(self, *, with_catalogue: bool) -> pb.ExampleList:
-        """Project the checkout owner's example metadata without dropping details."""
-        return _wire().from_mapping(
-            _wire().host_payloads.ExampleList,
-            self._host.examples.list(with_catalogue=with_catalogue).model_dump(mode="json"),
-        )
-
-    def task_goal(self, project: str, task: str) -> pb.TaskGoal:
-        """Read the bounded authored task goal."""
-        return _wire().from_mapping(
-            _wire().host_payloads.TaskGoal,
-            self._host.projects.task_goal(self._path(project), task).model_dump(mode="json"),
-        )
-
-    def machine(self) -> pb.MachineDescription:
-        """Project the current machine probe snapshot."""
-        return _wire().from_mapping(
-            _wire().host_payloads.MachineDescription,
-            self._describe(self._host).model_dump(mode="json"),
-        )
-
-    def compute(self) -> pb.ComputeSettings:
-        """Project source-aware settings; this operation performs no mutation."""
-        return _wire().from_mapping(
-            _wire().host_payloads.ComputeSettings,
-            self._host.compute.settings().model_dump(mode="json"),
-        )
-
-    def preflight(self, request: pb.PreflightRunRequest) -> pb.PreflightRunResponse:
-        """Revalidate the temporary legacy projection before invoking its probe owner."""
-        payload = _wire().to_mapping(request)
-        # Legacy diagnostics choose the first role in insertion order. Protobuf
-        # maps have no ordering, so retain only that display preference here.
-        if (
-            isinstance(self._legacy_request, RunPreflightRequest)
-            and self._legacy_request.agents is not None
-        ):
-            agents = payload["agents"]
-            if not isinstance(agents, dict):
-                message = "agents: expected a projected role mapping"
-                raise TypeError(message)
-            payload["agents"] = {role: agents[role] for role in self._legacy_request.agents}
-        legacy = RunPreflightRequest.model_validate(
-            {**payload, "deadline_ms": _wire().host_operations.PreflightRun.total_ms}
-        )
-        result = self._preflight(legacy, self._host)
-        if isinstance(result, HelperError):
-            raise _ReadRefusedError(result)
-        return _wire().from_mapping(
-            _wire().host_payloads.PreflightRunResponse,
-            result.model_dump(mode="json", exclude={"type"}),
-        )
-
-
-def read_reply(request: HelperRequest, source: HelperReadSource) -> HelperReply | HelperError:
+def read_reply(request: HelperRequest, source: HostReadSource) -> HelperReply | HelperError:
     """Execute a registered helper read; pairing and routing come from descriptors."""
     operation = _wire().host_operations.ADAPTER_OPERATIONS[request.type]
     payload = request.model_dump(mode="json", exclude={"type", "deadline_ms"})
     accepted = operation.accept(_wire().from_mapping(operation.request, payload))
     try:
         encoded = import_module("vibesys.api.host_operations.api").execute_read(accepted, source)
-    except _ReadRefusedError as error:
+    except import_module("server.host_operation_reads").ReadRefusedError as error:
         return error.refusal
     response = operation.response.from_binary(encoded)
     return _REPLY.validate_python({"type": request.type, **_wire().to_mapping(response)})
@@ -1618,78 +1361,19 @@ def _wire() -> ModuleType:
     return import_module("vs_proto.api")
 
 
-def registry_read_source(host: HelperHost) -> HelperReadSource:
-    """Temporary adapter owned by PR4, shared by the helper channel and ``vibesys host``.
-
-    A registry read has no legacy JSON request, so preflight keeps protobuf map order.
-    """
-    return HelperReadSource(host, None, describe=describe_machine, preflight=_preflight_facts)
-
-
-def read_failure_category(code: HelperErrorCode) -> FailureCategory:
-    """Map one helper refusal onto the closed failure category.
-
-    Callers branch on the category. ``CLUSTER_READ_ONLY`` is permission denied:
-    the file's owner is not this helper.
-    """
-    failure = _wire().FailureCategory
-    categories = {
-        HelperErrorCode.INVALID_REQUEST: failure.INVALID_INPUT,
-        HelperErrorCode.TASK_INVALID: failure.INVALID_INPUT,
-        HelperErrorCode.PATH_NOT_DIRECTORY: failure.INVALID_INPUT,
-        HelperErrorCode.UNVETTED_HARNESS: failure.INVALID_INPUT,
-        HelperErrorCode.CLUSTER_INVALID: failure.INVALID_INPUT,
-        HelperErrorCode.INCOMPATIBLE: failure.CONFIGURATION,
-        HelperErrorCode.EXAMPLES_UNAVAILABLE: failure.CONFIGURATION,
-        HelperErrorCode.COMPUTE_CONFIG_UNREADABLE: failure.CONFIGURATION,
-        HelperErrorCode.MODAL_NOT_CONFIGURED: failure.CONFIGURATION,
-        HelperErrorCode.DUPLICATE_REQUEST_ID: failure.CONFLICT,
-        HelperErrorCode.DESTINATION_EXISTS: failure.CONFLICT,
-        HelperErrorCode.DESTINATION_NESTED: failure.CONFLICT,
-        HelperErrorCode.NOT_NESTED: failure.CONFLICT,
-        HelperErrorCode.CLUSTER_EXISTS: failure.CONFLICT,
-        HelperErrorCode.UNKNOWN_WATCH: failure.NOT_FOUND,
-        HelperErrorCode.PROJECT_MISSING: failure.NOT_FOUND,
-        HelperErrorCode.PROJECT_UNINITIALIZED: failure.NOT_FOUND,
-        HelperErrorCode.PATH_MISSING: failure.NOT_FOUND,
-        HelperErrorCode.RUN_GONE: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_INSTANCE: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_LOG_STREAM: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_EXAMPLE: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_RUN: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_CLUSTER: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_PROVIDER: failure.NOT_FOUND,
-        HelperErrorCode.PERMISSION_DENIED: failure.PERMISSION_DENIED,
-        HelperErrorCode.CONNECT_DENIED: failure.PERMISSION_DENIED,
-        HelperErrorCode.CLUSTER_READ_ONLY: failure.PERMISSION_DENIED,
-        HelperErrorCode.HANDSHAKE_REQUIRED: failure.UNSUPPORTED,
-        HelperErrorCode.FEATURE_NOT_NEGOTIATED: failure.UNSUPPORTED,
-        HelperErrorCode.CHANNEL_BUSY: failure.RESOURCE_EXHAUSTED,
-        HelperErrorCode.CONNECT_FAILED: failure.TRANSIENT,
-        HelperErrorCode.DEADLINE_EXCEEDED: failure.DEADLINE_EXCEEDED,
-        HelperErrorCode.LOG_STORE_CORRUPT: failure.INTERNAL,
-        HelperErrorCode.PROJECT_CREATE_FAILED: failure.INTERNAL,
-        HelperErrorCode.CLUSTER_TEST_FAILED: failure.INTERNAL,
-        HelperErrorCode.READER_FAILED: failure.INTERNAL,
-        HelperErrorCode.INTERNAL: failure.INTERNAL,
-    }
-    found = categories.get(code)
-    if found is None:
-        message = f"unmapped helper code {code}"
-        raise ValueError(message)
-    return found
-
-
-def answer_registered_read(cli: str, payload: bytes, host: HelperHost) -> bytes:
-    """Run one registered read for ``vibesys host`` and return the envelope bytes."""
-    operations = import_module("vibesys.api.host_operations.api")
-    try:
-        return operations.execute_host_read(payload, registry_read_source(host), cli=cli)
-    except _ReadRefusedError as error:
-        category = read_failure_category(error.refusal.code)
-        return operations.host_read_failure(category, error.refusal.message)
-    except (ProjectLookupError, ComputeError) as error:
-        return operations.host_read_failure(read_failure_category(error.code), str(error))
+def registry_read_source(host: HelperHost, request: HelperRequest | None = None) -> HostReadSource:
+    """Bind shared read facts; preserve only a legacy request's role display order."""
+    role_order = (
+        tuple(request.agents)
+        if isinstance(request, RunPreflightRequest) and request.agents is not None
+        else None
+    )
+    return import_module("server.host_operation_reads").HostReadSource(
+        host,
+        role_order,
+        describe=lambda: describe_machine(host),
+        preflight=lambda value: _preflight_facts(value, host),
+    )
 
 
 def launch_registered_run(
@@ -1697,125 +1381,6 @@ def launch_registered_run(
 ) -> RunStartReply | HelperError:
     """Launch one already-admitted start through the helper's launcher."""
     return _start(request, host)
-
-
-class ClusterCompute(Protocol):
-    """The cluster changes one registered mutation asks of a host."""
-
-    def add(self, cluster: SlurmClusterSettings) -> ComputeSettings:
-        """Save ``cluster`` and return the machine's settings."""
-        ...
-
-    def remove(self, name: str) -> ComputeSettings:
-        """Forget the cluster ``name`` and return the machine's settings."""
-        ...
-
-    def test(self, cluster: SlurmClusterSettings) -> ClusterTestResult:
-        """How far ``cluster`` can be used from this machine."""
-        ...
-
-
-class RegisteredClusterHost(Protocol):
-    """A host whose compute surface can put, remove, or test one cluster."""
-
-    @property
-    def compute(self) -> ClusterCompute:
-        """The machine's clusters."""
-        ...
-
-
-@overload
-def apply_registered_cluster(
-    slot: Literal["remove_cluster"],
-    request: pb.RemoveClusterRequest,
-    host: RegisteredClusterHost,
-) -> pb.RemoveClusterResponse: ...
-
-
-@overload
-def apply_registered_cluster(
-    slot: Literal["put_cluster"],
-    request: pb.PutClusterRequest,
-    host: RegisteredClusterHost,
-) -> pb.PutClusterResponse: ...
-
-
-@overload
-def apply_registered_cluster(
-    slot: Literal["test_cluster"],
-    request: pb.TestClusterRequest,
-    host: RegisteredClusterHost,
-) -> pb.TestClusterResponse: ...
-
-
-@overload
-def apply_registered_cluster(
-    slot: str,
-    request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
-    host: RegisteredClusterHost,
-) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse: ...
-
-
-def apply_registered_cluster(
-    slot: str,
-    request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
-    host: RegisteredClusterHost,
-) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse:
-    """Change or test one cluster and return that slot's registry response.
-
-    ``ComputeError`` and ``ValueError`` stay with the caller, which stores a refusal.
-    """
-    wire = _wire()
-    payloads = wire.host_payloads
-    if slot == "remove_cluster" and isinstance(request, payloads.RemoveClusterRequest):
-        settings = host.compute.remove(request.name)
-        return payloads.RemoveClusterResponse(
-            request_id=request.request_id, settings=_registry_settings(settings)
-        )
-    if slot == "put_cluster" and isinstance(request, payloads.PutClusterRequest):
-        saved = host.compute.add(_registry_cluster(request.cluster))
-        return payloads.PutClusterResponse(
-            request_id=request.request_id, settings=_registry_settings(saved)
-        )
-    if slot == "test_cluster" and isinstance(request, payloads.TestClusterRequest):
-        found = host.compute.test(_registry_cluster(request.cluster))
-        return payloads.TestClusterResponse(
-            request_id=request.request_id, result=_registry_test(found)
-        )
-    message = f"cluster slot {slot} does not match its request"
-    raise ValueError(message)
-
-
-def _registry_cluster(cluster: pb.SlurmClusterSettings | None) -> SlurmClusterSettings:
-    if cluster is None:
-        message = "cluster is required"
-        raise ValueError(message)
-    model = import_module("server.host_compute").SlurmClusterSettings
-    return model.model_validate(_wire().to_mapping(cluster))
-
-
-def _registry_settings(settings: ComputeSettings) -> pb.ComputeSettings:
-    wire = _wire()
-    return wire.from_mapping(wire.host_payloads.ComputeSettings, settings.model_dump(mode="json"))
-
-
-def _registry_test(result: ClusterTestResult) -> object:
-    models = import_module("server.host_compute")
-    wire = _wire()
-    payloads = wire.host_payloads
-    if isinstance(result, models.ClusterTestPassed):
-        hardware = wire.from_mapping(
-            payloads.ClusterHardware, result.hardware.model_dump(mode="json")
-        )
-        passed = payloads.ClusterTestPassed(hardware=hardware, partitions=list(result.partitions))
-        return wire.Oneof("passed", passed)
-    stages = {
-        models.ClusterTestStage.REACH: payloads.ClusterTestStage.REACH,
-        models.ClusterTestStage.SCHEDULER: payloads.ClusterTestStage.SCHEDULER,
-        models.ClusterTestStage.WORKSPACE: payloads.ClusterTestStage.WORKSPACE,
-    }
-    failed = payloads.ClusterTestFailed(stage=stages[result.stage], detail=result.detail)
-    return wire.Oneof("failed", failed)
 
 
 class ProjectMutationExamples(Protocol):

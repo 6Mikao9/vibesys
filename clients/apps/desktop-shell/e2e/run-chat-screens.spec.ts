@@ -2,13 +2,16 @@ import {mkdirSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import type {RunEvent} from '@vibesys/contracts';
 import {fixtureNamed} from '@vibesys/run-fixtures';
+import {Controls, type Step} from './chat-controls.js';
+import {emitChat} from './chat-events.js';
 import {screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {openFixture, playLive} from './fixture-world.js';
 
 /**
- * The run chat's panel on a live run, with no backend: the chat events come from the fake run
- * server as wire events and the sends are answered by it. Each screen passes the layout and
+ * The run chat's panel on a live run, with no backend: the chat is a session log the fake gateway
+ * serves, the sends are answered by it, and what the run does with a steer is appended to the run
+ * log as the records the run would write. Each screen passes the layout and
  * wording checks: the panel closed and open at 1440, 1000 and 660 px; a streaming answer; a
  * proposed steer, edited; every state a sent steer can be in; a standing steer with Withdraw; the
  * harness picker; and an empty thread. `SCREENS_DIR=<dir>` writes each screen's screenshot
@@ -21,10 +24,6 @@ if (shots !== undefined) mkdirSync(shots, {recursive: true});
 
 const THREAD = 'thread-a';
 const CHAT = {agent_kind: 'chat', round_label: 'experiment-chat', chat_thread_id: THREAD} as const;
-
-interface FixtureWindow extends Window {
-  fakeHost: {emit(events: readonly unknown[]): void; controls: {control_id?: string}[]};
-}
 
 /** A wire event of the chat's: the envelope the fake run server streams, with the caller's fields. */
 function event(sequence: number, type: string, fields: object = {}): RunEvent {
@@ -76,14 +75,6 @@ function proposed(sequence: number): RunEvent {
   });
 }
 
-function delivery(sequence: number, controlId: string, step: Record<string, unknown>): RunEvent {
-  return {
-    ...event(sequence, 'run_status_changed'),
-    type: 'steer_delivery',
-    data: {kind: 'steer_delivery', delivery: {control_id: controlId, ...step}},
-  } as unknown as RunEvent;
-}
-
 const ANSWER = [
   'The best idea so far is the lock-free ring with per-slot sequence numbers, at **1.18×** the input.',
   '',
@@ -109,19 +100,19 @@ function conversation(from: number): readonly RunEvent[] {
 }
 
 async function emit(page: Page, events: readonly RunEvent[]): Promise<void> {
-  await page.evaluate(
-    batch => (window as unknown as FixtureWindow).fakeHost.emit(batch),
-    events as readonly unknown[],
-  );
+  await emitChat(page, events);
 }
 
-async function open(page: Page, width: number): Promise<void> {
+async function open(page: Page, width: number): Promise<Controls> {
   await page.setViewportSize({width, height: 900});
   const fixture = fixtureNamed(FIXTURE);
+  const controls = new Controls(page, fixture);
+  await controls.attach();
   await openFixture(page, fixture);
   await playLive(page, fixture);
   await settled(page);
   expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+  return controls;
 }
 
 async function openPanel(page: Page): Promise<void> {
@@ -137,13 +128,16 @@ async function check(page: Page, name: string): Promise<void> {
 
 const panel = (page: Page) => page.getByRole('region', {name: 'Chat'});
 
-async function sendProposal(page: Page, mode: 'Next turn' | 'Every turn'): Promise<string> {
+async function sendProposal(
+  page: Page,
+  controls: Controls,
+  mode: 'Next turn' | 'Every turn',
+): Promise<string> {
   await panel(page).getByRole('radiogroup', {name: 'When'}).getByText(mode, {exact: true}).click();
   await panel(page).getByRole('button', {name: 'Send', exact: true}).click();
   await expect(panel(page).getByText('Sent', {exact: true})).toBeVisible();
-  const id = await page.evaluate(
-    () => (window as unknown as FixtureWindow).fakeHost.controls.at(-1)?.control_id ?? '',
-  );
+  await expect.poll(() => controls.posted.length).toBeGreaterThan(0);
+  const id = controls.lastId();
   expect(id).not.toBe('');
   return id;
 }
@@ -183,7 +177,7 @@ test('the last thread opens by default, with a streaming answer', async ({page})
 });
 
 test('a proposed steer shows as a card, edited before anything is sent', async ({page}) => {
-  await open(page, 1440);
+  const controls = await open(page, 1440);
   await emit(page, conversation(firstSequence()));
   await openPanel(page);
   const text = panel(page).getByRole('textbox', {name: 'Steer text'});
@@ -197,17 +191,14 @@ test('a proposed steer shows as a card, edited before anything is sent', async (
     'Judge',
   ]);
   await panel(page).getByRole('radiogroup', {name: 'When'}).getByText('Now', {exact: true}).click();
-  const sent = await page.evaluate(
-    () => (window as unknown as FixtureWindow).fakeHost.controls.length,
-  );
-  expect(sent).toBe(0);
+  expect(controls.posted.length).toBe(0);
   await check(page, 'proposal-edited');
 });
 
 const DELIVERIES: readonly {
   readonly name: string;
   readonly mode: 'Next turn' | 'Every turn';
-  readonly steps: readonly Record<string, unknown>[];
+  readonly steps: readonly Step[];
   readonly shows: string;
 }[] = [
   {name: 'sent', mode: 'Next turn', steps: [], shows: 'Sent'},
@@ -246,15 +237,11 @@ const DELIVERIES: readonly {
 
 for (const each of DELIVERIES) {
   test(`a sent steer shows ${each.name}`, async ({page}) => {
-    await open(page, 1440);
-    const from = firstSequence();
-    await emit(page, conversation(from));
+    const controls = await open(page, 1440);
+    await emit(page, conversation(firstSequence()));
     await openPanel(page);
-    const id = await sendProposal(page, each.mode);
-    await emit(
-      page,
-      each.steps.map((step, index) => delivery(from + 10 + index, id, step)),
-    );
+    const id = await sendProposal(page, controls, each.mode);
+    for (const step of each.steps) await controls.deliver(id, step);
     await expect(panel(page).getByText(each.shows, {exact: true})).toBeVisible();
     await settled(page);
     await check(page, `delivery-${each.name}`);
@@ -262,20 +249,17 @@ for (const each of DELIVERIES) {
 }
 
 test('a standing steer in force offers Withdraw, which ends it', async ({page}) => {
-  await open(page, 1440);
-  const from = firstSequence();
-  await emit(page, conversation(from));
+  const controls = await open(page, 1440);
+  await emit(page, conversation(firstSequence()));
   await openPanel(page);
-  const id = await sendProposal(page, 'Every turn');
-  await emit(page, [delivery(from + 10, id, {state: 'in_force', role: 'implementer'})]);
+  const id = await sendProposal(page, controls, 'Every turn');
+  await controls.deliver(id, {state: 'in_force', role: 'implementer'});
   await expect(panel(page).getByRole('button', {name: 'Withdraw'})).toBeVisible();
   await check(page, 'standing-withdraw');
   await panel(page).getByRole('button', {name: 'Withdraw'}).click();
   await expect(panel(page).getByText('Withdrawing', {exact: true})).toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as FixtureWindow).fakeHost.controls.length))
-    .toBe(2);
-  await emit(page, [delivery(from + 11, id, {state: 'ended', reason: 'withdrawn'})]);
+  await expect.poll(() => controls.posted.length).toBe(2);
+  await controls.deliver(id, {state: 'ended', reason: 'withdrawn'});
   await expect(panel(page).getByText('Withdrawn', {exact: true})).toBeVisible();
   await check(page, 'standing-withdrawn');
 });

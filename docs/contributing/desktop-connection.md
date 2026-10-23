@@ -76,7 +76,7 @@ desktop main process (apps/desktop-main)              host (local or ssh)
 | Helper contracts | `server.host_api` (new, light) | Pydantic models for every helper message, the registry record, launch and stop results, and `RunPhase`. Imports `pydantic` and the standard library only. The single source of the helper's JSON Schema. |
 | Registry primitives | `server.registry` (new, light; split from `server.instances` and `server.transport.discovery`) | Registry root, lifetime lock, record store, `survey`. `server.instances` keeps the stop requester and composes these. |
 | Helper channel | `server.host_helper` | The channel: a pure `step` that folds lines, replies, watch observations, and time into the channel's state and the outputs the shell performs (the handshake, request ids, deadlines, feature gates, the one hand-over to the relay), and the shell. |
-| Helper requests | `server.host_helper_requests` | The per-method execution over role-named interfaces (`Projects`, `Directories`, `RunLauncher`, `CheckoutProbe`, the registry), and the pure decisions it needs (`negotiate`, `run_summaries`, `launch_arguments`, path completion). |
+| Helper requests | `server.host_helper_requests` | The per-method execution over role-named interfaces (`Projects`, `Directories`, `RunLauncher`, `CheckoutProbe`, the registry), and the pure decisions it needs (`negotiate`, `launch_arguments`, path completion); the reads of a project's runs (`run_summaries`, digests, the usage window) are `server.host_run_reads`, shared with the registered reads. |
 | Helper interfaces on a host | `server.host_helper_os` | The real implementations: projects through `vs_project.api`, directories as this account lists them, launches through `vs_sim.api` with the launcher's `headless_command`, the checkout through `git`. |
 | Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaced `entrypoints.stdio_bridge` (phase 5). |
 | Relay core | `server.relay` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
@@ -589,8 +589,11 @@ Every screen (Settings, Machines, New run, the Run screen, the sidebar) has one 
   no state that changes behavior. The desktop shell is React.
 - **Native `<dialog>`.** Sheets are `<dialog>` opened with `showModal()`: focus containment, inert
   background, Esc, and return of focus to the opener come from the platform.
-- **Data from watches.** Host panels and Recent statuses fold `instances.watch` pushes; there is no
-  manual refresh path to forget.
+- **Data from watches.** Host panels and Recent statuses fold the host gateway's `WatchRuns` stream
+  (`@vibesys/connection`'s `runWatch`, projected by `hostListingFromRuns`); the listing and the
+  connection status do not ask the host's helper, and an observed stream reconnects with a growing
+  delay and is dropped after 30 seconds of silence. Digests and the usage window are registered
+  reads (`ListRunDigests`, `UsageWindow`). There is no manual refresh path to forget.
 
 The desktop window (`apps/desktop-shell`, the only renderer since the cutover, #2850) follows the same rules: the sidebar
 store (`@vibesys/feature-app-shell`) folds the listings, Recent and the archived runs, and the

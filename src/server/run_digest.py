@@ -22,13 +22,14 @@ A journal with finished rounds and no span event predates the run trace
 (``ideas`` is ``None``) instead of counting none. A round and its workstream span end together, so a
 journal with a finished round and no ended span has no spans at all.
 
-Public surface: ``digest_journal``, ``run_attention``.
+Public surface: ``digest_journal``, ``run_attention``, ``digest_store``.
 """
 
 from __future__ import annotations
 
 from collections import deque
 from datetime import UTC, datetime
+from importlib import import_module
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -56,6 +57,8 @@ from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from vs_proto.api import Keyframe, RunHead, Span
 
 _OBJECT: Final[TypeAdapter[dict[str, JsonValue]]] = TypeAdapter(dict[str, JsonValue])
 _LINE_MAX_BYTES: Final = 16 * 1024 * 1024
@@ -417,27 +420,8 @@ class _Fold:
             )
             for each in chart
         ]
-        streak = 0
-        for point in reversed(points):
-            if point.verdict is IdeaVerdict.RUNNING:
-                continue
-            if point.verdict is not IdeaVerdict.FAILED:
-                break
-            streak += 1
-        # Over the cap, the oldest points that are not kept go first, then the oldest kept ones.
-        order = sorted(
-            range(len(points)), key=lambda at: (points[at].verdict is IdeaVerdict.KEPT, at)
-        )
-        gone = set(order[: max(0, len(points) - DASHBOARD_MAX_POINTS)])
-        shown = tuple(point for at, point in enumerate(points) if at not in gone)
         last = None if self.last is None else datetime.fromtimestamp(self.last, UTC)
-        return RunDashboard(
-            points=shown,
-            points_omitted=len(gone),
-            failed_streak=streak,
-            last_event_at=last,
-            best=self._best_reading(chart),
-        )
+        return _dashboard_points(points, last, self._best_reading(chart))
 
     def _ending(self, data: dict[str, JsonValue]) -> None:
         try:
@@ -520,7 +504,7 @@ def run_attention(digest: RunDigest, *, phase: RunPhase | None, now: float) -> R
     if (
         digest.closing is RunClosing.FAILED
         or (digest.ending is not None and digest.ending.outcome is RunEndOutcome.FAILED)
-        or (phase is not None and phase.status is RunStatus.FAILED)
+        or (not ended and phase is not None and phase.status is RunStatus.FAILED)
     ):
         return RunAttention.FAILED
     if ended or phase is None or phase.status is not RunStatus.RUNNING:
@@ -536,3 +520,162 @@ def run_attention(digest: RunDigest, *, phase: RunPhase | None, now: float) -> R
     if dashboard.failed_streak >= REPEATED_FAILURE_AFTER:
         return RunAttention.REPEATED_FAILURE
     return RunAttention.NONE
+
+
+def _dashboard_points(
+    points: list[IdeaPoint], last: datetime | None, best: BestReading | None
+) -> RunDashboard:
+    streak = 0
+    for point in reversed(points):
+        if point.verdict is IdeaVerdict.RUNNING:
+            continue
+        if point.verdict is not IdeaVerdict.FAILED:
+            break
+        streak += 1
+    # Over the cap, the oldest points that are not kept go first, then the oldest kept ones.
+    order = sorted(range(len(points)), key=lambda at: (points[at].verdict is IdeaVerdict.KEPT, at))
+    gone = set(order[: max(0, len(points) - DASHBOARD_MAX_POINTS)])
+    shown = tuple(point for at, point in enumerate(points) if at not in gone)
+    return RunDashboard(
+        points=shown,
+        points_omitted=len(gone),
+        failed_streak=streak,
+        last_event_at=last,
+        best=best,
+    )
+
+
+def digest_store(
+    head: RunHead, skeleton: Keyframe, *, last_event_at: datetime | None = None
+) -> RunDigest:
+    """Project the writer's committed facts; a journal never overrides a typed run.
+
+    Headline and outcome come from the same head the page observes. Idea measurements join
+    the skeleton by ownership, and timing comes from that prefix's recorded run clock.
+    """
+    wire = import_module("vs_proto.api")
+    objective = head.objective
+    best = (
+        None if objective is None or not objective.has_field("best_value") else objective.best_value
+    )
+    input_value = (
+        None
+        if objective is None or not objective.has_field("input_value")
+        else objective.input_value
+    )
+    series = None if objective is None else objective.series
+    minimize = series is not None and series.direction == wire.Direction.MIN
+    ratio = _store_ratio(best, input_value, minimize=minimize)
+    spans = {
+        key: history.versions[-1].span
+        for key, history in skeleton.spans.items()
+        if history.versions
+    }
+    spans = {key: span for key, span in spans.items() if span is not None}
+    ideas = _store_ideas(spans)
+    points = _store_points(head)
+    times = [span.started_at for span in spans.values()]
+    times += [span.ended_at for span in spans.values() if span.ended_at is not None]
+    times += [
+        version.point.clock
+        for history in skeleton.metrics
+        for version in history.points
+        if version.point is not None
+    ]
+    ending, closing = _store_ending(head)
+    return RunDigest(
+        ideas=len(set(ideas.values())),
+        adopted_ratio=ratio,
+        best_so_far_ratio=None,
+        duration_s=None if not times else max(0, *times),
+        ending=ending,
+        closing=closing,
+        dashboard=_dashboard_points(
+            points,
+            last_event_at,
+            None
+            if best is None
+            else BestReading(
+                value=best,
+                metric=None if series is None else series.name,
+                unit=None if series is None else series.unit or None,
+            ),
+        ),
+    )
+
+
+def _store_ratio(value: float | None, input_value: float | None, *, minimize: bool) -> float | None:
+    if value is None or input_value is None or input_value == 0 or (minimize and value == 0):
+        return None
+    return input_value / value if minimize else value / input_value
+
+
+def _store_ideas(spans: dict[str, Span]) -> dict[str, str]:
+    wire = import_module("vs_proto.api")
+    ideas = {}
+    for key, span in spans.items():
+        label = span.label
+        if label is None or label.kind != "workstream" or label.attrs is None:
+            continue
+        attrs = wire.WorkstreamAttrs.from_binary(label.attrs.value)
+        if not attrs.probe:
+            ideas[key] = (
+                "hypothesis:" + attrs.hypothesis_id if attrs.hypothesis_id else "span:" + key
+            )
+    return ideas
+
+
+def _store_points(head: RunHead) -> list[IdeaPoint]:
+    """The card renders exactly the writer's idea decisions, never reselects a best."""
+    wire = import_module("vs_proto.api")
+    objective = head.objective
+    if objective is None or objective.series is None:
+        return []
+    series = next((item for item in head.performance if item.series == objective.series.name), None)
+    if series is None:
+        return []
+    verdicts = {
+        wire.IdeaOutcome.PENDING: IdeaVerdict.RUNNING,
+        wire.IdeaOutcome.FAILED: IdeaVerdict.FAILED,
+        wire.IdeaOutcome.KEPT: IdeaVerdict.KEPT,
+        wire.IdeaOutcome.NOT_KEPT: IdeaVerdict.NOT_BETTER,
+        wire.IdeaOutcome.WITHIN_NOISE: IdeaVerdict.NOT_BETTER,
+        wire.IdeaOutcome.WORSE_THAN_INPUT: IdeaVerdict.NOT_BETTER,
+    }
+    readings = {point.measurement_seq: point.point for point in series.points}
+    return [
+        IdeaPoint(
+            ratio=_store_ratio(
+                None if (reading := readings.get(idea.measurement_seq)) is None else reading.value,
+                series.input_value if series.has_field("input_value") else None,
+                minimize=objective.series.direction == wire.Direction.MIN,
+            ),
+            verdict=verdicts[idea.outcome],
+        )
+        for idea in series.ideas
+        if idea.outcome in verdicts
+    ]
+
+
+def _store_ending(head: RunHead) -> tuple[RunEndingFact | None, RunClosing | None]:
+    state = None if head.lifecycle is None else head.lifecycle.state
+    if state is None or state.field != "ended":
+        return None, None
+    ended = state.value
+    presentation = ended.presentation
+    if presentation is None:
+        message = "ended.presentation: core outcome is absent"
+        raise ValueError(message)
+    match presentation.status:
+        case "completed":
+            outcome, closing = None, RunClosing.FINISHED
+        case "failed":
+            outcome, closing = RunEndOutcome.FAILED, RunClosing.FAILED
+        case "stopped":
+            outcome, closing = RunEndOutcome.STOPPED, RunClosing.INTERRUPTED
+        case _:
+            message = f"ended.presentation.status: unknown outcome {presentation.status}"
+            raise ValueError(message)
+    return RunEndingFact(
+        outcome=outcome, summary=ended.summary, resumable=ended.resumable, rounds_finished=0
+    ), closing

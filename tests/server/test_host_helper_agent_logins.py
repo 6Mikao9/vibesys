@@ -15,16 +15,18 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.server.host_helper_support import FakeAgentLogins, fake_host
 
-from entrypoints.host_helper import AgentLibraryLogins
 from server.host_agent_logins import (
     AccountLogin,
+    AgentLibraryLogins,
     AgentLogin,
     AgentLoginsListReply,
     AgentLoginsListRequest,
     AgentLoginsStartReply,
     AgentLoginsStartRequest,
     ApiKeyLogin,
+    LoginBounds,
     LoginStarted,
+    LoginStarter,
     LoginState,
     LoginUnavailable,
     LoginUnavailableReason,
@@ -37,7 +39,6 @@ from server.host_api import (
     parse_helper_request,
     request_features,
 )
-from server.host_helper_os import LoginBounds, LoginStarter
 from server.host_helper_requests import answer
 from vs_agent.api import LoginCommand, LoginCredential, LoginKind, ProviderLogin
 from vs_agent.api import LoginState as ProviderLoginState

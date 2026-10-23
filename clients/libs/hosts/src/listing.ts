@@ -45,6 +45,10 @@ export type HostListing =
       readonly ended: readonly HostRun[];
       /** Records this app cannot read (another VibeSys version), by id. */
       readonly unreadable: readonly string[];
+      /** Runs whose project cannot be resolved; liveness may also be unknown. */
+      readonly unknownProject?: readonly (Omit<HostRun, 'projectRoot'> & {
+        readonly alive?: boolean;
+      })[];
       /** Ids whose lock could not be read: neither known live nor known ended, by id. */
       readonly unverified: readonly string[];
     }
@@ -55,6 +59,18 @@ export type HostListing =
     };
 
 type ListedHost = Extract<HostListing, {readonly kind: 'listed'}>;
+
+/**
+ * The hosts that answer in `after` and did not in `before` (absent counts as not answering): a
+ * read that failed because such a host was unreachable may now succeed.
+ */
+export function hostsComeUp(
+  before: readonly HostListing[],
+  after: readonly HostListing[],
+): readonly HostKey[] {
+  const was = new Set(before.flatMap(each => (each.kind === 'listed' ? [each.host] : [])));
+  return after.flatMap(each => (each.kind === 'listed' && !was.has(each.host) ? [each.host] : []));
+}
 
 /** What one coherent registry listing proves about an instance. */
 export type InstanceObservation<Record, Unreadable = string> =

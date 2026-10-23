@@ -12,6 +12,7 @@
  */
 import {
   Chart,
+  DotLegend,
   Fact,
   FactLine,
   MetricTile,
@@ -21,6 +22,7 @@ import {
   Row,
   Sparkline,
   Stack,
+  SwatchLegend,
   Text,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
@@ -86,10 +88,20 @@ function IdeaLine(props: {readonly view: IdeaFocusView | null}): JSX.Element {
 }
 
 /** The comparisons with no reading, each a small label with its status word; none when all read. */
-function BaselineNotes(props: {readonly notes: HeroView['baselineNotes']}): JSX.Element | null {
-  if (props.notes.length === 0) return null;
+function BaselineNotes(props: {
+  readonly notes: HeroView['baselineNotes'];
+  readonly wholeNotes: HeroView['baselineNotes'];
+}): JSX.Element | null {
+  if (props.notes.length === 0 && props.wholeNotes.length === 0) return null;
   return (
     <FactLine fit="parent" wrap={false}>
+      {props.notes.length === 0 ? (
+        <Fact>
+          <Text variant="small" tone="muted" aria-hidden="true">
+            {' '}
+          </Text>
+        </Fact>
+      ) : null}
       {props.notes.map(note => (
         <Fact key={note.label} title={`${note.label} ${note.words}`}>
           <Text variant="small" tone="muted">
@@ -205,11 +217,36 @@ export function Hero(
               pick={id => props.zoom({type: 'open-idea', idea: id})}
               {...(props.hover === undefined ? {} : {hover: props.hover})}
             />
+            <ChartLegend chart={chart} />
           </Stack>
         )}
       </Row>
-      <BaselineNotes notes={hero.baselineNotes} />
+      <BaselineNotes
+        notes={hero.baselineNotes}
+        wholeNotes={heroView(props.whole, objectives).baselineNotes}
+      />
       <IdeaLine view={ideaFocusView(props.model, props.idea)} />
     </Stack>
+  );
+}
+
+function ChartLegend({
+  chart,
+}: {
+  readonly chart: NonNullable<ReturnType<typeof stripChartView>>;
+}): JSX.Element {
+  const items = [
+    ...(chart.steps.length > 0 ? [{label: 'Best value'}] : []),
+    ...(chart.points.some(point => point.tone === 'muted')
+      ? [{label: 'Other readings', muted: true}]
+      : []),
+  ];
+  return (
+    <Row gap="space-3" wrap>
+      <SwatchLegend label="Chart colors" items={items} />
+      {chart.points.some(point => point.tone === 'err') ? (
+        <DotLegend items={[{label: 'Failed readings', tone: 'err'}]} />
+      ) : null}
+    </Row>
   );
 }

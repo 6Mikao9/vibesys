@@ -72,7 +72,7 @@ function createChat(portsRef: {readonly current: RunChatPorts}): Chat {
     actors: {
       loadCatalogue: fromPromise(() => portsRef.current.harnesses()),
       createThread: fromPromise(({input, signal}) =>
-        portsRef.current.createThread(input.harness, signal),
+        portsRef.current.createThread(input.harness, signal, input.requestId),
       ),
       ask: fromPromise(({input, signal}) => portsRef.current.ask(input, signal)),
     },
@@ -210,7 +210,12 @@ export function useRunChat(options: RunChatOptions): RunChatHost {
           roles: runRoles(core.expectedRoles, options.roles ?? []),
           readOnly,
           canAsk: !readOnly || options.askable === true,
-          dispatch: event => chat.actor.send(event),
+          dispatch: event =>
+            chat.actor.send(
+              event.type === 'submit'
+                ? {...event, requestId: portsRef.current.newControlId()}
+                : event,
+            ),
         }
       : null,
   };

@@ -36,6 +36,7 @@ type host struct {
 	apiv1.UnimplementedHostServiceServer
 	config Config
 	index  runlog.Index
+	heads  headObserver
 }
 
 func (h *host) Hello(_ context.Context, request *apiv1.HelloRequest) (*apiv1.HelloResponse, error) {
@@ -63,6 +64,17 @@ func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailSer
 	if err != nil {
 		return rpcError(err)
 	}
+	var projection *runlog.Projection
+	upgrade := runlog.NewInputUpgrade(nil)
+	if request.GetSessionId() == "" {
+		projection, err = projectionAt(filepath.Dir(path), position)
+		if err == nil {
+			upgrade = runlog.NewInputUpgrade(projection.State)
+		}
+	}
+	if err != nil {
+		return rpcError(err)
+	}
 	follower.Seek(position, &h.index, func() (uint64, bool, error) { return committed(filepath.Dir(path)) })
 	// Headers publish that discovery and watch installation succeeded. A caller
 	// can now append without depending on goroutine scheduling or polling.
@@ -84,6 +96,17 @@ func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailSer
 				readErr = status.Errorf(codes.DataLoss, "run.log sequence %d does not follow %d", seq, previous)
 				break
 			}
+			payload, err = upgrade.Record(payload)
+			if err != nil {
+				readErr = err
+				break
+			}
+			if projection != nil {
+				if err := projection.Record(payload); err != nil {
+					readErr = err
+					break
+				}
+			}
 			seen = true
 			previous = seq
 			if seq < request.GetFromSeq() {
@@ -93,6 +116,12 @@ func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailSer
 			response.ThroughSeq = seq
 		}
 		if len(response.Records) > 0 {
+			if projection != nil {
+				response.Head, err = runlog.ProjectHead(projection.State)
+				if err != nil {
+					return rpcError(err)
+				}
+			}
 			if err := stream.Send(response); err != nil {
 				return err
 			}

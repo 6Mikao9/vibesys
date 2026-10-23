@@ -8,6 +8,7 @@ import {
   AgentTurnAttrsSchema,
   AttemptOutcome,
   Change,
+  ClientReplaySchema,
   Direction,
   DrainGoal,
   KeyframeSchema,
@@ -21,6 +22,7 @@ import {
   RuntimeType,
   SkeletonResponseSchema,
   SpanFailureKind,
+  SpanHistorySchema,
   SpanSchema,
   SpanStatus,
   StageState,
@@ -119,7 +121,7 @@ test('comparison links, adoption, baselines and capacity spans use the existing 
   expect(model.candidates.candidates[0]?.measurement?.metricValue).toBe(125);
   expect(model.candidates.candidates[0]?.measurement?.vsBaseline).toBe(1.25);
   expect(model.candidates.candidates[0]?.measurement?.against?.baseCommit).toBe('input');
-  expect(model.candidates.best).toEqual({candidate: 'idea-0', adopted: true});
+  expect(model.candidates.best).toBeNull(); // No core decision was supplied with this prefix.
   expect(model.baselines[0]?.value).toBe(50);
   expect(model.pauses).toEqual([
     {from: 0, to: 2, provider: 'provider-a', condition: 'rate_limited'},
@@ -137,33 +139,38 @@ test('comparison links, adoption, baselines and capacity spans use the existing 
 });
 
 test('startup reports only recorded stages and the gateway never offers legacy commands', () => {
-  const initial = storeRunFixture('live', 1).records.slice(0, 1);
-  const records = [
-    ...initial,
-    create(RecordSchema, {
-      seq: 2n,
-      epoch: 1,
-      at: {seconds: 1700000001n},
-      body: {
-        case: 'lifecycle',
-        value: {
-          state: {
-            case: 'starting',
-            value: {stage: StartupStage.BUILDING_TOOLS, state: StageState.RUNNING},
+  for (const [stage, id, label] of [
+    [StartupStage.PROBING_WORKSPACE, 'probing_workspace', 'Probing the workspace'],
+    [StartupStage.BUILDING_IMAGE, 'building_image', 'Building the agent image'],
+    [StartupStage.BUILDING_TOOLS, 'building_tools', 'Building the agent tools'],
+    [StartupStage.STARTING_CONTAINER, 'starting_container', 'Starting the agent container'],
+  ] as const) {
+    const initial = storeRunFixture('live', 1).records.slice(0, 1);
+    const records = [
+      ...initial,
+      create(RecordSchema, {
+        seq: 2n,
+        epoch: 1,
+        at: {seconds: 1700000001n},
+        body: {
+          case: 'lifecycle',
+          value: {
+            state: {
+              case: 'starting',
+              value: {stage, state: StageState.RUNNING},
+            },
           },
         },
-      },
-    }),
-  ];
-  const skeleton = foldSkeleton(seedSkeleton(), records);
-  const model = projectSkeleton(skeleton, 2n);
-  const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
-  expect(timelineView(state)).toEqual([
-    {id: 'building_tools', label: 'Tools', state: 'active', streamId: null},
-  ]);
-  expect(headerView(state).pauseNow.shown).toBe(false);
-  expect(headerView(state).pause.shown).toBe(false);
-  expect(headerView(state).status.label).toBe('Starting');
+      }),
+    ];
+    const skeleton = foldSkeleton(seedSkeleton(), records);
+    const model = projectSkeleton(skeleton, 2n);
+    const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
+    expect(timelineView(state)).toEqual([{id, label, state: 'active', streamId: null}]);
+    expect(headerView(state).pauseNow.shown).toBe(false);
+    expect(headerView(state).pause.shown).toBe(false);
+    expect(headerView(state).status.label).toBe('Starting');
+  }
 });
 
 test('park, drain and interruption keep their status words; past logs have no invented offsets', () => {
@@ -171,7 +178,7 @@ test('park, drain and interruption keep their status words; past logs have no in
   for (const [state, word] of [
     [{case: 'parked', value: {}}, 'Paused'],
     [{case: 'draining', value: {goal: DrainGoal.PARK}}, 'Pausing'],
-    [{case: 'ended', value: {outcome: Outcome.INTERRUPTED}}, 'Interrupted'],
+    [{case: 'ended', value: {outcome: Outcome.INTERRUPTED}}, 'Stopped'],
   ] as const) {
     const records = [
       ...fixture.records,
@@ -437,6 +444,8 @@ test('a native metric headlines the writer fact even without candidate-shaped sp
   const head = create(RunHeadSchema, {
     epoch: 1,
     committedSeq: 2n,
+    performanceStated: true,
+    performance: [{series: 'throughput', inputValue: 100, bestValue: 321}],
     objective: {
       series: {name: 'throughput', unit: 'ops/s', direction: Direction.MAX},
       bestValue: 321,
@@ -457,20 +466,27 @@ test('a native metric headlines the writer fact even without candidate-shaped sp
 for (const reversed of [false, true]) {
   test(`native event fold preserves objective tiles and trends with a writer headline (${reversed})`, () => {
     const records = storeRunFixture('facts', 2).records.map(record => clone(RecordSchema, record));
-    const epoch = records[0]?.body;
-    if (epoch?.case !== 'epochStarted' || !epoch.value.run) throw new Error('fixture');
-    epoch.value.run.objectives.push(
-      create(ObjectiveSchema, {series: 'latency', direction: Direction.MIN}),
+    // Every declaration of the epoch (its opening and the amendment that states the input).
+    const declarations = records.flatMap(record =>
+      record.body.case === 'epochStarted' || record.body.case === 'declarationAmended'
+        ? [record.body.value]
+        : [],
     );
-    if (reversed) epoch.value.run.objectives.reverse();
-    epoch.value.series.push(
-      create(MetricSeriesDeclSchema, {
-        ...epoch.value.series[0],
-        name: 'latency',
-        unit: 'ms',
-        direction: Direction.MIN,
-      }),
-    );
+    for (const declaration of declarations) {
+      if (!declaration.run) throw new Error('fixture');
+      declaration.run.objectives.push(
+        create(ObjectiveSchema, {series: 'latency', direction: Direction.MIN}),
+      );
+      if (reversed) declaration.run.objectives.reverse();
+      declaration.series.push(
+        create(MetricSeriesDeclSchema, {
+          ...declaration.series[0],
+          name: 'latency',
+          unit: 'ms',
+          direction: Direction.MIN,
+        }),
+      );
+    }
     const events = records
       .flatMap(record => {
         if (record.body.case !== 'metric' || record.body.value.series !== 'throughput')
@@ -497,6 +513,8 @@ for (const reversed of [false, true]) {
     const head = create(RunHeadSchema, {
       epoch: 1,
       committedSeq: seq,
+      performanceStated: true,
+      performance: [{series: 'throughput', inputValue: 100, bestValue: 320}],
       objective: {
         series: {name: 'throughput', unit: 'ops/s', direction: Direction.MAX},
         inputValue: 100,
@@ -512,7 +530,9 @@ for (const reversed of [false, true]) {
         expect(updated?.figure).toBe('3.20×');
         expect(updated?.detail).toBe('320 ops/s · input 100 ops/s');
         expect(tile.trend).not.toBeNull();
-        expect(updated?.trend).toEqual(tile.trend);
+        expect(updated?.trend?.reference).toBe(100);
+        expect(updated?.trend?.from).toBe(tile.trend?.from);
+        expect(updated?.trend?.to).toBe(tile.trend?.to);
       } else {
         expect(updated).toEqual(tile);
       }
@@ -635,5 +655,41 @@ test('retained real usage and cache costs match the old projection through repla
     const ordered = (rows: readonly UsageRecord[]) =>
       rows.map(spend).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     expect(ordered(reading.core.usageRecords)).toEqual(ordered(source.records));
+  }
+});
+
+test('regression: native planning-call markers survive keyframes across call counts', () => {
+  const replay = fromBinary(
+    ClientReplaySchema,
+    readFileSync(
+      new URL('../../../../libs/run-fixtures/src/native/finished-run.pb', import.meta.url),
+    ),
+  );
+  const records = replay.batches.flatMap(batch =>
+    batch.records.map(bytes => fromBinary(RecordSchema, bytes)),
+  );
+  const base = foldSkeleton(seedSkeleton(), records);
+  const planning = Object.values(base.spans).find(
+    history => history.versions[0]?.span?.label?.kind === 'planning_call',
+  )?.versions[0];
+  if (!planning?.span) throw new Error('Canonical scenario requires planning calls');
+  for (const count of [0, 1, 2, 15, 24]) {
+    const spans = Object.fromEntries(
+      Object.entries(base.spans).filter(
+        ([, history]) => history.versions[0]?.span?.label?.kind !== 'planning_call',
+      ),
+    );
+    for (let index = 0; index < count; index += 1) {
+      const id = `planning-${index}`;
+      spans[id] = create(SpanHistorySchema, {
+        versions: [{...planning, seq: BigInt(index + 2), span: {...planning.span, id}}],
+      });
+    }
+    const skeleton = {...base, spans};
+    const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n);
+    const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
+    expect([...state.run.trace.calls]).toEqual(
+      Array.from({length: count}, (_, index) => index + 2),
+    );
   }
 });

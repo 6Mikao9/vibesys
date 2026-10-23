@@ -5,15 +5,11 @@ import {
   HOST_CALL_METHOD,
   hostRelaunchRequest,
   hostRelaunchResponse,
-  livenessRequest,
-  livenessResponse,
   type RelaunchObservation,
   type RelaunchRequest,
-  RUN_LIVENESS_METHOD,
-  RunLiveness,
 } from '@vibesys/runs/intents';
-import {createActor, fromCallback, fromPromise} from 'xstate';
-import {type RelaunchEvent, relaunchMachine} from '../../state/index.js';
+import {createActor, fromPromise} from 'xstate';
+import {relaunchMachine} from '../../state/index.js';
 
 export function relaunchActor(input: {
   readonly bridge: GatewayBridge;
@@ -25,23 +21,6 @@ export function relaunchActor(input: {
   return createActor(
     relaunchMachine.provide({
       actors: {
-        liveness: fromCallback<RelaunchEvent>(({sendBack}) => {
-          const call = input.bridge.stream(
-            input.host,
-            RUN_LIVENESS_METHOD,
-            livenessRequest(),
-            bytes => {
-              try {
-                const value = livenessResponse(bytes, input.request.runId);
-                if (value !== null) sendBack({type: 'liveness', value});
-              } catch {
-                sendBack({type: 'liveness', value: {epoch: 0n, value: RunLiveness.UNSPECIFIED}});
-              }
-            },
-            () => sendBack({type: 'liveness', value: {epoch: 0n, value: RunLiveness.UNSPECIFIED}}),
-          );
-          return () => call.cancel();
-        }),
         launch: fromPromise(async ({input: request, signal}) => {
           const call = input.bridge.unary(
             input.host,

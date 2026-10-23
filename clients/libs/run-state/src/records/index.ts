@@ -28,11 +28,14 @@ export interface RecordRow {
   readonly attachment?: BlobAttached;
 }
 
+/** The latest 1000 rows by sequence; a row read twice (a Tail window over the prefix) counts once. */
 export function recordRows(
   rows: readonly RecordRow[],
   next: readonly RecordRow[],
 ): readonly RecordRow[] {
-  return [...rows, ...next].slice(-1000);
+  const bySeq = new Map<string, RecordRow>();
+  for (const row of [...rows, ...next]) bySeq.set(row.seq, row);
+  return [...bySeq.values()].sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : 1)).slice(-1000);
 }
 
 function legacyType(json: string): string {
@@ -49,6 +52,11 @@ function legacyType(json: string): string {
     typeof value.type === 'string'
     ? value.type
     : '';
+}
+
+/** The rows of records already decoded, such as the error notices a keyframe holds. */
+export function rowsOfRecords(records: readonly StoreRecord[]): readonly RecordRow[] {
+  return decodeRecordRows(records.map(record => toBinary(RecordSchema, record)));
 }
 
 export function decodeRecordRows(bytes: readonly Uint8Array[]): readonly RecordRow[] {

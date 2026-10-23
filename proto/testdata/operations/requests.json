@@ -106,5 +106,17 @@
     "id": 10,
     "payload": "0a09726571756573742d6112082f70726f6a656374f80701",
     "valid": false
+  },
+  {
+    "name": "ListAgentLogins valid",
+    "id": 19,
+    "payload": "0a09726571756573742d61",
+    "valid": true
+  },
+  {
+    "name": "ListAgentLogins missing identity",
+    "id": 19,
+    "payload": "",
+    "valid": false
   }
 ]

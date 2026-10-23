@@ -1,8 +1,8 @@
 /**
- * The rows of the Runs dashboard: the newest runs the connected machines list, newest first across
- * machines (at most `DASHBOARD_RUNS`, none archived). A row is the sidebar's own (`RunRow`): a live
- * run's, from its server, and any other run's as a Recent row reads it, from the registry's record
- * of its end and its digest.
+ * The rows of the Runs dashboard: every run the connected machines list, newest first across
+ * machines (none archived). A row is the sidebar's own (`RunRow`): a live run's, from its server,
+ * and any other run's as a Recent row reads it, from the registry's record of its end and its
+ * digest.
  */
 import {isSynthesizedTask} from '@vibesys/contracts';
 import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
@@ -29,7 +29,7 @@ export interface DashboardRow {
    */
   readonly task: string | null;
   /** The project's path on the machine. */
-  readonly project: string;
+  readonly project: string | null;
   /** When the run was created, in milliseconds. */
   readonly createdAt: number;
 }
@@ -42,7 +42,7 @@ function chosenTask(task: string | null): string | null {
 /** The runs the dashboard shows, newest first. */
 export function dashboardRows(state: SidebarState, clock: Clock): readonly DashboardRow[] {
   const live = liveRows(state);
-  return dashboardRefs(state).map(({host, project, run}) => {
+  const known = dashboardRefs(state).map(({host, project, run}) => {
     const machine = hostLabel(hostFromKey(host));
     const ref: RecentRun = {
       host,
@@ -68,6 +68,41 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
       createdAt: run.createdAt,
     };
   });
+  const unknown: DashboardRow[] = state.listings.flatMap(listing => {
+    if (listing.kind !== 'listed') return [];
+    return (listing.unknownProject ?? []).flatMap(run => {
+      const ref = {host: listing.host, runId: run.runId};
+      if (
+        known.some(each => sameRun(each.row.run, ref)) ||
+        state.archived.some(each => sameRun(each, ref))
+      )
+        return [];
+      const machine = hostLabel(hostFromKey(listing.host));
+      return [
+        {
+          host: listing.host,
+          machine,
+          task: null,
+          project: null,
+          createdAt: run.startedAt * 1000,
+          row: live.find(each => sameRun(each.run, ref)) ?? {
+            run: ref,
+            title: 'Unknown project',
+            detail: '',
+            trail: null,
+            tooltip: `${machine}: Project unknown`,
+            status: 'unknown',
+            look: {tone: 'neutral', word: 'Project unknown'},
+            problem: null,
+            now: null,
+            startedAt: run.startedAt === 0 ? null : run.startedAt * 1000,
+            digest: null,
+          },
+        },
+      ];
+    });
+  });
+  return [...known, ...unknown].sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** What a screen that lists runs by cost (Usage) calls one: its title, and when it began if the app knows. */
@@ -83,14 +118,18 @@ export interface RunLabel {
 export function runLabels(
   state: SidebarState,
   clock: Clock,
-): (run: {readonly host: HostKey; readonly project: string; readonly runId: string}) => RunLabel {
+): (run: {
+  readonly host: HostKey;
+  readonly project: string | null;
+  readonly runId: string;
+}) => RunLabel {
   const created = new Map(
     dashboardRefs(state).map(({host, run}) => [JSON.stringify([host, run.runId]), run.createdAt]),
   );
   return ({host, project, runId}) => {
     const at = created.get(JSON.stringify([host, runId]));
     return {
-      title: titleOf(state, {host, runId}, project),
+      title: project === null ? 'Unknown project' : titleOf(state, {host, runId}, project),
       began: at === undefined ? null : formatStarted(at, clock),
     };
   };

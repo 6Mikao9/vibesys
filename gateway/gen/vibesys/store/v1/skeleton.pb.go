@@ -23,6 +23,175 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// A refusal preserves readings without guessing how an unknown objective improves.
+type PerformanceRefusal int32
+
+const (
+	PerformanceRefusal_PERFORMANCE_REFUSAL_UNSPECIFIED       PerformanceRefusal = 0
+	PerformanceRefusal_PERFORMANCE_REFUSAL_UNKNOWN_DIRECTION PerformanceRefusal = 1
+)
+
+// Enum value maps for PerformanceRefusal.
+var (
+	PerformanceRefusal_name = map[int32]string{
+		0: "PERFORMANCE_REFUSAL_UNSPECIFIED",
+		1: "PERFORMANCE_REFUSAL_UNKNOWN_DIRECTION",
+	}
+	PerformanceRefusal_value = map[string]int32{
+		"PERFORMANCE_REFUSAL_UNSPECIFIED":       0,
+		"PERFORMANCE_REFUSAL_UNKNOWN_DIRECTION": 1,
+	}
+)
+
+func (x PerformanceRefusal) Enum() *PerformanceRefusal {
+	p := new(PerformanceRefusal)
+	*p = x
+	return p
+}
+
+func (x PerformanceRefusal) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PerformanceRefusal) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_skeleton_proto_enumTypes[0].Descriptor()
+}
+
+func (PerformanceRefusal) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_skeleton_proto_enumTypes[0]
+}
+
+func (x PerformanceRefusal) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PerformanceRefusal.Descriptor instead.
+func (PerformanceRefusal) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{0}
+}
+
+type IdeaOutcome int32
+
+const (
+	IdeaOutcome_IDEA_OUTCOME_UNSPECIFIED      IdeaOutcome = 0
+	IdeaOutcome_IDEA_OUTCOME_PENDING          IdeaOutcome = 1
+	IdeaOutcome_IDEA_OUTCOME_FAILED           IdeaOutcome = 2
+	IdeaOutcome_IDEA_OUTCOME_KEPT             IdeaOutcome = 3
+	IdeaOutcome_IDEA_OUTCOME_NOT_KEPT         IdeaOutcome = 4
+	IdeaOutcome_IDEA_OUTCOME_WITHIN_NOISE     IdeaOutcome = 5
+	IdeaOutcome_IDEA_OUTCOME_WORSE_THAN_INPUT IdeaOutcome = 6
+	IdeaOutcome_IDEA_OUTCOME_INPUT            IdeaOutcome = 7
+	IdeaOutcome_IDEA_OUTCOME_UNATTRIBUTED     IdeaOutcome = 8
+)
+
+// Enum value maps for IdeaOutcome.
+var (
+	IdeaOutcome_name = map[int32]string{
+		0: "IDEA_OUTCOME_UNSPECIFIED",
+		1: "IDEA_OUTCOME_PENDING",
+		2: "IDEA_OUTCOME_FAILED",
+		3: "IDEA_OUTCOME_KEPT",
+		4: "IDEA_OUTCOME_NOT_KEPT",
+		5: "IDEA_OUTCOME_WITHIN_NOISE",
+		6: "IDEA_OUTCOME_WORSE_THAN_INPUT",
+		7: "IDEA_OUTCOME_INPUT",
+		8: "IDEA_OUTCOME_UNATTRIBUTED",
+	}
+	IdeaOutcome_value = map[string]int32{
+		"IDEA_OUTCOME_UNSPECIFIED":      0,
+		"IDEA_OUTCOME_PENDING":          1,
+		"IDEA_OUTCOME_FAILED":           2,
+		"IDEA_OUTCOME_KEPT":             3,
+		"IDEA_OUTCOME_NOT_KEPT":         4,
+		"IDEA_OUTCOME_WITHIN_NOISE":     5,
+		"IDEA_OUTCOME_WORSE_THAN_INPUT": 6,
+		"IDEA_OUTCOME_INPUT":            7,
+		"IDEA_OUTCOME_UNATTRIBUTED":     8,
+	}
+)
+
+func (x IdeaOutcome) Enum() *IdeaOutcome {
+	p := new(IdeaOutcome)
+	*p = x
+	return p
+}
+
+func (x IdeaOutcome) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (IdeaOutcome) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_skeleton_proto_enumTypes[1].Descriptor()
+}
+
+func (IdeaOutcome) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_skeleton_proto_enumTypes[1]
+}
+
+func (x IdeaOutcome) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use IdeaOutcome.Descriptor instead.
+func (IdeaOutcome) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{1}
+}
+
+// Machine-local routing metadata, published by Project before its host discovery link.
+// Stored beside the host index, separately from the writer-owned log and head.
+type RunAddress struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ProjectRoot string                 `protobuf:"bytes,1,opt,name=project_root,json=projectRoot,proto3" json:"project_root,omitempty"`
+	// Binds the address to the resolved discovery target across index retargeting.
+	LogDirectory  string `protobuf:"bytes,2,opt,name=log_directory,json=logDirectory,proto3" json:"log_directory,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunAddress) Reset() {
+	*x = RunAddress{}
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunAddress) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunAddress) ProtoMessage() {}
+
+func (x *RunAddress) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunAddress.ProtoReflect.Descriptor instead.
+func (*RunAddress) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *RunAddress) GetProjectRoot() string {
+	if x != nil {
+		return x.ProjectRoot
+	}
+	return ""
+}
+
+func (x *RunAddress) GetLogDirectory() string {
+	if x != nil {
+		return x.LogDirectory
+	}
+	return ""
+}
+
 // Writer-computed dashboard projection. Absence of committed_seq retains the
 // phase 1 rule: every complete record is committed. A present zero commits none.
 type RunHead struct {
@@ -39,14 +208,17 @@ type RunHead struct {
 	// The current epoch header is committed, but its first lifecycle record is not.
 	AwaitingLifecycle bool `protobuf:"varint,10,opt,name=awaiting_lifecycle,json=awaitingLifecycle,proto3" json:"awaiting_lifecycle,omitempty"`
 	// Canonical writer epoch, derived from run.log independently of process metadata.
-	Epoch         uint32 `protobuf:"varint,11,opt,name=epoch,proto3" json:"epoch,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Epoch uint32 `protobuf:"varint,11,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	// Core decisions over this exact committed prefix, including unowned measurements.
+	Performance       []*SeriesPerformance `protobuf:"bytes,12,rep,name=performance,proto3" json:"performance,omitempty"`
+	PerformanceStated bool                 `protobuf:"varint,13,opt,name=performance_stated,json=performanceStated,proto3" json:"performance_stated,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *RunHead) Reset() {
 	*x = RunHead{}
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[0]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -58,7 +230,7 @@ func (x *RunHead) String() string {
 func (*RunHead) ProtoMessage() {}
 
 func (x *RunHead) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[0]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -71,7 +243,7 @@ func (x *RunHead) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunHead.ProtoReflect.Descriptor instead.
 func (*RunHead) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{0}
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RunHead) GetLifecycle() *Lifecycle {
@@ -151,19 +323,37 @@ func (x *RunHead) GetEpoch() uint32 {
 	return 0
 }
 
+func (x *RunHead) GetPerformance() []*SeriesPerformance {
+	if x != nil {
+		return x.Performance
+	}
+	return nil
+}
+
+func (x *RunHead) GetPerformanceStated() bool {
+	if x != nil {
+		return x.PerformanceStated
+	}
+	return false
+}
+
 // Values are absent until reported. The declaration supplies unit and direction.
 type HeadlineObjective struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Series        *MetricSeriesDecl      `protobuf:"bytes,1,opt,name=series,proto3" json:"series,omitempty"`
-	BestValue     *float64               `protobuf:"fixed64,2,opt,name=best_value,json=bestValue,proto3,oneof" json:"best_value,omitempty"`
-	InputValue    *float64               `protobuf:"fixed64,3,opt,name=input_value,json=inputValue,proto3,oneof" json:"input_value,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Series     *MetricSeriesDecl      `protobuf:"bytes,1,opt,name=series,proto3" json:"series,omitempty"`
+	BestValue  *float64               `protobuf:"fixed64,2,opt,name=best_value,json=bestValue,proto3,oneof" json:"best_value,omitempty"`
+	InputValue *float64               `protobuf:"fixed64,3,opt,name=input_value,json=inputValue,proto3,oneof" json:"input_value,omitempty"`
+	// True when the writer states the input's measurement in this head: input_value present means
+	// measured, absent means unmeasured or not yet measured. False is a previous writer's head,
+	// whose input a reader recovers once from the committed prefix of the log.
+	InputStated   bool `protobuf:"varint,4,opt,name=input_stated,json=inputStated,proto3" json:"input_stated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HeadlineObjective) Reset() {
 	*x = HeadlineObjective{}
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[1]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -175,7 +365,7 @@ func (x *HeadlineObjective) String() string {
 func (*HeadlineObjective) ProtoMessage() {}
 
 func (x *HeadlineObjective) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[1]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -188,7 +378,7 @@ func (x *HeadlineObjective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeadlineObjective.ProtoReflect.Descriptor instead.
 func (*HeadlineObjective) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *HeadlineObjective) GetSeries() *MetricSeriesDecl {
@@ -212,6 +402,13 @@ func (x *HeadlineObjective) GetInputValue() float64 {
 	return 0
 }
 
+func (x *HeadlineObjective) GetInputStated() bool {
+	if x != nil {
+		return x.InputStated
+	}
+	return false
+}
+
 // Informational process identity, never a substitute for probing run.lock.
 type RunProcess struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -224,7 +421,7 @@ type RunProcess struct {
 
 func (x *RunProcess) Reset() {
 	*x = RunProcess{}
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[2]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -236,7 +433,7 @@ func (x *RunProcess) String() string {
 func (*RunProcess) ProtoMessage() {}
 
 func (x *RunProcess) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[2]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -249,7 +446,7 @@ func (x *RunProcess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunProcess.ProtoReflect.Descriptor instead.
 func (*RunProcess) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RunProcess) GetPid() uint32 {
@@ -275,24 +472,43 @@ func (x *RunProcess) GetStartedAt() *timestamppb.Timestamp {
 
 // Immutable skeleton through through_seq. log_offset is the byte immediately
 // after that record in run.log, including magic and framing. It lets readers
-// seek without parsing old records. The gateway reads only these two headers;
-// it passes the entire encoded keyframe through without interpreting its body.
+// seek without parsing old records. The store reader supplies retained semantic
+// upgrades before the gateway addresses descriptors and serves the snapshot.
 type Keyframe struct {
-	state         protoimpl.MessageState  `protogen:"open.v1"`
-	ThroughSeq    uint64                  `protobuf:"varint,1,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"`
-	LogOffset     uint64                  `protobuf:"varint,2,opt,name=log_offset,json=logOffset,proto3" json:"log_offset,omitempty"`
-	Spans         map[string]*SpanHistory `protobuf:"bytes,3,rep,name=spans,proto3" json:"spans,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Metrics       []*MetricHistory        `protobuf:"bytes,4,rep,name=metrics,proto3" json:"metrics,omitempty"`
-	Streams       []*StreamRef            `protobuf:"bytes,5,rep,name=streams,proto3" json:"streams,omitempty"`
-	Epochs        []*EpochVersion         `protobuf:"bytes,6,rep,name=epochs,proto3" json:"epochs,omitempty"`
-	Lifecycles    []*LifecycleVersion     `protobuf:"bytes,7,rep,name=lifecycles,proto3" json:"lifecycles,omitempty"`
+	state      protoimpl.MessageState  `protogen:"open.v1"`
+	ThroughSeq uint64                  `protobuf:"varint,1,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"`
+	LogOffset  uint64                  `protobuf:"varint,2,opt,name=log_offset,json=logOffset,proto3" json:"log_offset,omitempty"`
+	Spans      map[string]*SpanHistory `protobuf:"bytes,3,rep,name=spans,proto3" json:"spans,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Metrics    []*MetricHistory        `protobuf:"bytes,4,rep,name=metrics,proto3" json:"metrics,omitempty"`
+	Streams    []*StreamRef            `protobuf:"bytes,5,rep,name=streams,proto3" json:"streams,omitempty"`
+	Epochs     []*EpochVersion         `protobuf:"bytes,6,rep,name=epochs,proto3" json:"epochs,omitempty"`
+	Lifecycles []*LifecycleVersion     `protobuf:"bytes,7,rep,name=lifecycles,proto3" json:"lifecycles,omitempty"`
+	// The latest error notice of each epoch, whole, so a reader can show a run's diagnostic
+	// without reading the records the keyframe summarises.
+	Failures []*Record `protobuf:"bytes,8,rep,name=failures,proto3" json:"failures,omitempty"`
+	// True when the writer folded every record through through_seq into `failures`, so that an
+	// empty list means no error notice. Keyframes written before the field are false: their
+	// reader recovers the failure facts from the log.
+	FailuresTracked bool `protobuf:"varint,9,opt,name=failures_tracked,json=failuresTracked,proto3" json:"failures_tracked,omitempty"`
+	// Complete semantic intent history, including writer positions, refusal reasons and targets.
+	Intents []*Record `protobuf:"bytes,10,rep,name=intents,proto3" json:"intents,omitempty"`
+	// Every record through through_seq was folded into intents, record_facts and epoch starts.
+	// A reader of an older checkpoint recovers these facts from the frozen committed prefix
+	// through its single progressive Tail, rather than assuming its raw replay window suffices.
+	RecordsTracked bool `protobuf:"varint,11,opt,name=records_tracked,json=recordsTracked,proto3" json:"records_tracked,omitempty"`
+	// Blob attachments, chat events and spans carrying steer delivery links. Other span facts
+	// already live in spans; epochs, lifecycles, metrics and streams have their own indexes.
+	RecordFacts []*Record `protobuf:"bytes,12,rep,name=record_facts,json=recordFacts,proto3" json:"record_facts,omitempty"`
+	// Exact-prefix core projection restored by the read upgrade for previous writers.
+	// A reader ignores a head whose committed_seq differs from through_seq.
+	Head          *RunHead `protobuf:"bytes,13,opt,name=head,proto3" json:"head,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Keyframe) Reset() {
 	*x = Keyframe{}
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[3]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -304,7 +520,7 @@ func (x *Keyframe) String() string {
 func (*Keyframe) ProtoMessage() {}
 
 func (x *Keyframe) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[3]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -317,7 +533,7 @@ func (x *Keyframe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Keyframe.ProtoReflect.Descriptor instead.
 func (*Keyframe) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Keyframe) GetThroughSeq() uint64 {
@@ -369,6 +585,48 @@ func (x *Keyframe) GetLifecycles() []*LifecycleVersion {
 	return nil
 }
 
+func (x *Keyframe) GetFailures() []*Record {
+	if x != nil {
+		return x.Failures
+	}
+	return nil
+}
+
+func (x *Keyframe) GetFailuresTracked() bool {
+	if x != nil {
+		return x.FailuresTracked
+	}
+	return false
+}
+
+func (x *Keyframe) GetIntents() []*Record {
+	if x != nil {
+		return x.Intents
+	}
+	return nil
+}
+
+func (x *Keyframe) GetRecordsTracked() bool {
+	if x != nil {
+		return x.RecordsTracked
+	}
+	return false
+}
+
+func (x *Keyframe) GetRecordFacts() []*Record {
+	if x != nil {
+		return x.RecordFacts
+	}
+	return nil
+}
+
+func (x *Keyframe) GetHead() *RunHead {
+	if x != nil {
+		return x.Head
+	}
+	return nil
+}
+
 type SpanHistory struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Versions      []*SpanVersion         `protobuf:"bytes,1,rep,name=versions,proto3" json:"versions,omitempty"`
@@ -378,7 +636,7 @@ type SpanHistory struct {
 
 func (x *SpanHistory) Reset() {
 	*x = SpanHistory{}
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[4]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -390,7 +648,7 @@ func (x *SpanHistory) String() string {
 func (*SpanHistory) ProtoMessage() {}
 
 func (x *SpanHistory) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[4]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -403,7 +661,7 @@ func (x *SpanHistory) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpanHistory.ProtoReflect.Descriptor instead.
 func (*SpanHistory) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SpanHistory) GetVersions() []*SpanVersion {
@@ -423,7 +681,7 @@ type SpanVersion struct {
 
 func (x *SpanVersion) Reset() {
 	*x = SpanVersion{}
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[5]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -435,7 +693,7 @@ func (x *SpanVersion) String() string {
 func (*SpanVersion) ProtoMessage() {}
 
 func (x *SpanVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[5]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -448,7 +706,7 @@ func (x *SpanVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpanVersion.ProtoReflect.Descriptor instead.
 func (*SpanVersion) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SpanVersion) GetSeq() uint64 {
@@ -475,7 +733,7 @@ type MetricHistory struct {
 
 func (x *MetricHistory) Reset() {
 	*x = MetricHistory{}
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[6]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -487,7 +745,7 @@ func (x *MetricHistory) String() string {
 func (*MetricHistory) ProtoMessage() {}
 
 func (x *MetricHistory) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[6]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -500,7 +758,7 @@ func (x *MetricHistory) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricHistory.ProtoReflect.Descriptor instead.
 func (*MetricHistory) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *MetricHistory) GetSeries() string {
@@ -527,7 +785,7 @@ type MetricVersion struct {
 
 func (x *MetricVersion) Reset() {
 	*x = MetricVersion{}
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[7]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -539,7 +797,7 @@ func (x *MetricVersion) String() string {
 func (*MetricVersion) ProtoMessage() {}
 
 func (x *MetricVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[7]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -552,7 +810,7 @@ func (x *MetricVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricVersion.ProtoReflect.Descriptor instead.
 func (*MetricVersion) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *MetricVersion) GetSeq() uint64 {
@@ -569,17 +827,26 @@ func (x *MetricVersion) GetPoint() *MetricPoint {
 	return nil
 }
 
+// A stored keyframe carries epoch.descriptors inline. The gateway replaces them
+// with descriptors_sha256 on the wire (SkeletonResponse.descriptor_sets), since
+// every epoch of a run usually repeats one set. Exactly one of the two names the
+// descriptors of an epoch that has any. The wire form is not valid under the
+// EpochStarted descriptor rules until a reader has restored them.
 type EpochVersion struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Seq           uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
-	Epoch         *EpochStarted          `protobuf:"bytes,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Seq               uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
+	Epoch             *EpochStarted          `protobuf:"bytes,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	DescriptorsSha256 string                 `protobuf:"bytes,3,opt,name=descriptors_sha256,json=descriptorsSha256,proto3" json:"descriptors_sha256,omitempty"`
+	// The original header envelope. Amendments and inferred input declarations do not start epochs.
+	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	StartsEpoch   bool                   `protobuf:"varint,5,opt,name=starts_epoch,json=startsEpoch,proto3" json:"starts_epoch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EpochVersion) Reset() {
 	*x = EpochVersion{}
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[8]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +858,7 @@ func (x *EpochVersion) String() string {
 func (*EpochVersion) ProtoMessage() {}
 
 func (x *EpochVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[8]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +871,7 @@ func (x *EpochVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EpochVersion.ProtoReflect.Descriptor instead.
 func (*EpochVersion) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *EpochVersion) GetSeq() uint64 {
@@ -621,6 +888,27 @@ func (x *EpochVersion) GetEpoch() *EpochStarted {
 	return nil
 }
 
+func (x *EpochVersion) GetDescriptorsSha256() string {
+	if x != nil {
+		return x.DescriptorsSha256
+	}
+	return ""
+}
+
+func (x *EpochVersion) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
+func (x *EpochVersion) GetStartsEpoch() bool {
+	if x != nil {
+		return x.StartsEpoch
+	}
+	return false
+}
+
 type LifecycleVersion struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Seq           uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
@@ -631,7 +919,7 @@ type LifecycleVersion struct {
 
 func (x *LifecycleVersion) Reset() {
 	*x = LifecycleVersion{}
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[9]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -643,7 +931,7 @@ func (x *LifecycleVersion) String() string {
 func (*LifecycleVersion) ProtoMessage() {}
 
 func (x *LifecycleVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[9]
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -656,7 +944,7 @@ func (x *LifecycleVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LifecycleVersion.ProtoReflect.Descriptor instead.
 func (*LifecycleVersion) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *LifecycleVersion) GetSeq() uint64 {
@@ -673,11 +961,244 @@ func (x *LifecycleVersion) GetLifecycle() *Lifecycle {
 	return nil
 }
 
+type SeriesPerformance struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Series        string                 `protobuf:"bytes,1,opt,name=series,proto3" json:"series,omitempty"`
+	InputValue    *float64               `protobuf:"fixed64,2,opt,name=input_value,json=inputValue,proto3,oneof" json:"input_value,omitempty"`
+	BestValue     *float64               `protobuf:"fixed64,3,opt,name=best_value,json=bestValue,proto3,oneof" json:"best_value,omitempty"`
+	Points        []*IdeaPerformance     `protobuf:"bytes,4,rep,name=points,proto3" json:"points,omitempty"`
+	Ideas         []*IdeaDecision        `protobuf:"bytes,6,rep,name=ideas,proto3" json:"ideas,omitempty"`
+	Refusal       *PerformanceRefusal    `protobuf:"varint,5,opt,name=refusal,proto3,enum=vibesys.store.v1.PerformanceRefusal,oneof" json:"refusal,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SeriesPerformance) Reset() {
+	*x = SeriesPerformance{}
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SeriesPerformance) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SeriesPerformance) ProtoMessage() {}
+
+func (x *SeriesPerformance) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SeriesPerformance.ProtoReflect.Descriptor instead.
+func (*SeriesPerformance) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SeriesPerformance) GetSeries() string {
+	if x != nil {
+		return x.Series
+	}
+	return ""
+}
+
+func (x *SeriesPerformance) GetInputValue() float64 {
+	if x != nil && x.InputValue != nil {
+		return *x.InputValue
+	}
+	return 0
+}
+
+func (x *SeriesPerformance) GetBestValue() float64 {
+	if x != nil && x.BestValue != nil {
+		return *x.BestValue
+	}
+	return 0
+}
+
+func (x *SeriesPerformance) GetPoints() []*IdeaPerformance {
+	if x != nil {
+		return x.Points
+	}
+	return nil
+}
+
+func (x *SeriesPerformance) GetIdeas() []*IdeaDecision {
+	if x != nil {
+		return x.Ideas
+	}
+	return nil
+}
+
+func (x *SeriesPerformance) GetRefusal() PerformanceRefusal {
+	if x != nil && x.Refusal != nil {
+		return *x.Refusal
+	}
+	return PerformanceRefusal_PERFORMANCE_REFUSAL_UNSPECIFIED
+}
+
+type IdeaPerformance struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	MeasurementSeq uint64                 `protobuf:"varint,1,opt,name=measurement_seq,json=measurementSeq,proto3" json:"measurement_seq,omitempty"`
+	Point          *MetricPoint           `protobuf:"bytes,2,opt,name=point,proto3" json:"point,omitempty"`
+	Idea           *string                `protobuf:"bytes,3,opt,name=idea,proto3,oneof" json:"idea,omitempty"`
+	Outcome        IdeaOutcome            `protobuf:"varint,4,opt,name=outcome,proto3,enum=vibesys.store.v1.IdeaOutcome" json:"outcome,omitempty"`
+	NewBest        bool                   `protobuf:"varint,5,opt,name=new_best,json=newBest,proto3" json:"new_best,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *IdeaPerformance) Reset() {
+	*x = IdeaPerformance{}
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IdeaPerformance) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IdeaPerformance) ProtoMessage() {}
+
+func (x *IdeaPerformance) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IdeaPerformance.ProtoReflect.Descriptor instead.
+func (*IdeaPerformance) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *IdeaPerformance) GetMeasurementSeq() uint64 {
+	if x != nil {
+		return x.MeasurementSeq
+	}
+	return 0
+}
+
+func (x *IdeaPerformance) GetPoint() *MetricPoint {
+	if x != nil {
+		return x.Point
+	}
+	return nil
+}
+
+func (x *IdeaPerformance) GetIdea() string {
+	if x != nil && x.Idea != nil {
+		return *x.Idea
+	}
+	return ""
+}
+
+func (x *IdeaPerformance) GetOutcome() IdeaOutcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return IdeaOutcome_IDEA_OUTCOME_UNSPECIFIED
+}
+
+func (x *IdeaPerformance) GetNewBest() bool {
+	if x != nil {
+		return x.NewBest
+	}
+	return false
+}
+
+// An idea still has an outcome when no gate produced a reading.
+type IdeaDecision struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Idea           string                 `protobuf:"bytes,1,opt,name=idea,proto3" json:"idea,omitempty"`
+	Outcome        IdeaOutcome            `protobuf:"varint,2,opt,name=outcome,proto3,enum=vibesys.store.v1.IdeaOutcome" json:"outcome,omitempty"`
+	MeasurementSeq *uint64                `protobuf:"varint,3,opt,name=measurement_seq,json=measurementSeq,proto3,oneof" json:"measurement_seq,omitempty"`
+	NewBest        bool                   `protobuf:"varint,4,opt,name=new_best,json=newBest,proto3" json:"new_best,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *IdeaDecision) Reset() {
+	*x = IdeaDecision{}
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IdeaDecision) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IdeaDecision) ProtoMessage() {}
+
+func (x *IdeaDecision) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_skeleton_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IdeaDecision.ProtoReflect.Descriptor instead.
+func (*IdeaDecision) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_skeleton_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *IdeaDecision) GetIdea() string {
+	if x != nil {
+		return x.Idea
+	}
+	return ""
+}
+
+func (x *IdeaDecision) GetOutcome() IdeaOutcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return IdeaOutcome_IDEA_OUTCOME_UNSPECIFIED
+}
+
+func (x *IdeaDecision) GetMeasurementSeq() uint64 {
+	if x != nil && x.MeasurementSeq != nil {
+		return *x.MeasurementSeq
+	}
+	return 0
+}
+
+func (x *IdeaDecision) GetNewBest() bool {
+	if x != nil {
+		return x.NewBest
+	}
+	return false
+}
+
 var File_vibesys_store_v1_skeleton_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\n" +
-	"\x1fvibesys/store/v1/skeleton.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"vibesys/store/v1/agent_attrs.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/record.proto\x1a\x1bvibesys/store/v1/span.proto\"\xdc\a\n" +
+	"\x1fvibesys/store/v1/skeleton.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"vibesys/store/v1/agent_attrs.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/record.proto\x1a\x1bvibesys/store/v1/span.proto\"t\n" +
+	"\n" +
+	"RunAddress\x121\n" +
+	"\fproject_root\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01(\x80\x80\x04:\x01/R\vprojectRoot\x123\n" +
+	"\rlog_directory\x18\x02 \x01(\tB\x0e\xbaH\vr\t\x10\x01(\x80\x80\x04:\x01/R\flogDirectory\"\xd2\b\n" +
 	"\aRunHead\x129\n" +
 	"\tlifecycle\x18\x01 \x01(\v2\x1b.vibesys.store.v1.LifecycleR\tlifecycle\x12'\n" +
 	"\bstrategy\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\bstrategy\x12A\n" +
@@ -693,19 +1214,22 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\aprocess\x18\t \x01(\v2\x1c.vibesys.store.v1.RunProcessR\aprocess\x12-\n" +
 	"\x12awaiting_lifecycle\x18\n" +
 	" \x01(\bR\x11awaitingLifecycle\x12\x14\n" +
-	"\x05epoch\x18\v \x01(\rR\x05epoch\x1a=\n" +
+	"\x05epoch\x18\v \x01(\rR\x05epoch\x12E\n" +
+	"\vperformance\x18\f \x03(\v2#.vibesys.store.v1.SeriesPerformanceR\vperformance\x12-\n" +
+	"\x12performance_stated\x18\r \x01(\bR\x11performanceStated\x1a=\n" +
 	"\x0fSpanCountsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01:\xbe\x02\xbaH\xba\x02\x1af\n" +
 	"\x15run_head.chart_points\x12,chart_points must contain at most 256 points\x1a\x1fthis.chart_points.size() <= 256\x1a\xcf\x01\n" +
 	"\x12run_head.lifecycle\x12;head has either a lifecycle or an explicitly awaiting epoch\x1a|has(this.lifecycle) != this.awaiting_lifecycle && (!this.awaiting_lifecycle || (this.epoch > 0u && has(this.committed_seq)))B\x10\n" +
-	"\x0e_committed_seq\"\xd2\x01\n" +
+	"\x0e_committed_seq\"\xf5\x01\n" +
 	"\x11HeadlineObjective\x12B\n" +
 	"\x06series\x18\x01 \x01(\v2\".vibesys.store.v1.MetricSeriesDeclB\x06\xbaH\x03\xc8\x01\x01R\x06series\x12+\n" +
 	"\n" +
 	"best_value\x18\x02 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x00R\tbestValue\x88\x01\x01\x12-\n" +
 	"\vinput_value\x18\x03 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x01R\n" +
-	"inputValue\x88\x01\x01B\r\n" +
+	"inputValue\x88\x01\x01\x12!\n" +
+	"\finput_stated\x18\x04 \x01(\bR\vinputStatedB\r\n" +
 	"\v_best_valueB\x0e\n" +
 	"\f_input_value\"\x89\x01\n" +
 	"\n" +
@@ -713,7 +1237,7 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\x03pid\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\x03pid\x12\x1d\n" +
 	"\x05epoch\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x05epoch\x12A\n" +
 	"\n" +
-	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\"\xea\x03\n" +
+	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\"\x91\f\n" +
 	"\bKeyframe\x12(\n" +
 	"\vthrough_seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\n" +
 	"throughSeq\x120\n" +
@@ -725,11 +1249,20 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\x06epochs\x18\x06 \x03(\v2\x1e.vibesys.store.v1.EpochVersionR\x06epochs\x12B\n" +
 	"\n" +
 	"lifecycles\x18\a \x03(\v2\".vibesys.store.v1.LifecycleVersionR\n" +
-	"lifecycles\x1aW\n" +
+	"lifecycles\x124\n" +
+	"\bfailures\x18\b \x03(\v2\x18.vibesys.store.v1.RecordR\bfailures\x12)\n" +
+	"\x10failures_tracked\x18\t \x01(\bR\x0ffailuresTracked\x122\n" +
+	"\aintents\x18\n" +
+	" \x03(\v2\x18.vibesys.store.v1.RecordR\aintents\x12'\n" +
+	"\x0frecords_tracked\x18\v \x01(\bR\x0erecordsTracked\x12;\n" +
+	"\frecord_facts\x18\f \x03(\v2\x18.vibesys.store.v1.RecordR\vrecordFacts\x12-\n" +
+	"\x04head\x18\r \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x1aW\n" +
 	"\n" +
 	"SpansEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
-	"\x05value\x18\x02 \x01(\v2\x1d.vibesys.store.v1.SpanHistoryR\x05value:\x028\x01\"H\n" +
+	"\x05value\x18\x02 \x01(\v2\x1d.vibesys.store.v1.SpanHistoryR\x05value:\x028\x01:\xfa\x05\xbaH\xf6\x05\x1a\xf8\x02\n" +
+	"\x1fkeyframe.failures_within_prefix\x12\x95\x01failures must be error notices of the prefix: sequence at most through_seq, at most one per epoch, and only a keyframe that tracks them may carry any\x1a\xbc\x01this.failures.all(f, f.seq <= this.through_seq && has(f.notice) && f.notice.severity >= 2) && this.failures.map(f, f.epoch).unique() && (this.failures.size() == 0 || this.failures_tracked)\x1a\xf8\x02\n" +
+	"\x15keyframe.record_facts\x12drecord facts must be unique records within the checkpoint prefix, with intent bodies only in intents\x1a\xf8\x01this.intents.all(r, r.seq <= this.through_seq && has(r.intent)) && this.intents.map(r, r.seq).unique() && this.record_facts.all(r, r.seq <= this.through_seq && (has(r.blob) || has(r.chat) || has(r.span))) && this.record_facts.map(r, r.seq).unique()\"H\n" +
 	"\vSpanHistory\x129\n" +
 	"\bversions\x18\x01 \x03(\v2\x1d.vibesys.store.v1.SpanVersionR\bversions\"\\\n" +
 	"\vSpanVersion\x12\x19\n" +
@@ -740,13 +1273,60 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\x06points\x18\x02 \x03(\v2\x1f.vibesys.store.v1.MetricVersionR\x06points\"g\n" +
 	"\rMetricVersion\x12\x19\n" +
 	"\x03seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12;\n" +
-	"\x05point\x18\x02 \x01(\v2\x1d.vibesys.store.v1.MetricPointB\x06\xbaH\x03\xc8\x01\x01R\x05point\"g\n" +
+	"\x05point\x18\x02 \x01(\v2\x1d.vibesys.store.v1.MetricPointB\x06\xbaH\x03\xc8\x01\x01R\x05point\"\xae\x03\n" +
 	"\fEpochVersion\x12\x19\n" +
 	"\x03seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12<\n" +
-	"\x05epoch\x18\x02 \x01(\v2\x1e.vibesys.store.v1.EpochStartedB\x06\xbaH\x03\xc8\x01\x01R\x05epoch\"p\n" +
+	"\x05epoch\x18\x02 \x01(\v2\x1e.vibesys.store.v1.EpochStartedB\x06\xbaH\x03\xc8\x01\x01R\x05epoch\x12G\n" +
+	"\x12descriptors_sha256\x18\x03 \x01(\tB\x18\xbaH\x15r\x132\x11^([0-9a-f]{64})?$R\x11descriptorsSha256\x129\n" +
+	"\n" +
+	"started_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12!\n" +
+	"\fstarts_epoch\x18\x05 \x01(\bR\vstartsEpoch:\x9d\x01\xbaH\x99\x01\x1a\x96\x01\n" +
+	"\x1eepoch_version.descriptors_once\x125descriptors are inline or addressed by hash, not both\x1a=this.descriptors_sha256 == '' || !has(this.epoch.descriptors)\"p\n" +
 	"\x10LifecycleVersion\x12\x19\n" +
 	"\x03seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12A\n" +
-	"\tlifecycle\x18\x02 \x01(\v2\x1b.vibesys.store.v1.LifecycleB\x06\xbaH\x03\xc8\x01\x01R\tlifecycleBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
+	"\tlifecycle\x18\x02 \x01(\v2\x1b.vibesys.store.v1.LifecycleB\x06\xbaH\x03\xc8\x01\x01R\tlifecycle\"\x81\x03\n" +
+	"\x11SeriesPerformance\x12#\n" +
+	"\x06series\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x06series\x12-\n" +
+	"\vinput_value\x18\x02 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x00R\n" +
+	"inputValue\x88\x01\x01\x12+\n" +
+	"\n" +
+	"best_value\x18\x03 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x01R\tbestValue\x88\x01\x01\x129\n" +
+	"\x06points\x18\x04 \x03(\v2!.vibesys.store.v1.IdeaPerformanceR\x06points\x124\n" +
+	"\x05ideas\x18\x06 \x03(\v2\x1e.vibesys.store.v1.IdeaDecisionR\x05ideas\x12O\n" +
+	"\arefusal\x18\x05 \x01(\x0e2$.vibesys.store.v1.PerformanceRefusalB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x02R\arefusal\x88\x01\x01B\x0e\n" +
+	"\f_input_valueB\r\n" +
+	"\v_best_valueB\n" +
+	"\n" +
+	"\b_refusal\"\x8f\x02\n" +
+	"\x0fIdeaPerformance\x120\n" +
+	"\x0fmeasurement_seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\x0emeasurementSeq\x12;\n" +
+	"\x05point\x18\x02 \x01(\v2\x1d.vibesys.store.v1.MetricPointB\x06\xbaH\x03\xc8\x01\x01R\x05point\x12$\n" +
+	"\x04idea\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x04idea\x88\x01\x01\x12C\n" +
+	"\aoutcome\x18\x04 \x01(\x0e2\x1d.vibesys.store.v1.IdeaOutcomeB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aoutcome\x12\x19\n" +
+	"\bnew_best\x18\x05 \x01(\bR\anewBestB\a\n" +
+	"\x05_idea\"\xda\x01\n" +
+	"\fIdeaDecision\x12\x1f\n" +
+	"\x04idea\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04idea\x12C\n" +
+	"\aoutcome\x18\x02 \x01(\x0e2\x1d.vibesys.store.v1.IdeaOutcomeB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aoutcome\x125\n" +
+	"\x0fmeasurement_seq\x18\x03 \x01(\x04B\a\xbaH\x042\x02 \x00H\x00R\x0emeasurementSeq\x88\x01\x01\x12\x19\n" +
+	"\bnew_best\x18\x04 \x01(\bR\anewBestB\x12\n" +
+	"\x10_measurement_seq*d\n" +
+	"\x12PerformanceRefusal\x12#\n" +
+	"\x1fPERFORMANCE_REFUSAL_UNSPECIFIED\x10\x00\x12)\n" +
+	"%PERFORMANCE_REFUSAL_UNKNOWN_DIRECTION\x10\x01*\x89\x02\n" +
+	"\vIdeaOutcome\x12\x1c\n" +
+	"\x18IDEA_OUTCOME_UNSPECIFIED\x10\x00\x12\x18\n" +
+	"\x14IDEA_OUTCOME_PENDING\x10\x01\x12\x17\n" +
+	"\x13IDEA_OUTCOME_FAILED\x10\x02\x12\x15\n" +
+	"\x11IDEA_OUTCOME_KEPT\x10\x03\x12\x19\n" +
+	"\x15IDEA_OUTCOME_NOT_KEPT\x10\x04\x12\x1d\n" +
+	"\x19IDEA_OUTCOME_WITHIN_NOISE\x10\x05\x12!\n" +
+	"\x1dIDEA_OUTCOME_WORSE_THAN_INPUT\x10\x06\x12\x16\n" +
+	"\x12IDEA_OUTCOME_INPUT\x10\a\x12\x1d\n" +
+	"\x19IDEA_OUTCOME_UNATTRIBUTED\x10\bBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_skeleton_proto_rawDescOnce sync.Once
@@ -760,55 +1340,75 @@ func file_vibesys_store_v1_skeleton_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_skeleton_proto_rawDescData
 }
 
-var file_vibesys_store_v1_skeleton_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_vibesys_store_v1_skeleton_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_vibesys_store_v1_skeleton_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_vibesys_store_v1_skeleton_proto_goTypes = []any{
-	(*RunHead)(nil),               // 0: vibesys.store.v1.RunHead
-	(*HeadlineObjective)(nil),     // 1: vibesys.store.v1.HeadlineObjective
-	(*RunProcess)(nil),            // 2: vibesys.store.v1.RunProcess
-	(*Keyframe)(nil),              // 3: vibesys.store.v1.Keyframe
-	(*SpanHistory)(nil),           // 4: vibesys.store.v1.SpanHistory
-	(*SpanVersion)(nil),           // 5: vibesys.store.v1.SpanVersion
-	(*MetricHistory)(nil),         // 6: vibesys.store.v1.MetricHistory
-	(*MetricVersion)(nil),         // 7: vibesys.store.v1.MetricVersion
-	(*EpochVersion)(nil),          // 8: vibesys.store.v1.EpochVersion
-	(*LifecycleVersion)(nil),      // 9: vibesys.store.v1.LifecycleVersion
-	nil,                           // 10: vibesys.store.v1.RunHead.SpanCountsEntry
-	nil,                           // 11: vibesys.store.v1.Keyframe.SpansEntry
-	(*Lifecycle)(nil),             // 12: vibesys.store.v1.Lifecycle
-	(*TokenUsage)(nil),            // 13: vibesys.store.v1.TokenUsage
-	(*MetricPoint)(nil),           // 14: vibesys.store.v1.MetricPoint
-	(*MetricSeriesDecl)(nil),      // 15: vibesys.store.v1.MetricSeriesDecl
-	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
-	(*StreamRef)(nil),             // 17: vibesys.store.v1.StreamRef
-	(*Span)(nil),                  // 18: vibesys.store.v1.Span
-	(*EpochStarted)(nil),          // 19: vibesys.store.v1.EpochStarted
+	(PerformanceRefusal)(0),       // 0: vibesys.store.v1.PerformanceRefusal
+	(IdeaOutcome)(0),              // 1: vibesys.store.v1.IdeaOutcome
+	(*RunAddress)(nil),            // 2: vibesys.store.v1.RunAddress
+	(*RunHead)(nil),               // 3: vibesys.store.v1.RunHead
+	(*HeadlineObjective)(nil),     // 4: vibesys.store.v1.HeadlineObjective
+	(*RunProcess)(nil),            // 5: vibesys.store.v1.RunProcess
+	(*Keyframe)(nil),              // 6: vibesys.store.v1.Keyframe
+	(*SpanHistory)(nil),           // 7: vibesys.store.v1.SpanHistory
+	(*SpanVersion)(nil),           // 8: vibesys.store.v1.SpanVersion
+	(*MetricHistory)(nil),         // 9: vibesys.store.v1.MetricHistory
+	(*MetricVersion)(nil),         // 10: vibesys.store.v1.MetricVersion
+	(*EpochVersion)(nil),          // 11: vibesys.store.v1.EpochVersion
+	(*LifecycleVersion)(nil),      // 12: vibesys.store.v1.LifecycleVersion
+	(*SeriesPerformance)(nil),     // 13: vibesys.store.v1.SeriesPerformance
+	(*IdeaPerformance)(nil),       // 14: vibesys.store.v1.IdeaPerformance
+	(*IdeaDecision)(nil),          // 15: vibesys.store.v1.IdeaDecision
+	nil,                           // 16: vibesys.store.v1.RunHead.SpanCountsEntry
+	nil,                           // 17: vibesys.store.v1.Keyframe.SpansEntry
+	(*Lifecycle)(nil),             // 18: vibesys.store.v1.Lifecycle
+	(*TokenUsage)(nil),            // 19: vibesys.store.v1.TokenUsage
+	(*MetricPoint)(nil),           // 20: vibesys.store.v1.MetricPoint
+	(*MetricSeriesDecl)(nil),      // 21: vibesys.store.v1.MetricSeriesDecl
+	(*timestamppb.Timestamp)(nil), // 22: google.protobuf.Timestamp
+	(*StreamRef)(nil),             // 23: vibesys.store.v1.StreamRef
+	(*Record)(nil),                // 24: vibesys.store.v1.Record
+	(*Span)(nil),                  // 25: vibesys.store.v1.Span
+	(*EpochStarted)(nil),          // 26: vibesys.store.v1.EpochStarted
 }
 var file_vibesys_store_v1_skeleton_proto_depIdxs = []int32{
-	12, // 0: vibesys.store.v1.RunHead.lifecycle:type_name -> vibesys.store.v1.Lifecycle
-	1,  // 1: vibesys.store.v1.RunHead.objective:type_name -> vibesys.store.v1.HeadlineObjective
-	10, // 2: vibesys.store.v1.RunHead.span_counts:type_name -> vibesys.store.v1.RunHead.SpanCountsEntry
-	13, // 3: vibesys.store.v1.RunHead.usage:type_name -> vibesys.store.v1.TokenUsage
-	14, // 4: vibesys.store.v1.RunHead.chart_points:type_name -> vibesys.store.v1.MetricPoint
-	2,  // 5: vibesys.store.v1.RunHead.process:type_name -> vibesys.store.v1.RunProcess
-	15, // 6: vibesys.store.v1.HeadlineObjective.series:type_name -> vibesys.store.v1.MetricSeriesDecl
-	16, // 7: vibesys.store.v1.RunProcess.started_at:type_name -> google.protobuf.Timestamp
-	11, // 8: vibesys.store.v1.Keyframe.spans:type_name -> vibesys.store.v1.Keyframe.SpansEntry
-	6,  // 9: vibesys.store.v1.Keyframe.metrics:type_name -> vibesys.store.v1.MetricHistory
-	17, // 10: vibesys.store.v1.Keyframe.streams:type_name -> vibesys.store.v1.StreamRef
-	8,  // 11: vibesys.store.v1.Keyframe.epochs:type_name -> vibesys.store.v1.EpochVersion
-	9,  // 12: vibesys.store.v1.Keyframe.lifecycles:type_name -> vibesys.store.v1.LifecycleVersion
-	5,  // 13: vibesys.store.v1.SpanHistory.versions:type_name -> vibesys.store.v1.SpanVersion
-	18, // 14: vibesys.store.v1.SpanVersion.span:type_name -> vibesys.store.v1.Span
-	7,  // 15: vibesys.store.v1.MetricHistory.points:type_name -> vibesys.store.v1.MetricVersion
-	14, // 16: vibesys.store.v1.MetricVersion.point:type_name -> vibesys.store.v1.MetricPoint
-	19, // 17: vibesys.store.v1.EpochVersion.epoch:type_name -> vibesys.store.v1.EpochStarted
-	12, // 18: vibesys.store.v1.LifecycleVersion.lifecycle:type_name -> vibesys.store.v1.Lifecycle
-	4,  // 19: vibesys.store.v1.Keyframe.SpansEntry.value:type_name -> vibesys.store.v1.SpanHistory
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	18, // 0: vibesys.store.v1.RunHead.lifecycle:type_name -> vibesys.store.v1.Lifecycle
+	4,  // 1: vibesys.store.v1.RunHead.objective:type_name -> vibesys.store.v1.HeadlineObjective
+	16, // 2: vibesys.store.v1.RunHead.span_counts:type_name -> vibesys.store.v1.RunHead.SpanCountsEntry
+	19, // 3: vibesys.store.v1.RunHead.usage:type_name -> vibesys.store.v1.TokenUsage
+	20, // 4: vibesys.store.v1.RunHead.chart_points:type_name -> vibesys.store.v1.MetricPoint
+	5,  // 5: vibesys.store.v1.RunHead.process:type_name -> vibesys.store.v1.RunProcess
+	13, // 6: vibesys.store.v1.RunHead.performance:type_name -> vibesys.store.v1.SeriesPerformance
+	21, // 7: vibesys.store.v1.HeadlineObjective.series:type_name -> vibesys.store.v1.MetricSeriesDecl
+	22, // 8: vibesys.store.v1.RunProcess.started_at:type_name -> google.protobuf.Timestamp
+	17, // 9: vibesys.store.v1.Keyframe.spans:type_name -> vibesys.store.v1.Keyframe.SpansEntry
+	9,  // 10: vibesys.store.v1.Keyframe.metrics:type_name -> vibesys.store.v1.MetricHistory
+	23, // 11: vibesys.store.v1.Keyframe.streams:type_name -> vibesys.store.v1.StreamRef
+	11, // 12: vibesys.store.v1.Keyframe.epochs:type_name -> vibesys.store.v1.EpochVersion
+	12, // 13: vibesys.store.v1.Keyframe.lifecycles:type_name -> vibesys.store.v1.LifecycleVersion
+	24, // 14: vibesys.store.v1.Keyframe.failures:type_name -> vibesys.store.v1.Record
+	24, // 15: vibesys.store.v1.Keyframe.intents:type_name -> vibesys.store.v1.Record
+	24, // 16: vibesys.store.v1.Keyframe.record_facts:type_name -> vibesys.store.v1.Record
+	3,  // 17: vibesys.store.v1.Keyframe.head:type_name -> vibesys.store.v1.RunHead
+	8,  // 18: vibesys.store.v1.SpanHistory.versions:type_name -> vibesys.store.v1.SpanVersion
+	25, // 19: vibesys.store.v1.SpanVersion.span:type_name -> vibesys.store.v1.Span
+	10, // 20: vibesys.store.v1.MetricHistory.points:type_name -> vibesys.store.v1.MetricVersion
+	20, // 21: vibesys.store.v1.MetricVersion.point:type_name -> vibesys.store.v1.MetricPoint
+	26, // 22: vibesys.store.v1.EpochVersion.epoch:type_name -> vibesys.store.v1.EpochStarted
+	22, // 23: vibesys.store.v1.EpochVersion.started_at:type_name -> google.protobuf.Timestamp
+	18, // 24: vibesys.store.v1.LifecycleVersion.lifecycle:type_name -> vibesys.store.v1.Lifecycle
+	14, // 25: vibesys.store.v1.SeriesPerformance.points:type_name -> vibesys.store.v1.IdeaPerformance
+	15, // 26: vibesys.store.v1.SeriesPerformance.ideas:type_name -> vibesys.store.v1.IdeaDecision
+	0,  // 27: vibesys.store.v1.SeriesPerformance.refusal:type_name -> vibesys.store.v1.PerformanceRefusal
+	20, // 28: vibesys.store.v1.IdeaPerformance.point:type_name -> vibesys.store.v1.MetricPoint
+	1,  // 29: vibesys.store.v1.IdeaPerformance.outcome:type_name -> vibesys.store.v1.IdeaOutcome
+	1,  // 30: vibesys.store.v1.IdeaDecision.outcome:type_name -> vibesys.store.v1.IdeaOutcome
+	7,  // 31: vibesys.store.v1.Keyframe.SpansEntry.value:type_name -> vibesys.store.v1.SpanHistory
+	32, // [32:32] is the sub-list for method output_type
+	32, // [32:32] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_skeleton_proto_init() }
@@ -822,20 +1422,24 @@ func file_vibesys_store_v1_skeleton_proto_init() {
 	file_vibesys_store_v1_lifecycle_proto_init()
 	file_vibesys_store_v1_record_proto_init()
 	file_vibesys_store_v1_span_proto_init()
-	file_vibesys_store_v1_skeleton_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_store_v1_skeleton_proto_msgTypes[1].OneofWrappers = []any{}
+	file_vibesys_store_v1_skeleton_proto_msgTypes[2].OneofWrappers = []any{}
+	file_vibesys_store_v1_skeleton_proto_msgTypes[11].OneofWrappers = []any{}
+	file_vibesys_store_v1_skeleton_proto_msgTypes[12].OneofWrappers = []any{}
+	file_vibesys_store_v1_skeleton_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_skeleton_proto_rawDesc), len(file_vibesys_store_v1_skeleton_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   12,
+			NumEnums:      2,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_vibesys_store_v1_skeleton_proto_goTypes,
 		DependencyIndexes: file_vibesys_store_v1_skeleton_proto_depIdxs,
+		EnumInfos:         file_vibesys_store_v1_skeleton_proto_enumTypes,
 		MessageInfos:      file_vibesys_store_v1_skeleton_proto_msgTypes,
 	}.Build()
 	File_vibesys_store_v1_skeleton_proto = out.File

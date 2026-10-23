@@ -39,11 +39,14 @@ def _slots() -> tuple[str, ...]:
     return (
         "list_tasks",
         "list_saved_runs",
+        "list_run_digests",
+        "usage_window",
         "list_harnesses",
         "list_examples",
         "get_task_goal",
         "describe_machine",
         "list_compute",
+        "list_agent_logins",
         "inspect_destination",
         "preflight_run",
         "terminate_run",
@@ -89,6 +92,7 @@ def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
         ("post_intent", 10000),
         ("relaunch", 30000),
         ("chat_message", 10000),
+        ("create_chat_session", 10000),
     ]
     assert [(op.slot, op.policy.cap_ms) for op in compiled if op.is_watch()] == [
         ("login", 600000),

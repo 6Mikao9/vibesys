@@ -8,16 +8,15 @@ is light (``tests/architecture/test_light_entrypoints.py``).
 
 Public surface: ``FileProjects``, ``ProjectStopIntents``, ``OsDirectories``,
 ``SubprocessRunLauncher``,
-``SubprocessRunPreflight``, ``LoginStarter`` and ``HeldLogin`` with ``LoginBounds`` and ``login_instruction``,
+``SubprocessRunPreflight``,
 ``read_task_goal``,
-``GitCheckoutProbe``, ``OsConfigFiles``, and ``StoreLogReader`` with ``run_streams_directory``.
+``GitCheckoutProbe`` and ``StoreLogReader`` with ``run_streams_directory``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-import re
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -27,7 +26,6 @@ from typing import TYPE_CHECKING, BinaryIO
 
 from pydantic import JsonValue, TypeAdapter
 
-from server.host_agent_logins import LoginStarted, LoginUnavailable, LoginUnavailableReason
 from server.host_api import (
     RUN_EVENTS_FILE,
     RUN_EVENTS_READ_MAX_BYTES,
@@ -46,7 +44,14 @@ from server.host_api import (
     RunDigest,
     RunDigestUnreadable,
 )
-from server.host_examples import ExampleObjective, TaskGoal, TaskList, TaskSummary, bounded_goal
+from server.host_examples import (
+    ExampleObjective,
+    ProjectLookupError,
+    TaskGoal,
+    TaskList,
+    TaskSummary,
+    bounded_goal,
+)
 from server.host_helper_logs import (
     LogStoreCorruptError,
     RunLocation,
@@ -59,8 +64,6 @@ from server.host_helper_preflight import preflight_unavailable
 from server.host_helper_requests import (
     EventPage,
     PathHints,
-    ProjectLookupError,
-    ProjectRun,
     Scan,
     ScannedEntry,
     SpanEventPage,
@@ -87,11 +90,12 @@ from vs_project.api import (
     ProjectError,
     load_objectives,
 )
-from vs_sim.api import ProcessSpec, ProcessTimeoutError
+from vs_sim.api import ProcessSpec
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Sequence
 
+    from server.host_run_reads import ProjectRun
     from server.run_summary import Summarized
     from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
@@ -99,8 +103,6 @@ if TYPE_CHECKING:
     from vs_proto.api import host_payloads as pb
     from vs_sim.api import (
         CommandProbe,
-        PipedProcess,
-        PipedProcessLauncher,
         ProcessLauncher,
         SleepingClock,
         Threads,
@@ -236,14 +238,12 @@ class FileProjects:
         self._journals: dict[tuple[Path, str], Path] = {}
         self._tallies: dict[Path, JournalTally] = {}
         self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}
+        self._native_digests: dict[Path, tuple[bytes, RunDigest]] = {}
         self._indexes: dict[Path, JournalIndex] = {}
         self._summary_reader: SummaryReader | None = None
 
     def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        """Reuse catalog metadata and the transport's retained-format importer."""
-        if self._clock is None:
-            message = "saved-run import clock was not supplied"
-            raise ValueError(message)
+        """Read catalog metadata and bounded history availability observations."""
         wire = import_module("vs_proto.api")
         pb = wire.host_payloads
 
@@ -258,9 +258,7 @@ class FileProjects:
             )
             for run in runs
         ]
-        return import_module("server.host_saved_runs").page_saved_runs(
-            request, root, entries, clock=self._clock, threads=self._threads
-        )
+        return import_module("server.host_saved_runs").page_saved_runs(request, root, entries)
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -302,8 +300,9 @@ class FileProjects:
             raise ProjectLookupError(
                 HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)
             ) from exc
+        project_run = import_module("server.host_run_reads").ProjectRun
         recorded = [
-            ProjectRun(
+            project_run(
                 run_id=manifest.run_id,
                 task=manifest.task_name,
                 display_name=manifest.display_name,
@@ -313,7 +312,7 @@ class FileProjects:
         ]
         known = {run.run_id for run in recorded}
         journaled = [
-            ProjectRun(
+            project_run(
                 run_id=run_id,
                 task=None,
                 display_name=run_id,
@@ -330,11 +329,13 @@ class FileProjects:
         return opened.root, tuple(runs)
 
     def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
-        """What run ``run_id``'s journal says at a glance; ``None`` when there is no journal.
+        """Committed store facts, or the journal of a run never converted to the store.
 
-        An ended run's journal never changes, so its digest is kept for as long as the journal
-        keeps its size and modification time; a run still going is read again.
+        Native projections are cached by head bytes, never by a separate journal's age.
         """
+        native = Project.run_log_path_for(project_root, run_id)
+        if native.exists() or native.with_name("run.head").exists():
+            return self._native_digest(native)
         journal = Project.log_directory_for(project_root, run_id) / RUN_EVENTS_FILE
         try:
             with journal.open("rb") as lines:
@@ -353,6 +354,22 @@ class FileProjects:
         if digest.ending is not None or digest.closing is not None:
             self._digests[journal] = (version, digest)
         return digest
+
+    def _native_digest(self, path: Path) -> RunDigest | RunDigestUnreadable:
+        try:
+            version = path.with_name("run.head").read_bytes()
+            cached = self._native_digests.get(path)
+            if cached is not None and cached[0] == version:
+                return cached[1]
+            digest = import_module("server.run_digest_store").read_digest(path)
+        except (OSError, ValueError) as exc:
+            return RunDigestUnreadable(
+                message="the run's committed store could not be read: "
+                + str(exc).replace("\n", " ")[:150]
+            )
+        else:
+            self._native_digests[path] = (version, digest)
+            return digest
 
     def require_initialized(self, project: Path) -> Path:
         """The project's root, once it is known to define tasks."""
@@ -527,28 +544,6 @@ class FileProjects:
                 HelperErrorCode.PROJECT_UNINITIALIZED, str(opened.root), message
             )
         return opened
-
-
-class OsConfigFiles:
-    """The machine's configuration files on this filesystem (``ConfigFiles``)."""
-
-    def read(self, path: str) -> str | None:
-        """The file's text, or ``None`` when it does not exist."""
-        try:
-            return Path(path).read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
-
-    def write(self, path: str, text: str) -> None:
-        """Replace the file whole: write a sibling, then rename it over the file."""
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-        try:
-            staged.write_text(text, encoding="utf-8")
-            staged.replace(target)
-        finally:
-            staged.unlink(missing_ok=True)
 
 
 class ProjectStopIntents:
@@ -828,190 +823,3 @@ class _StoreInstanceLogs:
             eof=chunk.eof,
             closed=chunk.closed,
         )
-
-
-# --- starting a harness's own login ------------------------------------------------------
-#
-# `LoginStarter.start` runs the login command the agent library names (agentshim's facts, the
-# choice of variant in `vs_agent`) as a child that outlives the request: a device-code login
-# prints a page to open and a code to enter, then waits for the person to finish. The starter
-# reads the output until it has that instruction, answers, and leaves the child running; a
-# worker waits for the child so it is reaped, and ends it if the person never finishes.
-
-_LOGIN_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-_LOGIN_URL = re.compile(r"https?://[^\s\x1b\"'<>)]+")
-_LOGIN_CODE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4,8}\b")
-_LOGIN_LINE_MAX = 300
-
-
-def login_instruction(url: str | None, code: str | None) -> str | None:
-    """What the person is asked to do, in one line, or ``None`` when nothing was shown.
-
-    A page without a code is just the page. An instruction that would not fit a wire line is
-    dropped rather than cut: half a URL is worse than none.
-    """
-    if url is None:
-        return None
-    line = f"Open {url} and enter the code {code}" if code is not None else f"Open {url}"
-    return line if len(line) <= _LOGIN_LINE_MAX else None
-
-
-class _Output:
-    """What a login's output has shown so far; the reader writes, ``start`` waits on it."""
-
-    def __init__(self, threads: Threads) -> None:
-        self.condition = threads.condition()
-        self.url: str | None = None
-        self.code: str | None = None
-        self.first_line = ""
-        self.ended = False
-        self.lines = 0
-
-    def take(self, line: str) -> None:
-        text = _LOGIN_ANSI.sub("", line).strip()
-        with self.condition:
-            self.lines += 1
-            if text and not self.first_line:
-                self.first_line = text[:_LOGIN_LINE_MAX]
-            if self.url is None and (found := _LOGIN_URL.search(text)) is not None:
-                self.url = found.group(0)
-            if self.code is None and (found := _LOGIN_CODE.search(text)) is not None:
-                self.code = found.group(0)
-            self.condition.notify_all()
-
-    def end(self) -> None:
-        with self.condition:
-            self.ended = True
-            self.condition.notify_all()
-
-
-@dataclass(frozen=True, slots=True)
-class LoginBounds:
-    """How long a login is waited for, in seconds of ``Threads``' clock."""
-
-    page_wait: float = 10.0
-    """The wait for the first page the login shows."""
-    code_wait: float = 1.0
-    """The further wait for a code once a page is shown."""
-    lifetime: float = 900.0
-    """How long a login may stay open before it is ended."""
-
-
-class HeldLogin:
-    """A login that stays up until it ends or ``cancel`` stops its process group."""
-
-    def __init__(
-        self,
-        threads: Threads,
-        result: LoginStarted | LoginUnavailable,
-        process: PipedProcess | None,
-    ) -> None:
-        """Remember ``result`` and, when ``process`` is running, when it has been reaped."""
-        self.result = result
-        self._process = process
-        self._finished = threads.event()
-        if process is None:
-            self._finished.set()
-
-    def cancel(self) -> None:
-        """Stop the login's process group. A login that never started is unchanged."""
-        process = self._process
-        if process is not None:
-            process.terminate_group()
-
-    def wait(self) -> None:
-        """Block until the login process has been reaped."""
-        self._finished.wait()
-
-    def mark_finished(self) -> None:
-        """Record that the process group has been reaped."""
-        self._finished.set()
-
-
-class LoginStarter:
-    """Runs a login command and reports what it asked the person to do."""
-
-    def __init__(
-        self,
-        processes: PipedProcessLauncher,
-        threads: Threads,
-        environment: Callable[[], Mapping[str, str]],
-        bounds: LoginBounds,
-    ) -> None:
-        """Start commands through ``processes``, in the environment ``environment()`` gives them.
-
-        The environment is read when a login starts, not here: it is the login shell's, which a
-        helper that never starts a login has no reason to load. ``threads`` is the clock waited on.
-        """
-        self._processes = processes
-        self._threads = threads
-        self._environment = environment
-        self._bounds = bounds
-
-    def start(self, argv: tuple[str, ...]) -> LoginStarted | LoginUnavailable:
-        """Run ``argv`` and answer once it has shown its page and code, ended, or run out of time."""
-        return self.hold(argv).result
-
-    def refuse(self, result: LoginUnavailable) -> HeldLogin:
-        """A login that was not started, already finished."""
-        return HeldLogin(self._threads, result, None)
-
-    def hold(self, argv: tuple[str, ...]) -> HeldLogin:
-        """Start ``argv`` and keep the child until ``HeldLogin.cancel`` or its lifetime ends."""
-        try:
-            process = self._processes.start(argv, env=self._environment(), merge_stderr=True)
-        except OSError as error:
-            return HeldLogin(
-                self._threads, _failed(f"could not run {argv[0]}: {error.strerror or error}"), None
-            )
-        output = _Output(self._threads)
-        held = HeldLogin(self._threads, LoginStarted(instruction=None), process)
-        self._threads.spawn(lambda: _read(process, output), name="login-output")
-        self._threads.spawn(
-            lambda: _reap(process, self._bounds.lifetime, held.mark_finished),
-            name="login-reaper",
-        )
-        with output.condition:
-            output.condition.wait_for(
-                lambda: output.url is not None or output.ended, self._bounds.page_wait
-            )
-            if output.url is not None:
-                output.condition.wait_for(
-                    lambda: output.code is not None or output.ended, self._bounds.code_wait
-                )
-            instruction = login_instruction(output.url, output.code)
-            if instruction is None and output.url is None and output.ended and output.first_line:
-                held.result = _failed(output.first_line)
-                return held
-        held.result = LoginStarted(instruction=instruction)
-        return held
-
-
-def _failed(detail: str) -> LoginUnavailable:
-    return LoginUnavailable(
-        reason=LoginUnavailableReason.START_FAILED, detail=detail.splitlines()[0][:_LOGIN_LINE_MAX]
-    )
-
-
-def _read(process: PipedProcess, output: _Output) -> None:
-    """Feed the child's output lines to ``output`` until its pipe closes."""
-    try:
-        while line := process.stdout.readline():
-            output.take(line)
-    finally:
-        output.end()
-
-
-def _reap(process: PipedProcess, lifetime: float, finished: Callable[[], None]) -> None:
-    """Wait for the child so it is reaped, and end its group if it outlives ``lifetime``."""
-    try:
-        process.wait(lifetime)
-    except ProcessTimeoutError:
-        process.terminate_group()
-        try:
-            process.wait(5.0)
-        except ProcessTimeoutError:
-            process.kill_group()
-            process.wait(5.0)
-    finally:
-        finished()

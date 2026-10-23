@@ -8,7 +8,7 @@
 import type {FakeProvides} from './fake-bridge.js';
 
 /** What `installFakeRun` provides: the log streams and the run commands. */
-export type RunMethods = 'logs' | 'releaseLogs' | 'resume';
+type RunMethods = 'logs' | 'releaseLogs' | 'resume';
 
 export interface FakeRunSeed {
   readonly streams: readonly unknown[];

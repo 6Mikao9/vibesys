@@ -34,13 +34,10 @@ import {
   type UsageMethods,
   type WindowsMethods,
 } from './fake-bridge.js';
-import {type ChatMethods, installFakeChat} from './fake-chat.js';
-import {type FixtureServerMethods, installFakeFixtureServer} from './fake-fixture-server.js';
-import {type FakeHistorySeed, installFakeHistory} from './fake-history.js';
 import {FAKE_OFFER} from './fake-offer.js';
-import {installFakeRun, type RunMethods} from './fake-run.js';
-import {type FakeSummarySpanSeed, installFakeSummarySpan} from './fake-summary-span.js';
 import {addInitScripts, initScript as script} from './init-scripts.js';
+import {type NativeFixtureOptions, nativeFixtureScript} from './native-fixture.js';
+import {installGatewayOnly, type RetiredRunMethods} from './retired-run-bridge.js';
 import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/work/queue-rs';
@@ -65,14 +62,13 @@ type ProvidedByWorld =
   | UsageMethods
   | ExampleDestinationMethods
   | WindowsMethods
-  | RunMethods
-  | ChatMethods
-  | FixtureServerMethods;
+  | RetiredRunMethods;
 type MissingMethods = Exclude<keyof WelcomeBridge, ProvidedByWorld>;
 const complete: [MissingMethods] extends [never] ? true : MissingMethods = true;
 void complete;
 
 interface FixtureWindow extends Window {
+  fakeGateway: {calls(): readonly string[]};
   fakeHost: {
     listing(listing: unknown): void;
     emit(events: readonly unknown[]): void;
@@ -82,13 +78,8 @@ interface FixtureWindow extends Window {
   };
 }
 
-export interface OpenOptions {
-  readonly refuseActions?: readonly string[];
-  readonly summary?: 'gone' | 'unsupported';
+export interface OpenOptions extends NativeFixtureOptions {
   readonly theme?: 'ink' | 'paper';
-  /** A finished run's history served in small pages, held part-way: see `fake-history.ts`. */
-  readonly historyServing?: Omit<FakeHistorySeed, 'events'>;
-  readonly summaryServing?: Omit<FakeSummarySpanSeed, 'events'>;
 }
 
 /** The registry phase a run that ended with `outcome` stays in. */
@@ -183,17 +174,14 @@ function seedOf(fixture: RunFixture, theme: 'ink' | 'paper'): FakeBridgeSeed {
   };
 }
 
-/** A self-contained installer called with its seed, as a script a page runs. */
-
 /**
  * The scripts that make a page the app opened on `fixture`, in the order they must run before the
- * page's own scripts: the Fake bridge, its machines, the fake run, and the fixture server
- * replaying the run. Playwright adds them as one init script (`openFixture`); the fixture dev app
+ * page's own scripts: the Fake bridge, its machines, and the native gateway replay.
+ * Playwright adds them as one init script (`openFixture`); the fixture dev app
  * serves them to the page (`e2e/tools/dev-fixture.ts`).
  */
 export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): readonly string[] {
   const seed = seedOf(fixture, options.theme ?? 'ink');
-  const live = fixture.state === 'live';
   const scripts = [
     script(installFakeBridge, seed),
     script(installFakeMachines, seed),
@@ -203,39 +191,9 @@ export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): 
     script(installFakeUsage, seed),
     script(installFakeExampleDestination, seed),
     script(installFakeWindows, undefined),
-    script(installFakeRun, {streams: [], text: {}}),
-    script(installFakeFixtureServer, {
-      runId: fixture.runId,
-      ...(options.summary ? {summary: options.summary} : {}),
-      first: live ? splitLive(fixture).first : fixture.events,
-      ...(live ? {} : {history: fixture.events}),
-      overview: {
-        objective: {
-          text: fixture.objective.text,
-          metric: fixture.objective.metric,
-          unit: fixture.objective.unit,
-          direction: fixture.objective.direction,
-          correctness_check: [],
-        },
-      },
-    }),
+    script(installGatewayOnly, undefined),
   ];
-  const last = Math.max(0, ...fixture.events.map(each => each.sequence ?? 0));
-  scripts.push(
-    script(installFakeChat, {
-      runId: fixture.runId,
-      firstSequence: last + 1,
-      ...(options.refuseActions ? {refuseActions: options.refuseActions} : {}),
-    }),
-  );
-  if (options.historyServing !== undefined) {
-    scripts.push(script(installFakeHistory, {...options.historyServing, events: fixture.events}));
-  }
-  if (options.summaryServing !== undefined) {
-    scripts.push(
-      script(installFakeSummarySpan, {...options.summaryServing, events: fixture.events}),
-    );
-  }
+  scripts.push(nativeFixtureScript(fixture, options));
   return scripts;
 }
 
@@ -267,11 +225,23 @@ export async function playLive(page: Page, fixture: RunFixture): Promise<void> {
     beforeDrop,
   );
   if (fixture.dropAfter === undefined) return;
+  const subscriptions = () =>
+    page.evaluate(() => {
+      const calls = (window as unknown as FixtureWindow).fakeGateway.calls();
+      return ['Tail', 'WatchRuns'].map(
+        method => calls.filter(call => call.endsWith(`/${method}`)).length,
+      );
+    });
+  const before = await subscriptions();
   await page.evaluate(() => (window as unknown as FixtureWindow).fakeHost.drop());
   await page.evaluate(
     events => (window as unknown as FixtureWindow).fakeHost.emit(events),
     afterDrop,
   );
+  // A reconnecting fixture is ready after both real reader subscriptions resume.
+  await expect
+    .poll(async () => (await subscriptions()).every((count, index) => count > (before[index] ?? 0)))
+    .toBe(true);
 }
 
 /** Fails the test when the page asked the bridge for the same thing over and over. */
@@ -284,5 +254,7 @@ export async function expectNoRequestLoops(page: Page): Promise<void> {
 
 /** Lets a held history read finish, so the run's screen settles. */
 export async function releaseHistory(page: Page): Promise<void> {
-  await page.evaluate(() => (window as unknown as FixtureWindow).fakeHost.releaseHistory());
+  await page.evaluate(() =>
+    (window as unknown as {fakeGateway: {releaseTail(): void}}).fakeGateway.releaseTail(),
+  );
 }

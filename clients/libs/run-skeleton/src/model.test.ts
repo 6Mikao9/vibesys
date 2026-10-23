@@ -6,9 +6,14 @@ import {
   KeyframeSchema,
   LifecycleSchema,
   Outcome,
+  OutcomeSchema,
+  outcomePresentation,
+  projectLifecycle,
   RecordSchema,
+  RunHeadSchema,
   RunLiveness,
   RuntimeType,
+  Severity,
   SkeletonResponseSchema,
   SpanStatus,
   type Record as StoreRecord,
@@ -305,7 +310,7 @@ for (const kind of ['running', 'draining', 'parked', 'ended'] as const)
               );
         const full = foldSkeleton(cached, records.slice(cut));
         const observed = observeRun(full, {epoch, value: RunLiveness.INTERRUPTED});
-        expect(observed.lifecycle).toEqual(lifecycle);
+        expect(observed.lifecycle).toEqual(projectLifecycle(lifecycle));
         expect(epochHasEnded(lifecycle)).toBe(kind === 'parked' || kind === 'ended');
         expect(observed.final).toBe(epochHasEnded(lifecycle));
         const successor = foldSkeleton(full, [
@@ -319,3 +324,79 @@ for (const kind of ['running', 'draining', 'parked', 'ended'] as const)
       }
     }
   });
+
+test('the fold keeps the latest error notice of each epoch, wherever the notices sit', () => {
+  let state = 7;
+  const next = (bound: number) => {
+    state = (state * 1103515245 + 12345) % 2 ** 31;
+    return state % bound;
+  };
+  for (let round = 0; round < 12; round += 1) {
+    const records = Array.from({length: next(150)}, (_, index) =>
+      create(RecordSchema, {
+        seq: BigInt(index + 1),
+        epoch: 1 + Math.floor((index * 3) / 150),
+        body: {
+          case: 'notice',
+          value: {severity: [Severity.WARNING, Severity.ERROR, Severity.FATAL][next(3)] ?? 1},
+        },
+      }),
+    );
+    const folded = foldSkeleton(seedSkeleton(), records);
+    const latest = new Map<number, bigint>();
+    for (const record of records)
+      if (record.body.case === 'notice' && record.body.value.severity >= Severity.ERROR)
+        latest.set(record.epoch, record.seq);
+    expect(new Map(folded.failures.map(record => [record.epoch, record.seq]))).toEqual(latest);
+  }
+});
+
+const failure = (seq: bigint, epoch: number, severity: Severity) =>
+  create(RecordSchema, {seq, epoch, body: {case: 'notice', value: {severity}}});
+const keyframeOf = (failures: ReturnType<typeof failure>[], failuresTracked = true) =>
+  create(KeyframeSchema, {throughSeq: 305n, logOffset: 8n, failures, failuresTracked});
+
+test('a keyframe whose failures are not error notices of its prefix is refused', () => {
+  for (const bad of [
+    keyframeOf([failure(9999n, 1, Severity.ERROR)]),
+    keyframeOf([failure(4n, 1, Severity.WARNING)]),
+    keyframeOf([failure(4n, 1, Severity.ERROR), failure(5n, 1, Severity.FATAL)]),
+    keyframeOf([failure(4n, 1, Severity.ERROR)], false),
+  ])
+    expect(() => seedSkeleton(bad)).toThrow('keyframe.failures');
+  expect(
+    seedSkeleton(keyframeOf([failure(4n, 1, Severity.ERROR), failure(300n, 2, Severity.FATAL)]))
+      .failures,
+  ).toHaveLength(2);
+  expect(seedSkeleton(keyframeOf([], false)).failuresTracked).toBe(false);
+});
+
+test('an ended run reads the presentation of its outcome from the records and from the head alike', () => {
+  const outcomes = OutcomeSchema.values.map(value => value.number).filter(number => number !== 0);
+  expect(outcomes.length).toBeGreaterThan(0);
+  for (const outcome of outcomes) {
+    const lifecycle = create(LifecycleSchema, {state: {case: 'ended', value: {outcome}}});
+    const bodies = [
+      {case: 'epochStarted', value: {runId: 'run-a', epoch: 1}},
+      {case: 'lifecycle', value: lifecycle},
+    ] as const;
+    const records = bodies.map((body, index) =>
+      create(RecordSchema, {seq: BigInt(index + 1), epoch: 1, body}),
+    );
+    const folded = observeRun(foldSkeleton(seedSkeleton(), records));
+    const head = create(RunHeadSchema, {
+      epoch: 1,
+      committedSeq: 2n,
+      lifecycle: projectLifecycle(lifecycle),
+    });
+    const fromHead = observeRun(foldSkeleton(seedSkeleton(), records), {
+      epoch: 1,
+      value: RunLiveness.ALIVE,
+      head,
+    });
+    expect(folded.lifecycle).toEqual(fromHead.lifecycle);
+    expect(
+      folded.lifecycle?.state.case === 'ended' && folded.lifecycle.state.value.presentation,
+    ).toEqual(outcomePresentation(outcome));
+  }
+});

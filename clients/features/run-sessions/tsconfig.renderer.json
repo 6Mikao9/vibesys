@@ -29,12 +29,6 @@
     },
     {
       "path": "../../libs/ipc/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/ui/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/request-identity/tsconfig.lib.json"
     }
   ]
 }

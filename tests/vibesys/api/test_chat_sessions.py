@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from tests.support.task_project import write_task
 
@@ -30,16 +32,20 @@ from vibesys.api.testing import FakeAuxiliaryAgents, FakeManagedAgent, FakeRunRe
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_proto.api import (
+    RUN_LOG_MAGIC,
     ChatMessageRequest,
     ChatSessionCreated,
     ChatSteerProposed,
+    CreateChatSessionRequest,
     Ended,
+    EpochStarted,
     HostCallRequest,
     HostCallResponse,
     Lifecycle,
     Oneof,
     Outcome,
     Parked,
+    Record,
     RunFailure,
     RunFailureKind,
     RunHead,
@@ -51,12 +57,11 @@ from vs_proto.api import (
     Timestamp,
     validate,
 )
-from vs_runlog.api import RunLogReader, assert_run_unlocked
+from vs_runlog.api import RunLogReader, assert_run_unlocked, encode_frame
 from vs_sim.api.testing import FakeProcesses, FakeProcessSignaller, ProcessScript, Sim, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 
 def chat_call(
@@ -81,7 +86,10 @@ def chat_call(
 @pytest.fixture
 def chat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ChatMessageRequest:
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
-    root = tmp_path / "project"
+    return chat_project(tmp_path / "project")
+
+
+def chat_project(root: Path) -> ChatMessageRequest:
     root.mkdir()
     project = Project.open(root)
     project.state.create_project("chat", now=datetime(2026, 1, 1, tzinfo=UTC))
@@ -118,11 +126,29 @@ def publish(request: ChatMessageRequest, *, parked: bool = False, epoch: int = 1
             state=Oneof("parked", Parked()) if parked else Oneof("running", Running())
         ),
         process=RunProcess(pid=1, epoch=epoch, started_at=Timestamp(seconds=1)),
-        committed_seq=0,
+        committed_seq=2,
+        epoch=epoch,
     )
     validate(head)
     path = Project.run_log_path_for(request.project_root, request.run_id).parent
     path.mkdir(parents=True, exist_ok=True)
+    assert head.lifecycle is not None
+    (path / "run.log").write_bytes(
+        RUN_LOG_MAGIC
+        + encode_frame(
+            Record(
+                seq=1,
+                epoch=epoch,
+                at=Timestamp(seconds=1),
+                body=Oneof("epoch_started", EpochStarted(epoch=epoch)),
+            )
+        )
+        + encode_frame(
+            Record(
+                seq=2, epoch=epoch, at=Timestamp(seconds=1), body=Oneof("lifecycle", head.lifecycle)
+            )
+        )
+    )
     (path / "run.head").write_bytes(head.to_binary())
 
 
@@ -420,12 +446,36 @@ def test_invalid_inbox_routes_are_rejected_without_answering(chat: ChatMessageRe
     assert status.reason == "chat message routing does not match its inbox"
 
 
-def test_reading_an_incomplete_native_head_is_refused(chat: ChatMessageRequest) -> None:
-    path = Project.run_log_path_for(chat.project_root, chat.run_id).parent / "run.head"
+@pytest.mark.regression
+@pytest.mark.parametrize("head_epoch", [0, 7])
+@pytest.mark.parametrize("process_epoch", [None, 1, 8])
+@pytest.mark.parametrize("parked", [False, True])
+def test_chat_epoch_comes_from_the_committed_log(
+    chat: ChatMessageRequest, head_epoch: int, process_epoch: int | None, *, parked: bool
+) -> None:
+    publish(chat, epoch=7, parked=parked)
+    path = Project.run_head_path_for(chat.project_root, chat.run_id)
     head = RunHead.from_binary(path.read_bytes())
-    head.process = None
+    head.epoch = head_epoch
+    if process_epoch is None:
+        head.process = None
+    else:
+        assert head.process is not None
+        head.process.epoch = process_epoch
+    original = head.to_binary()
+    path.write_bytes(original)
+    assert run_head(path) == (7, parked)
+    assert path.read_bytes() == original
+
+
+@pytest.mark.regression
+def test_reading_an_unpublished_chat_epoch_is_refused(chat: ChatMessageRequest) -> None:
+    path = Project.run_head_path_for(chat.project_root, chat.run_id)
+    head = RunHead.from_binary(path.read_bytes())
+    head.committed_seq = 0
+    head.epoch = 0
     path.write_bytes(head.to_binary())
-    with pytest.raises(ValueError, match="process and lifecycle"):
+    with pytest.raises(ValueError, match="published epoch"):
         run_head(path)
 
 
@@ -573,3 +623,102 @@ def test_every_ending_uses_the_same_chat_admission_and_retained_history(
         assert path.read_bytes() == original
     assert len(starts) == 2
     assert len(events(chat)) == 5
+
+
+@pytest.mark.regression
+@example(
+    actions=[
+        (0, "create"),
+        (0, "send"),
+        (1, "create"),
+        (0, "open"),
+        (0, "retry"),
+        (0, "conflict"),
+        (0, "lose-head"),
+        (0, "retry"),
+    ]
+)
+@given(
+    actions=st.lists(
+        st.tuples(
+            st.integers(0, 4),
+            st.sampled_from(["create", "send", "open", "retry", "conflict", "lose-head"]),
+        ),
+        min_size=1,
+        max_size=30,
+    )
+)
+def test_generated_thread_sequences_keep_creation_and_question_identity(
+    actions: list[tuple[int, str]],
+) -> None:
+    """Create/open/send/restart/retry through public codecs, without an agent process."""
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as environment:
+        root = Path(temporary)
+        environment.setenv("VIBESYS_STATE_HOME", str(root / "state"))
+        chat = chat_project(root / "project")
+        created: set[int] = set()
+        for index, action in actions:
+            provider, model = ("claude", "opus") if index % 2 == 0 else ("codex", "gpt-5")
+            request = CreateChatSessionRequest(
+                project_root=chat.project_root,
+                run_id=chat.run_id,
+                session_id=f"thread-{index}",
+                provider=provider,
+                model=model,
+            )
+            if action == "lose-head" and index in created:
+                (
+                    Project.chat_session_directory_for(
+                        chat.project_root, chat.run_id, request.session_id
+                    )
+                    / "run.head"
+                ).unlink(missing_ok=True)
+            if index not in created or action in {"create", "retry", "conflict", "lose-head"}:
+                if index in created and action == "conflict":
+                    request.model = "different"
+                payload = HostCallRequest(
+                    checkout="/checkout", method=Oneof("create_chat_session", request)
+                ).to_binary()
+                response = HostCallResponse.from_binary(chat_call(payload))
+                assert response.result is not None
+                if index in created and action == "conflict":
+                    assert response.result.field == "configuration_failed"
+                else:
+                    assert response.result.field == "create_chat_session"
+                    assert response.result.value.session_id == request.session_id
+                    created.add(index)
+            message = ChatMessageRequest.from_binary(chat.to_binary())
+            message.session_id = request.session_id
+            if action == "send":
+                response = HostCallResponse.from_binary(
+                    chat_call(
+                        HostCallRequest(
+                            checkout="/checkout", method=Oneof("chat_message", message)
+                        ).to_binary(),
+                        start_chat=lambda _: None,
+                    )
+                )
+                assert response.result is not None
+                assert response.result.field == "chat_message"
+                assert (
+                    len(
+                        Project.open(chat.project_root)
+                        .state.session_inbox(chat.run_id, request.session_id)
+                        .pending()
+                    )
+                    == 1
+                )
+            if action == "open":
+                threads = SimThreads()
+                session = ChatSession(message, ChatRuntime(threads.clock, threads))
+                try:
+                    saved = session.configuration(
+                        ChatSessionCreated(id=request.session_id, provider="other", model="other")
+                    )
+                    assert (saved.provider, saved.model) == (provider, model)
+                finally:
+                    session.close()
+            records = events(message)
+            assert len(records) == 1
+            assert records[0].field == "created"
+            assert (records[0].value.provider, records[0].value.model) == (provider, model)

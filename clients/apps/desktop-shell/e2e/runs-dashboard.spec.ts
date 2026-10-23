@@ -1,4 +1,5 @@
 import {expect, type Page, test} from '@playwright/test';
+import {storeRunFixture} from '@vibesys/run-fixtures';
 import {
   dashboardWorld,
   listingOf,
@@ -9,6 +10,7 @@ import {
   open,
   type RunCase,
 } from './dashboard-world.js';
+import {installGateway, wire} from './fake-gateway.js';
 import type {FakeHostWindow} from './world.js';
 
 /**
@@ -284,7 +286,16 @@ test('a run that ends moves from Running to Finished', async ({page}) => {
   await open(page, dashboardWorld(ONE_RUN));
   await expect(tiles(page, 'Running')).toHaveCount(1);
 
-  const ended = listingOf([{...ONE_RUN[0], phase: 'completed'} as RunCase], 'ssh:host-a');
+  const finished = [{...ONE_RUN[0], phase: 'completed'} as RunCase];
+  const nextDigests = dashboardWorld(finished).digests;
+  await page.evaluate(
+    digests =>
+      (window as unknown as {fakeRunDigests: {set(value: unknown): void}}).fakeRunDigests.set(
+        digests,
+      ),
+    nextDigests,
+  );
+  const ended = listingOf(finished, 'ssh:host-a');
   await page.evaluate(
     ([listing]) => (window as unknown as FakeHostWindow).fakeHost.listing(listing),
     [ended],
@@ -317,4 +328,49 @@ test('on a machine whose VibeSys is too old for digests, a run still says its ow
   const unknown = tiles(page, 'Unknown').first();
   await expect(unknown).toContainText('unknown');
   await expect(unknown).toContainText('needs an update');
+});
+
+test('an addressless run remains visible when its project is unknown', async ({page}) => {
+  const world = dashboardWorld([]);
+  await installGateway(page, wire(storeRunFixture('live')));
+  await open(page, {
+    ...world,
+    listings: [
+      {
+        kind: 'listed',
+        host: 'ssh:host-a',
+        live: [],
+        ended: [],
+        unreadable: [],
+        unverified: [],
+        unknownProject: [
+          {
+            id: 'run-addressless',
+            runId: 'run-addressless',
+            status: 'running',
+            phase: 'running',
+            paused: null,
+            end: null,
+            startedAt: 0,
+            reason: null,
+          },
+        ],
+      },
+    ],
+    recent: [],
+    projectRuns: {},
+  });
+  const tile = tiles(page, 'Unknown');
+  await expect(tile).toHaveCount(1);
+  await expect(tile).toBeVisible();
+  await expect(tile).toContainText('Unknown project');
+  await expect(tile).toContainText('host-a');
+  await expect(tile).toContainText('Project unknown');
+  const shots = process.env['SCREENS_DIR'];
+  if (shots !== undefined)
+    await page.screenshot({path: `${shots}/runs__unknown-project__1440.png`});
+  await tile.getByRole('button', {name: /^Unknown project/}).click();
+  await expect(page.getByText('Project unknown', {exact: true})).toBeVisible();
+  for (const name of ['Resume', 'Pause', 'Pause now', 'Guidance'])
+    await expect(page.getByRole('button', {name, exact: true})).toHaveCount(0);
 });

@@ -14,6 +14,7 @@ from vs_project._layout import (
     TaskDirectory,
     TaskName,
     TasksRoot,
+    project_root_for_log_directory,
 )
 from vs_project._state import ProjectState, _state_home, validate_run_id
 from vs_project._state_io import publish_run_link
@@ -199,6 +200,18 @@ class Project:
         return ProjectState.log_directory_for(project_root, run_id)
 
     @classmethod
+    def from_log_directory(
+        cls, directory: Path | str, *, recorded_root: Path | str | None = None
+    ) -> Self | None:
+        """Resolve the physical run layout; a recorded root may only confirm its key.
+
+        Repository-local runs belong to their current enclosing project. External
+        runs resolve only when a recorded root reproduces their directory key.
+        """
+        root = project_root_for_log_directory(directory, recorded_root=recorded_root)
+        return cls.open(root) if root is not None else None
+
+    @classmethod
     def run_head_path_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return the writer's published head beside its canonical log."""
         return cls.log_directory_for(project_root, run_id) / "run.head"
@@ -240,9 +253,13 @@ class Project:
     def publish_run_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Atomically publish a host discovery link to this run's log directory."""
         validate_run_id(run_id)
-        return publish_run_link(
-            _state_home() / "runs" / run_id, cls.log_directory_for(project_root, run_id)
+        directory = cls.log_directory_for(project_root, run_id)
+        import_module("vs_project._run_address").publish_address(
+            _state_home() / "run-addresses" / f"{run_id}.pb",
+            directory,
+            Path(project_root).expanduser().resolve(),
         )
+        return publish_run_link(_state_home() / "runs" / run_id, directory)
 
     @staticmethod
     def indexed_run_directories() -> tuple[Path, ...]:

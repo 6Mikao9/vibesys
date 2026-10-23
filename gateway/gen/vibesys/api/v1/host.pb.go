@@ -243,7 +243,9 @@ type TailResponse struct {
 	// Each element is one encoded vibesys.store.v1.Record, without log framing.
 	Records [][]byte `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
 	// The last sequence delivered in this response.
-	ThroughSeq    uint64 `protobuf:"varint,2,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"`
+	ThroughSeq uint64 `protobuf:"varint,2,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"`
+	// Canonical facts of exactly through_seq; absent for session and phase 1 logs.
+	Head          *v1.RunHead `protobuf:"bytes,3,opt,name=head,proto3" json:"head,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -292,11 +294,21 @@ func (x *TailResponse) GetThroughSeq() uint64 {
 	return 0
 }
 
+func (x *TailResponse) GetHead() *v1.RunHead {
+	if x != nil {
+		return x.Head
+	}
+	return nil
+}
+
 type SkeletonRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	RunId string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	// Descriptor sets the client already holds. The reply names each epoch's set
+	// by hash and sends the bytes only of sets not listed here.
+	KnownDescriptorsSha256 []string `protobuf:"bytes,2,rep,name=known_descriptors_sha256,json=knownDescriptorsSha256,proto3" json:"known_descriptors_sha256,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *SkeletonRequest) Reset() {
@@ -336,9 +348,74 @@ func (x *SkeletonRequest) GetRunId() string {
 	return ""
 }
 
+func (x *SkeletonRequest) GetKnownDescriptorsSha256() []string {
+	if x != nil {
+		return x.KnownDescriptorsSha256
+	}
+	return nil
+}
+
+// One EpochStarted.descriptors set, addressed by the SHA-256 of its encoded
+// bytes. data is exactly the bytes that hash covers, so a reader verifies it
+// without re-encoding.
+type DescriptorSet struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sha256        string                 `protobuf:"bytes,1,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DescriptorSet) Reset() {
+	*x = DescriptorSet{}
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DescriptorSet) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DescriptorSet) ProtoMessage() {}
+
+func (x *DescriptorSet) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DescriptorSet.ProtoReflect.Descriptor instead.
+func (*DescriptorSet) Descriptor() ([]byte, []int) {
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DescriptorSet) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *DescriptorSet) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
 // A bounded committed prefix, at most 1 MiB encoded. No keyframe means replay
-// from the beginning; a keyframe larger than the budget is omitted. Records that
-// do not fit (including a single large record) are delivered through Tail.
+// from the beginning; a keyframe larger than the budget once its descriptors are
+// addressed by hash is omitted. Records that do not fit (including a single
+// large record) are delivered through Tail. Every epoch of the keyframe names its
+// descriptors by EpochVersion.descriptors_sha256; descriptor_sets carries the
+// ones the request did not list.
 type SkeletonResponse struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Keyframe []byte                 `protobuf:"bytes,1,opt,name=keyframe,proto3,oneof" json:"keyframe,omitempty"`
@@ -349,15 +426,18 @@ type SkeletonResponse struct {
 	NextSeq uint64 `protobuf:"varint,4,opt,name=next_seq,json=nextSeq,proto3" json:"next_seq,omitempty"`
 	// True when the frozen readable prefix was included in full. Both bool
 	// values are valid, including an empty prefix requiring a Tail continuation.
-	Complete      bool     `protobuf:"varint,5,opt,name=complete,proto3" json:"complete,omitempty"`
-	Sessions      []string `protobuf:"bytes,6,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	Complete       bool             `protobuf:"varint,5,opt,name=complete,proto3" json:"complete,omitempty"`
+	Sessions       []string         `protobuf:"bytes,6,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	DescriptorSets []*DescriptorSet `protobuf:"bytes,7,rep,name=descriptor_sets,json=descriptorSets,proto3" json:"descriptor_sets,omitempty"`
+	// Core facts at committed_seq, including the retained-writer read upgrade.
+	Head          *v1.RunHead `protobuf:"bytes,8,opt,name=head,proto3" json:"head,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SkeletonResponse) Reset() {
 	*x = SkeletonResponse{}
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[5]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -369,7 +449,7 @@ func (x *SkeletonResponse) String() string {
 func (*SkeletonResponse) ProtoMessage() {}
 
 func (x *SkeletonResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[5]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -382,7 +462,7 @@ func (x *SkeletonResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SkeletonResponse.ProtoReflect.Descriptor instead.
 func (*SkeletonResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SkeletonResponse) GetKeyframe() []byte {
@@ -427,6 +507,20 @@ func (x *SkeletonResponse) GetSessions() []string {
 	return nil
 }
 
+func (x *SkeletonResponse) GetDescriptorSets() []*DescriptorSet {
+	if x != nil {
+		return x.DescriptorSets
+	}
+	return nil
+}
+
+func (x *SkeletonResponse) GetHead() *v1.RunHead {
+	if x != nil {
+		return x.Head
+	}
+	return nil
+}
+
 type WatchRunsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -435,7 +529,7 @@ type WatchRunsRequest struct {
 
 func (x *WatchRunsRequest) Reset() {
 	*x = WatchRunsRequest{}
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[6]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -447,7 +541,7 @@ func (x *WatchRunsRequest) String() string {
 func (*WatchRunsRequest) ProtoMessage() {}
 
 func (x *WatchRunsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[6]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -460,7 +554,7 @@ func (x *WatchRunsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRunsRequest.ProtoReflect.Descriptor instead.
 func (*WatchRunsRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{7}
 }
 
 // Initial entries precede an initial_complete marker. Later entries replace by
@@ -474,13 +568,19 @@ type WatchRunsResponse struct {
 	Liveness        RunLiveness `protobuf:"varint,3,opt,name=liveness,proto3,enum=vibesys.api.v1.RunLiveness" json:"liveness,omitempty"`
 	Removed         bool        `protobuf:"varint,4,opt,name=removed,proto3" json:"removed,omitempty"`
 	InitialComplete bool        `protobuf:"varint,5,opt,name=initial_complete,json=initialComplete,proto3" json:"initial_complete,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Emitted at least every five seconds, after all preceding run observations.
+	// A receiver expires its facts after thirty seconds without a frame.
+	Heartbeat bool `protobuf:"varint,6,opt,name=heartbeat,proto3" json:"heartbeat,omitempty"`
+	// Canonical host-side project directory. Older gateways may omit it; those entries have no
+	// address and cannot enter project-dependent listings. Markers and tombstones omit it.
+	ProjectRoot   *string `protobuf:"bytes,7,opt,name=project_root,json=projectRoot,proto3,oneof" json:"project_root,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WatchRunsResponse) Reset() {
 	*x = WatchRunsResponse{}
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[7]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -492,7 +592,7 @@ func (x *WatchRunsResponse) String() string {
 func (*WatchRunsResponse) ProtoMessage() {}
 
 func (x *WatchRunsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[7]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -505,7 +605,7 @@ func (x *WatchRunsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRunsResponse.ProtoReflect.Descriptor instead.
 func (*WatchRunsResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WatchRunsResponse) GetRunId() string {
@@ -543,6 +643,20 @@ func (x *WatchRunsResponse) GetInitialComplete() bool {
 	return false
 }
 
+func (x *WatchRunsResponse) GetHeartbeat() bool {
+	if x != nil {
+		return x.Heartbeat
+	}
+	return false
+}
+
+func (x *WatchRunsResponse) GetProjectRoot() string {
+	if x != nil && x.ProjectRoot != nil {
+		return *x.ProjectRoot
+	}
+	return ""
+}
+
 // Malformed hashes reject the whole request before filesystem access. File
 // lookup/content failures for admitted hashes remain per-result errors.
 type GetBlobsRequest struct {
@@ -556,7 +670,7 @@ type GetBlobsRequest struct {
 
 func (x *GetBlobsRequest) Reset() {
 	*x = GetBlobsRequest{}
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[8]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -568,7 +682,7 @@ func (x *GetBlobsRequest) String() string {
 func (*GetBlobsRequest) ProtoMessage() {}
 
 func (x *GetBlobsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[8]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -581,7 +695,7 @@ func (x *GetBlobsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBlobsRequest.ProtoReflect.Descriptor instead.
 func (*GetBlobsRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetBlobsRequest) GetRunId() string {
@@ -617,7 +731,7 @@ type GetBlobsResponse struct {
 
 func (x *GetBlobsResponse) Reset() {
 	*x = GetBlobsResponse{}
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[9]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -629,7 +743,7 @@ func (x *GetBlobsResponse) String() string {
 func (*GetBlobsResponse) ProtoMessage() {}
 
 func (x *GetBlobsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[9]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -642,7 +756,7 @@ func (x *GetBlobsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBlobsResponse.ProtoReflect.Descriptor instead.
 func (*GetBlobsResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetBlobsResponse) GetBlobs() []*BlobResult {
@@ -664,7 +778,7 @@ type BlobResult struct {
 
 func (x *BlobResult) Reset() {
 	*x = BlobResult{}
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[10]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -676,7 +790,7 @@ func (x *BlobResult) String() string {
 func (*BlobResult) ProtoMessage() {}
 
 func (x *BlobResult) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[10]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -689,7 +803,7 @@ func (x *BlobResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlobResult.ProtoReflect.Descriptor instead.
 func (*BlobResult) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *BlobResult) GetSha256() string {
@@ -731,7 +845,7 @@ type TailStreamRequest struct {
 
 func (x *TailStreamRequest) Reset() {
 	*x = TailStreamRequest{}
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[11]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -743,7 +857,7 @@ func (x *TailStreamRequest) String() string {
 func (*TailStreamRequest) ProtoMessage() {}
 
 func (x *TailStreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[11]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -756,7 +870,7 @@ func (x *TailStreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TailStreamRequest.ProtoReflect.Descriptor instead.
 func (*TailStreamRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *TailStreamRequest) GetRunId() string {
@@ -790,7 +904,7 @@ type TailStreamResponse struct {
 
 func (x *TailStreamResponse) Reset() {
 	*x = TailStreamResponse{}
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[12]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -802,7 +916,7 @@ func (x *TailStreamResponse) String() string {
 func (*TailStreamResponse) ProtoMessage() {}
 
 func (x *TailStreamResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_host_proto_msgTypes[12]
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -815,7 +929,7 @@ func (x *TailStreamResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TailStreamResponse.ProtoReflect.Descriptor instead.
 func (*TailStreamResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TailStreamResponse) GetData() []byte {
@@ -832,11 +946,101 @@ func (x *TailStreamResponse) GetNextOffset() uint64 {
 	return 0
 }
 
+// Only committed session metadata is exposed. Empty sessions created before a
+// first question remain discoverable. Listing never starts an agent.
+type ListChatSessionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListChatSessionsRequest) Reset() {
+	*x = ListChatSessionsRequest{}
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListChatSessionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListChatSessionsRequest) ProtoMessage() {}
+
+func (x *ListChatSessionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListChatSessionsRequest.ProtoReflect.Descriptor instead.
+func (*ListChatSessionsRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ListChatSessionsRequest) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+type ListChatSessionsResponse struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Sessions      []*v1.ChatSessionCreated `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListChatSessionsResponse) Reset() {
+	*x = ListChatSessionsResponse{}
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListChatSessionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListChatSessionsResponse) ProtoMessage() {}
+
+func (x *ListChatSessionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_api_v1_host_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListChatSessionsResponse.ProtoReflect.Descriptor instead.
+func (*ListChatSessionsResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_api_v1_host_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ListChatSessionsResponse) GetSessions() []*v1.ChatSessionCreated {
+	if x != nil {
+		return x.Sessions
+	}
+	return nil
+}
+
 var File_vibesys_api_v1_host_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\n" +
-	"\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1evibesys/api/v1/host_call.proto\x1a(vibesys/api/v1/host_read_generated.proto\x1a*vibesys/api/v1/host_mutate_generated.proto\x1a)vibesys/api/v1/host_watch_generated.proto\x1a\x1fvibesys/store/v1/skeleton.proto\"M\n" +
+	"\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1evibesys/api/v1/host_call.proto\x1a*vibesys/api/v1/host_mutate_generated.proto\x1a(vibesys/api/v1/host_read_generated.proto\x1a)vibesys/api/v1/host_watch_generated.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1fvibesys/store/v1/skeleton.proto\"M\n" +
 	"\fHelloRequest\x12=\n" +
 	"\x0fapi_schema_hash\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\rapiSchemaHash\"\x83\x01\n" +
 	"\rHelloResponse\x12=\n" +
@@ -848,14 +1052,20 @@ const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\bfrom_seq\x18\x02 \x01(\x04B\x0f\xbaH\f2\n" +
 	"\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7fR\afromSeq\x12J\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$R\tsessionId\"r\n" +
+	"session_id\x18\x03 \x01(\tB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$R\tsessionId\"\xf5\x02\n" +
 	"\fTailResponse\x120\n" +
 	"\arecords\x18\x01 \x03(\fB\x16\xbaH\x13\x92\x01\x10\b\x01\x10\x80\x80@\"\bz\x06\x10\x01\x18\x80\x80@R\arecords\x120\n" +
 	"\vthrough_seq\x18\x02 \x01(\x04B\x0f\xbaH\f2\n" +
 	"\x18\xfe\xff\xff\xff\xff\xff\xff\xff\x7fR\n" +
-	"throughSeq\"R\n" +
+	"throughSeq\x12-\n" +
+	"\x04head\x18\x03 \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head:\xd1\x01\xbaH\xcd\x01\x1a\xca\x01\n" +
+	"\x10tail_head_prefix\x123head must state performance for exactly through_seq\x1a\x80\x01!has(this.head) || (has(this.head.committed_seq) && this.head.committed_seq == this.through_seq && this.head.performance_stated)\"\xac\x01\n" +
 	"\x0fSkeletonRequest\x12?\n" +
-	"\x06run_id\x18\x01 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\"\xcc\x02\n" +
+	"\x06run_id\x18\x01 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\x12X\n" +
+	"\x18known_descriptors_sha256\x18\x02 \x03(\tB\x1e\xbaH\x1b\x92\x01\x18\x10@\x18\x01\"\x12r\x102\x0e^[0-9a-f]{64}$R\x16knownDescriptorsSha256\"_\n" +
+	"\rDescriptorSet\x12-\n" +
+	"\x06sha256\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\x06sha256\x12\x1f\n" +
+	"\x04data\x18\x02 \x01(\fB\v\xbaH\bz\x06\x10\x01\x18\x80\x80@R\x04data\"\xcd\x03\n" +
 	"\x10SkeletonResponse\x12,\n" +
 	"\bkeyframe\x18\x01 \x01(\fB\v\xbaH\bz\x06\x10\x01\x18\x80\x80@H\x00R\bkeyframe\x88\x01\x01\x12.\n" +
 	"\arecords\x18\x02 \x03(\fB\x14\xbaH\x11\x92\x01\x0e\x10\x80\x80@\"\bz\x06\x10\x01\x18\x80\x80@R\arecords\x124\n" +
@@ -864,16 +1074,22 @@ const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\bnext_seq\x18\x04 \x01(\x04B\x0f\xbaH\f2\n" +
 	"\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7fR\anextSeq\x12\x1a\n" +
 	"\bcomplete\x18\x05 \x01(\bR\bcomplete\x12O\n" +
-	"\bsessions\x18\x06 \x03(\tB3\xbaH0\x92\x01-\x10\x80\x80@\x18\x01\"%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\bsessionsB\v\n" +
+	"\bsessions\x18\x06 \x03(\tB3\xbaH0\x92\x01-\x10\x80\x80@\x18\x01\"%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\bsessions\x12P\n" +
+	"\x0fdescriptor_sets\x18\a \x03(\v2\x1d.vibesys.api.v1.DescriptorSetB\b\xbaH\x05\x92\x01\x02\x10@R\x0edescriptorSets\x12-\n" +
+	"\x04head\x18\b \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04headB\v\n" +
 	"\t_keyframe\"\x12\n" +
-	"\x10WatchRunsRequest\"\xf4\x04\n" +
+	"\x10WatchRunsRequest\"\xa7\x06\n" +
 	"\x11WatchRunsResponse\x12B\n" +
 	"\x06run_id\x18\x01 \x01(\tB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$R\x05runId\x12-\n" +
 	"\x04head\x18\x02 \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x12A\n" +
 	"\bliveness\x18\x03 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessB\b\xbaH\x05\x82\x01\x02\x10\x01R\bliveness\x12\x18\n" +
 	"\aremoved\x18\x04 \x01(\bR\aremoved\x12)\n" +
-	"\x10initial_complete\x18\x05 \x01(\bR\x0finitialComplete:\xe3\x02\xbaH\xdf\x02\x1a\xdc\x02\n" +
-	"\x10watch_runs.shape\x12drun_id, head, liveness, removed and initial_complete must form an entry, tombstone or initial marker\x1a\xe1\x01this.initial_complete ? (this.run_id == '' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != '' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))\"\xd5\x01\n" +
+	"\x10initial_complete\x18\x05 \x01(\bR\x0finitialComplete\x12\x1c\n" +
+	"\theartbeat\x18\x06 \x01(\bR\theartbeat\x125\n" +
+	"\fproject_root\x18\a \x01(\tB\r\xbaH\n" +
+	"r\b\x10\x01(\x80 :\x01/H\x00R\vprojectRoot\x88\x01\x01:\xb0\x03\xbaH\xac\x03\x1a\xa9\x03\n" +
+	"\x10watch_runs.shape\x12orun_id, head, liveness, removed and initial_complete must form an entry, tombstone, initial marker or heartbeat\x1a\xa3\x02(this.initial_complete || this.heartbeat) ? (!(this.initial_complete && this.heartbeat) && this.run_id == '' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != '' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))B\x0f\n" +
+	"\r_project_root\"\xd5\x01\n" +
 	"\x0fGetBlobsRequest\x12?\n" +
 	"\x06run_id\x18\x01 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\x125\n" +
 	"\x06sha256\x18\x02 \x03(\tB\x1d\xbaH\x1a\x92\x01\x17\x10\x80\x02\"\x12r\x102\x0e^[0-9a-f]{64}$R\x06sha256\x12J\n" +
@@ -901,19 +1117,24 @@ const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\vnext_offset\x18\x02 \x01(\x04B\x0f\xbaH\f2\n" +
 	"\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7fR\n" +
 	"nextOffset:b\xbaH_\x1a]\n" +
-	"\x12tail_stream.offset\x12\x1bnext_offset must cover data\x1a*this.next_offset >= uint(this.data.size())*\x92\x01\n" +
+	"\x12tail_stream.offset\x12\x1bnext_offset must cover data\x1a*this.next_offset >= uint(this.data.size())\"Z\n" +
+	"\x17ListChatSessionsRequest\x12?\n" +
+	"\x06run_id\x18\x01 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\"g\n" +
+	"\x18ListChatSessionsResponse\x12K\n" +
+	"\bsessions\x18\x01 \x03(\v2$.vibesys.store.v1.ChatSessionCreatedB\t\xbaH\x06\x92\x01\x03\x10\x80 R\bsessions*\x92\x01\n" +
 	"\vRunLiveness\x12\x1c\n" +
 	"\x18RUN_LIVENESS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n" +
 	"\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n" +
 	"\x12RUN_LIVENESS_ENDED\x10\x03\x12\x17\n" +
-	"\x13RUN_LIVENESS_PARKED\x10\x042\x84\x06\n" +
+	"\x13RUN_LIVENESS_PARKED\x10\x042\xeb\x06\n" +
 	"\vHostService\x12M\n" +
 	"\bHostCall\x12\x1f.vibesys.api.v1.HostCallRequest\x1a .vibesys.api.v1.HostCallResponse\x12A\n" +
 	"\x04Read\x12\x1b.vibesys.api.v1.ReadRequest\x1a\x1c.vibesys.api.v1.ReadResponse\x12F\n" +
 	"\x05Watch\x12\x1c.vibesys.api.v1.WatchRequest\x1a\x1d.vibesys.api.v1.WatchResponse0\x01\x12G\n" +
 	"\x06Mutate\x12\x1d.vibesys.api.v1.MutateRequest\x1a\x1e.vibesys.api.v1.MutateResponse\x12D\n" +
-	"\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12C\n" +
+	"\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12e\n" +
+	"\x10ListChatSessions\x12'.vibesys.api.v1.ListChatSessionsRequest\x1a(.vibesys.api.v1.ListChatSessionsResponse\x12C\n" +
 	"\x04Tail\x12\x1b.vibesys.api.v1.TailRequest\x1a\x1c.vibesys.api.v1.TailResponse0\x01\x12M\n" +
 	"\bSkeleton\x12\x1f.vibesys.api.v1.SkeletonRequest\x1a .vibesys.api.v1.SkeletonResponse\x12R\n" +
 	"\tWatchRuns\x12 .vibesys.api.v1.WatchRunsRequest\x1a!.vibesys.api.v1.WatchRunsResponse0\x01\x12M\n" +
@@ -934,61 +1155,71 @@ func file_vibesys_api_v1_host_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_api_v1_host_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_api_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_vibesys_api_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_vibesys_api_v1_host_proto_goTypes = []any{
-	(RunLiveness)(0),           // 0: vibesys.api.v1.RunLiveness
-	(*HelloRequest)(nil),       // 1: vibesys.api.v1.HelloRequest
-	(*HelloResponse)(nil),      // 2: vibesys.api.v1.HelloResponse
-	(*TailRequest)(nil),        // 3: vibesys.api.v1.TailRequest
-	(*TailResponse)(nil),       // 4: vibesys.api.v1.TailResponse
-	(*SkeletonRequest)(nil),    // 5: vibesys.api.v1.SkeletonRequest
-	(*SkeletonResponse)(nil),   // 6: vibesys.api.v1.SkeletonResponse
-	(*WatchRunsRequest)(nil),   // 7: vibesys.api.v1.WatchRunsRequest
-	(*WatchRunsResponse)(nil),  // 8: vibesys.api.v1.WatchRunsResponse
-	(*GetBlobsRequest)(nil),    // 9: vibesys.api.v1.GetBlobsRequest
-	(*GetBlobsResponse)(nil),   // 10: vibesys.api.v1.GetBlobsResponse
-	(*BlobResult)(nil),         // 11: vibesys.api.v1.BlobResult
-	(*TailStreamRequest)(nil),  // 12: vibesys.api.v1.TailStreamRequest
-	(*TailStreamResponse)(nil), // 13: vibesys.api.v1.TailStreamResponse
-	(*v1.RunHead)(nil),         // 14: vibesys.store.v1.RunHead
-	(*HostCallRequest)(nil),    // 15: vibesys.api.v1.HostCallRequest
-	(*ReadRequest)(nil),        // 16: vibesys.api.v1.ReadRequest
-	(*WatchRequest)(nil),       // 17: vibesys.api.v1.WatchRequest
-	(*MutateRequest)(nil),      // 18: vibesys.api.v1.MutateRequest
-	(*HostCallResponse)(nil),   // 19: vibesys.api.v1.HostCallResponse
-	(*ReadResponse)(nil),       // 20: vibesys.api.v1.ReadResponse
-	(*WatchResponse)(nil),      // 21: vibesys.api.v1.WatchResponse
-	(*MutateResponse)(nil),     // 22: vibesys.api.v1.MutateResponse
+	(RunLiveness)(0),                 // 0: vibesys.api.v1.RunLiveness
+	(*HelloRequest)(nil),             // 1: vibesys.api.v1.HelloRequest
+	(*HelloResponse)(nil),            // 2: vibesys.api.v1.HelloResponse
+	(*TailRequest)(nil),              // 3: vibesys.api.v1.TailRequest
+	(*TailResponse)(nil),             // 4: vibesys.api.v1.TailResponse
+	(*SkeletonRequest)(nil),          // 5: vibesys.api.v1.SkeletonRequest
+	(*DescriptorSet)(nil),            // 6: vibesys.api.v1.DescriptorSet
+	(*SkeletonResponse)(nil),         // 7: vibesys.api.v1.SkeletonResponse
+	(*WatchRunsRequest)(nil),         // 8: vibesys.api.v1.WatchRunsRequest
+	(*WatchRunsResponse)(nil),        // 9: vibesys.api.v1.WatchRunsResponse
+	(*GetBlobsRequest)(nil),          // 10: vibesys.api.v1.GetBlobsRequest
+	(*GetBlobsResponse)(nil),         // 11: vibesys.api.v1.GetBlobsResponse
+	(*BlobResult)(nil),               // 12: vibesys.api.v1.BlobResult
+	(*TailStreamRequest)(nil),        // 13: vibesys.api.v1.TailStreamRequest
+	(*TailStreamResponse)(nil),       // 14: vibesys.api.v1.TailStreamResponse
+	(*ListChatSessionsRequest)(nil),  // 15: vibesys.api.v1.ListChatSessionsRequest
+	(*ListChatSessionsResponse)(nil), // 16: vibesys.api.v1.ListChatSessionsResponse
+	(*v1.RunHead)(nil),               // 17: vibesys.store.v1.RunHead
+	(*v1.ChatSessionCreated)(nil),    // 18: vibesys.store.v1.ChatSessionCreated
+	(*HostCallRequest)(nil),          // 19: vibesys.api.v1.HostCallRequest
+	(*ReadRequest)(nil),              // 20: vibesys.api.v1.ReadRequest
+	(*WatchRequest)(nil),             // 21: vibesys.api.v1.WatchRequest
+	(*MutateRequest)(nil),            // 22: vibesys.api.v1.MutateRequest
+	(*HostCallResponse)(nil),         // 23: vibesys.api.v1.HostCallResponse
+	(*ReadResponse)(nil),             // 24: vibesys.api.v1.ReadResponse
+	(*WatchResponse)(nil),            // 25: vibesys.api.v1.WatchResponse
+	(*MutateResponse)(nil),           // 26: vibesys.api.v1.MutateResponse
 }
 var file_vibesys_api_v1_host_proto_depIdxs = []int32{
-	14, // 0: vibesys.api.v1.WatchRunsResponse.head:type_name -> vibesys.store.v1.RunHead
-	0,  // 1: vibesys.api.v1.WatchRunsResponse.liveness:type_name -> vibesys.api.v1.RunLiveness
-	11, // 2: vibesys.api.v1.GetBlobsResponse.blobs:type_name -> vibesys.api.v1.BlobResult
-	15, // 3: vibesys.api.v1.HostService.HostCall:input_type -> vibesys.api.v1.HostCallRequest
-	16, // 4: vibesys.api.v1.HostService.Read:input_type -> vibesys.api.v1.ReadRequest
-	17, // 5: vibesys.api.v1.HostService.Watch:input_type -> vibesys.api.v1.WatchRequest
-	18, // 6: vibesys.api.v1.HostService.Mutate:input_type -> vibesys.api.v1.MutateRequest
-	1,  // 7: vibesys.api.v1.HostService.Hello:input_type -> vibesys.api.v1.HelloRequest
-	3,  // 8: vibesys.api.v1.HostService.Tail:input_type -> vibesys.api.v1.TailRequest
-	5,  // 9: vibesys.api.v1.HostService.Skeleton:input_type -> vibesys.api.v1.SkeletonRequest
-	7,  // 10: vibesys.api.v1.HostService.WatchRuns:input_type -> vibesys.api.v1.WatchRunsRequest
-	9,  // 11: vibesys.api.v1.HostService.GetBlobs:input_type -> vibesys.api.v1.GetBlobsRequest
-	12, // 12: vibesys.api.v1.HostService.TailStream:input_type -> vibesys.api.v1.TailStreamRequest
-	19, // 13: vibesys.api.v1.HostService.HostCall:output_type -> vibesys.api.v1.HostCallResponse
-	20, // 14: vibesys.api.v1.HostService.Read:output_type -> vibesys.api.v1.ReadResponse
-	21, // 15: vibesys.api.v1.HostService.Watch:output_type -> vibesys.api.v1.WatchResponse
-	22, // 16: vibesys.api.v1.HostService.Mutate:output_type -> vibesys.api.v1.MutateResponse
-	2,  // 17: vibesys.api.v1.HostService.Hello:output_type -> vibesys.api.v1.HelloResponse
-	4,  // 18: vibesys.api.v1.HostService.Tail:output_type -> vibesys.api.v1.TailResponse
-	6,  // 19: vibesys.api.v1.HostService.Skeleton:output_type -> vibesys.api.v1.SkeletonResponse
-	8,  // 20: vibesys.api.v1.HostService.WatchRuns:output_type -> vibesys.api.v1.WatchRunsResponse
-	10, // 21: vibesys.api.v1.HostService.GetBlobs:output_type -> vibesys.api.v1.GetBlobsResponse
-	13, // 22: vibesys.api.v1.HostService.TailStream:output_type -> vibesys.api.v1.TailStreamResponse
-	13, // [13:23] is the sub-list for method output_type
-	3,  // [3:13] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	17, // 0: vibesys.api.v1.TailResponse.head:type_name -> vibesys.store.v1.RunHead
+	6,  // 1: vibesys.api.v1.SkeletonResponse.descriptor_sets:type_name -> vibesys.api.v1.DescriptorSet
+	17, // 2: vibesys.api.v1.SkeletonResponse.head:type_name -> vibesys.store.v1.RunHead
+	17, // 3: vibesys.api.v1.WatchRunsResponse.head:type_name -> vibesys.store.v1.RunHead
+	0,  // 4: vibesys.api.v1.WatchRunsResponse.liveness:type_name -> vibesys.api.v1.RunLiveness
+	12, // 5: vibesys.api.v1.GetBlobsResponse.blobs:type_name -> vibesys.api.v1.BlobResult
+	18, // 6: vibesys.api.v1.ListChatSessionsResponse.sessions:type_name -> vibesys.store.v1.ChatSessionCreated
+	19, // 7: vibesys.api.v1.HostService.HostCall:input_type -> vibesys.api.v1.HostCallRequest
+	20, // 8: vibesys.api.v1.HostService.Read:input_type -> vibesys.api.v1.ReadRequest
+	21, // 9: vibesys.api.v1.HostService.Watch:input_type -> vibesys.api.v1.WatchRequest
+	22, // 10: vibesys.api.v1.HostService.Mutate:input_type -> vibesys.api.v1.MutateRequest
+	1,  // 11: vibesys.api.v1.HostService.Hello:input_type -> vibesys.api.v1.HelloRequest
+	15, // 12: vibesys.api.v1.HostService.ListChatSessions:input_type -> vibesys.api.v1.ListChatSessionsRequest
+	3,  // 13: vibesys.api.v1.HostService.Tail:input_type -> vibesys.api.v1.TailRequest
+	5,  // 14: vibesys.api.v1.HostService.Skeleton:input_type -> vibesys.api.v1.SkeletonRequest
+	8,  // 15: vibesys.api.v1.HostService.WatchRuns:input_type -> vibesys.api.v1.WatchRunsRequest
+	10, // 16: vibesys.api.v1.HostService.GetBlobs:input_type -> vibesys.api.v1.GetBlobsRequest
+	13, // 17: vibesys.api.v1.HostService.TailStream:input_type -> vibesys.api.v1.TailStreamRequest
+	23, // 18: vibesys.api.v1.HostService.HostCall:output_type -> vibesys.api.v1.HostCallResponse
+	24, // 19: vibesys.api.v1.HostService.Read:output_type -> vibesys.api.v1.ReadResponse
+	25, // 20: vibesys.api.v1.HostService.Watch:output_type -> vibesys.api.v1.WatchResponse
+	26, // 21: vibesys.api.v1.HostService.Mutate:output_type -> vibesys.api.v1.MutateResponse
+	2,  // 22: vibesys.api.v1.HostService.Hello:output_type -> vibesys.api.v1.HelloResponse
+	16, // 23: vibesys.api.v1.HostService.ListChatSessions:output_type -> vibesys.api.v1.ListChatSessionsResponse
+	4,  // 24: vibesys.api.v1.HostService.Tail:output_type -> vibesys.api.v1.TailResponse
+	7,  // 25: vibesys.api.v1.HostService.Skeleton:output_type -> vibesys.api.v1.SkeletonResponse
+	9,  // 26: vibesys.api.v1.HostService.WatchRuns:output_type -> vibesys.api.v1.WatchRunsResponse
+	11, // 27: vibesys.api.v1.HostService.GetBlobs:output_type -> vibesys.api.v1.GetBlobsResponse
+	14, // 28: vibesys.api.v1.HostService.TailStream:output_type -> vibesys.api.v1.TailStreamResponse
+	18, // [18:29] is the sub-list for method output_type
+	7,  // [7:18] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_api_v1_host_proto_init() }
@@ -997,17 +1228,18 @@ func file_vibesys_api_v1_host_proto_init() {
 		return
 	}
 	file_vibesys_api_v1_host_call_proto_init()
-	file_vibesys_api_v1_host_read_generated_proto_init()
 	file_vibesys_api_v1_host_mutate_generated_proto_init()
+	file_vibesys_api_v1_host_read_generated_proto_init()
 	file_vibesys_api_v1_host_watch_generated_proto_init()
-	file_vibesys_api_v1_host_proto_msgTypes[5].OneofWrappers = []any{}
+	file_vibesys_api_v1_host_proto_msgTypes[6].OneofWrappers = []any{}
+	file_vibesys_api_v1_host_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_api_v1_host_proto_rawDesc), len(file_vibesys_api_v1_host_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

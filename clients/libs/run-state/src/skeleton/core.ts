@@ -6,6 +6,7 @@ import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import {AgentClient, type AgentTurnAttrs, AgentTurnAttrsSchema} from '@vibesys/proto';
 import {addTokens, type CoreState, initialCoreState, NO_TOKENS, type TokenTally} from '../index.js';
 import {ownProjectionInput} from '../publication.js';
+import {nativeTranscriptEntries} from '../transcript/native.js';
 import type {TranscriptEntry} from '../transcript-fold.js';
 import type {SkeletonContent, StoreView} from './types.js';
 
@@ -25,6 +26,7 @@ function replyEntry(
       kind: 'reply',
       spanId,
       turnId: spanId,
+      invocationId: spanId,
       agentKind: turn.role,
       content: JSON.stringify(reply.value),
       reply: ownProjectionInput(reply),
@@ -64,6 +66,8 @@ export function skeletonCore(view: StoreView, content: SkeletonContent = {}): Co
     const attrs = span.label?.attrs;
     if (attrs?.typeUrl.split('/').at(-1) !== AgentTurnAttrsSchema.typeName) continue;
     const turn = fromBinary(AgentTurnAttrsSchema, attrs.value);
+    const native = content.transcripts?.[span.id];
+    if (native) transcript.push(...nativeTranscriptEntries(span.id, native, content.text));
     transcript.push(...replyEntry(span.id, turn, seq, content));
     const usage = turn.usage;
     const tokens: TokenTally = {

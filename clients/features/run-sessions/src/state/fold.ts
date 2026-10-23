@@ -44,7 +44,7 @@ function foldRecord(
     state = {
       ...state,
       turns: state.turns.map(turn =>
-        turn.requestId === event.value.requestId
+        turn.requestId === event.value.requestId && turn.streaming
           ? {...turn, answer: turn.answer + event.value.text}
           : turn,
       ),
@@ -88,7 +88,9 @@ function foldMessage(
         };
   state = {
     ...state,
-    turns: [...state.turns.filter(item => item.requestId !== turn.requestId), turn],
+    turns: previous
+      ? state.turns.map(item => (item.requestId === turn.requestId ? turn : item))
+      : [...state.turns, turn],
   };
   return state;
 }

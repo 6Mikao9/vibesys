@@ -19,16 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	HostService_HostCall_FullMethodName   = "/vibesys.api.v1.HostService/HostCall"
-	HostService_Read_FullMethodName       = "/vibesys.api.v1.HostService/Read"
-	HostService_Watch_FullMethodName      = "/vibesys.api.v1.HostService/Watch"
-	HostService_Mutate_FullMethodName     = "/vibesys.api.v1.HostService/Mutate"
-	HostService_Hello_FullMethodName      = "/vibesys.api.v1.HostService/Hello"
-	HostService_Tail_FullMethodName       = "/vibesys.api.v1.HostService/Tail"
-	HostService_Skeleton_FullMethodName   = "/vibesys.api.v1.HostService/Skeleton"
-	HostService_WatchRuns_FullMethodName  = "/vibesys.api.v1.HostService/WatchRuns"
-	HostService_GetBlobs_FullMethodName   = "/vibesys.api.v1.HostService/GetBlobs"
-	HostService_TailStream_FullMethodName = "/vibesys.api.v1.HostService/TailStream"
+	HostService_HostCall_FullMethodName         = "/vibesys.api.v1.HostService/HostCall"
+	HostService_Read_FullMethodName             = "/vibesys.api.v1.HostService/Read"
+	HostService_Watch_FullMethodName            = "/vibesys.api.v1.HostService/Watch"
+	HostService_Mutate_FullMethodName           = "/vibesys.api.v1.HostService/Mutate"
+	HostService_Hello_FullMethodName            = "/vibesys.api.v1.HostService/Hello"
+	HostService_ListChatSessions_FullMethodName = "/vibesys.api.v1.HostService/ListChatSessions"
+	HostService_Tail_FullMethodName             = "/vibesys.api.v1.HostService/Tail"
+	HostService_Skeleton_FullMethodName         = "/vibesys.api.v1.HostService/Skeleton"
+	HostService_WatchRuns_FullMethodName        = "/vibesys.api.v1.HostService/WatchRuns"
+	HostService_GetBlobs_FullMethodName         = "/vibesys.api.v1.HostService/GetBlobs"
+	HostService_TailStream_FullMethodName       = "/vibesys.api.v1.HostService/TailStream"
 )
 
 // HostServiceClient is the client API for HostService service.
@@ -50,6 +51,7 @@ type HostServiceClient interface {
 	// keeps running after the caller disconnects, until the operation cap.
 	Mutate(ctx context.Context, in *MutateRequest, opts ...grpc.CallOption) (*MutateResponse, error)
 	Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error)
+	ListChatSessions(ctx context.Context, in *ListChatSessionsRequest, opts ...grpc.CallOption) (*ListChatSessionsResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
 	Tail(ctx context.Context, in *TailRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailResponse], error)
@@ -120,6 +122,16 @@ func (c *hostServiceClient) Hello(ctx context.Context, in *HelloRequest, opts ..
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HelloResponse)
 	err := c.cc.Invoke(ctx, HostService_Hello_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostServiceClient) ListChatSessions(ctx context.Context, in *ListChatSessionsRequest, opts ...grpc.CallOption) (*ListChatSessionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListChatSessionsResponse)
+	err := c.cc.Invoke(ctx, HostService_ListChatSessions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +234,7 @@ type HostServiceServer interface {
 	// keeps running after the caller disconnects, until the operation cap.
 	Mutate(context.Context, *MutateRequest) (*MutateResponse, error)
 	Hello(context.Context, *HelloRequest) (*HelloResponse, error)
+	ListChatSessions(context.Context, *ListChatSessionsRequest) (*ListChatSessionsResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
 	Tail(*TailRequest, grpc.ServerStreamingServer[TailResponse]) error
@@ -253,6 +266,9 @@ func (UnimplementedHostServiceServer) Mutate(context.Context, *MutateRequest) (*
 }
 func (UnimplementedHostServiceServer) Hello(context.Context, *HelloRequest) (*HelloResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Hello not implemented")
+}
+func (UnimplementedHostServiceServer) ListChatSessions(context.Context, *ListChatSessionsRequest) (*ListChatSessionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListChatSessions not implemented")
 }
 func (UnimplementedHostServiceServer) Tail(*TailRequest, grpc.ServerStreamingServer[TailResponse]) error {
 	return status.Error(codes.Unimplemented, "method Tail not implemented")
@@ -373,6 +389,24 @@ func _HostService_Hello_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostService_ListChatSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListChatSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).ListChatSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_ListChatSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).ListChatSessions(ctx, req.(*ListChatSessionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _HostService_Tail_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(TailRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -464,6 +498,10 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Hello",
 			Handler:    _HostService_Hello_Handler,
+		},
+		{
+			MethodName: "ListChatSessions",
+			Handler:    _HostService_ListChatSessions_Handler,
 		},
 		{
 			MethodName: "Skeleton",
