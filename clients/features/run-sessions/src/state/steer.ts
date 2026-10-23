@@ -81,7 +81,8 @@ function intentFact(seq: bigint, intent: IntentState): SteerDeliveryFact | null 
     withdraws: intent.withdraws ?? null,
     role: null,
     attemptId: null,
-    reason: withdraw && step === 'ended' ? 'withdrawn' : (intent.reason ?? intent.reasonCode ?? null),
+    reason:
+      withdraw && step === 'ended' ? 'withdrawn' : (intent.reason ?? intent.reasonCode ?? null),
   };
 }
 

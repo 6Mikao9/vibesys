@@ -12,6 +12,7 @@ from tests.support.retained_events import (
     ANNOUNCEMENTS,
     CORE_TYPES,
     SESSION_FACTS,
+    FixtureRefusedError,
     core_event,
     replay_of,
 )
@@ -111,3 +112,22 @@ def test_every_committed_run_fixture_converts(path: Path) -> None:
     if "runId" not in fixture:
         pytest.skip("not a run: a catalogue of examples")
     assert replay_of(fixture).batches
+
+
+CONFORMANCE = ROOT / "tests/conformance/fixtures/run-summary"
+
+
+@pytest.mark.parametrize(
+    ("name", "reason"),
+    [
+        ("two-ideas", "agent: Field required"),
+        ("predates-trace", "activity"),
+    ],
+)
+def test_conformance_runs_that_predate_the_native_shapes_are_refused_by_name(
+    name: str, reason: str
+) -> None:
+    """These inputs belong to the retained server summary; the native path refuses them typed."""
+    fixture = json.loads((CONFORMANCE / f"{name}.json").read_text())
+    with pytest.raises(FixtureRefusedError, match=reason):
+        replay_of({"runId": "20261010-120000-11111111-dynamic", "events": fixture["events"]})

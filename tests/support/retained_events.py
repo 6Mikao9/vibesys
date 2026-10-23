@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from vibesys.events import CoreEvent, CoreEventType
-from vibesys.records.api import MappingState, map_event
+from vibesys.records.api import MappedEvent, MappingState, map_event
 from vs_proto.api import ClientReplay, ClientReplayBatch
 
 CORE_TYPES = frozenset(kind.value for kind in CoreEventType)
@@ -61,6 +61,18 @@ def core_event(original: dict[str, Any]) -> dict[str, Any] | None:
     return event
 
 
+class FixtureRefusedError(ValueError):
+    """A fixture holds an event the native projection cannot map; names the event and why."""
+
+
+def _project(state: MappingState, event: dict[str, Any], original: dict[str, Any]) -> MappedEvent:
+    try:
+        return map_event(state, CoreEvent.model_validate(event))
+    except (TypeError, ValueError) as error:
+        message = f"event {original.get('sequence')} ({original['type']}) is refused: {error}"
+        raise FixtureRefusedError(message) from error
+
+
 def replay_of(fixture: dict[str, Any]) -> ClientReplay:
     """The records, blobs and streams the shipping projection makes of a fixture's events."""
     replay = ClientReplay()
@@ -70,7 +82,7 @@ def replay_of(fixture: dict[str, Any]) -> ClientReplay:
         event = core_event(original)
         if event is None:
             continue
-        projected = map_event(state, CoreEvent.model_validate(event))
+        projected = _project(state, event, original)
         state = projected.state
         replay.batches.append(
             ClientReplayBatch(
@@ -87,5 +99,4 @@ def replay_of(fixture: dict[str, Any]) -> ClientReplay:
                 raise ValueError(message)
             content.extend(stream.content)
     replay.streams.update({key: bytes(value) for key, value in streams.items()})
-
     return replay
