@@ -36,6 +36,8 @@ export const GATEWAY_REPLY_BYTES = 1 << 20;
  * own tests and this simulation both run.
  */
 export const GATEWAY_KEYFRAME_CANDIDATES = 4;
+/** A stored checkpoint over this is not read by the service; it tries an older one. */
+export const GATEWAY_MAX_STORED_KEYFRAME = 16 << 20;
 /** What the service keeps back of the reply budget beside a keyframe, and beside the records. */
 const KEYFRAME_RESERVE = 32;
 const RECORDS_RESERVE = 24;
@@ -74,6 +76,10 @@ export interface SimRun {
    * run arrive in several messages, which the service does for a large one.
    */
   readonly tailBytes?: number;
+  /** A test scales the stored-checkpoint read limit down to its small runs. */
+  readonly storedKeyframeLimit?: number;
+  /** Checkpoints written before `Keyframe.failures_tracked`: no failure facts, flag false. */
+  readonly legacyKeyframes?: boolean;
 }
 
 /** A fault the link injects into the n-th call of a method (0 is the first). */
@@ -96,6 +102,8 @@ export interface SimDelivery {
 
 /** A stored keyframe as the gateway sends it: descriptors named by hash, sets held apart. */
 interface WireKeyframe {
+  /** What the checkpoint takes in the log, before its descriptors are named by hash. */
+  readonly storedBytes: number;
   readonly bytes: Uint8Array;
   readonly sets: ReadonlyMap<string, Uint8Array>;
 }
@@ -298,7 +306,9 @@ export class SimGateway implements RunTransport {
       [...this.keyframe(covered).sets].filter(([hash]) => !known.has(hash));
     const covered =
       chooseKeyframe(this.run.keyframes ?? [], through =>
-        through <= records.length
+        through <= records.length &&
+        this.keyframe(through).storedBytes <=
+          (this.run.storedKeyframeLimit ?? GATEWAY_MAX_STORED_KEYFRAME)
           ? size(this.keyframe(through).bytes, unknownSets(through)) + KEYFRAME_RESERVE <= budget
           : false,
       ) ?? 0;
@@ -332,6 +342,11 @@ export class SimGateway implements RunTransport {
       ...foldSkeleton(seedSkeleton(), records.slice(0, covered)),
       throughSeq: records[covered - 1]?.seq ?? 0n,
     });
+    if (this.run.legacyKeyframes) {
+      keyframe.failures = [];
+      keyframe.failuresTracked = false;
+    }
+    const storedBytes = toBinary(KeyframeSchema, keyframe).length;
     const sets = new Map<string, Uint8Array>();
     for (const version of keyframe.epochs) {
       const descriptors = version.epoch?.descriptors;
@@ -342,7 +357,7 @@ export class SimGateway implements RunTransport {
       version.descriptorsSha256 = hash;
       version.epoch.descriptors = undefined;
     }
-    const wire = {bytes: toBinary(KeyframeSchema, keyframe), sets};
+    const wire = {storedBytes, bytes: toBinary(KeyframeSchema, keyframe), sets};
     this.#keyframes.set(covered, wire);
     return wire;
   }

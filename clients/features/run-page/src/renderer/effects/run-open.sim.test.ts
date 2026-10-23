@@ -12,6 +12,7 @@ import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
+  KeyframeSchema,
   NoticeCode,
   RecordSchema,
   Severity,
@@ -398,4 +399,27 @@ test('a finished run’s failure diagnostic does not depend on how many records 
       actor.stop();
     }
   }
+});
+
+test('a checkpoint stored over the read limit is skipped though its reply would fit', async () => {
+  const records = storeRunFixture('short', 120, 1).records;
+  const stored = async (through: number) => {
+    const reply = await firstReply(records, [through], GATEWAY_REPLY_BYTES);
+    return fromBinary(KeyframeSchema, reply.keyframe ?? new Uint8Array());
+  };
+  const small = toBinary(KeyframeSchema, await stored(5)).length;
+  const large = toBinary(KeyframeSchema, await stored(400)).length;
+  expect(large).toBeGreaterThan(small);
+  // The limit sits between the two stored sizes: the service reads the older checkpoint only.
+  const limit = Math.floor((small + large) / 2) + 90 * 1024;
+  const {clock, gateway, actor} = open(
+    {records, keyframes: [5, 400], storedKeyframeLimit: limit},
+    {rttMs: 1, bytesPerMs: 1e9},
+  );
+  await until(clock, () => gateway.skeletons.length > 0);
+  actor.stop();
+  const reply = gateway.skeletons[0];
+  expect(fromBinary(KeyframeSchema, reply?.keyframe ?? new Uint8Array()).throughSeq).toBe(
+    records[4]?.seq,
+  );
 });

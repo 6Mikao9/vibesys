@@ -7,6 +7,7 @@ import {refusalOf} from './index.js';
 import {
   chooseKeyframe,
   GATEWAY_KEYFRAME_CANDIDATES,
+  GATEWAY_MAX_STORED_KEYFRAME,
   GATEWAY_REPLY_BYTES,
   SimGateway,
 } from './testing.js';
@@ -18,10 +19,10 @@ const CONTRACT = JSON.parse(
     'utf8',
   ),
 ) as {
-  constants: {keyframeCandidates: number; replyBytes: number};
+  constants: {keyframeCandidates: number; replyBytes: number; maxStoredKeyframe: number};
   selection: {
     name: string;
-    checkpoints: {through: number; fits: boolean}[];
+    checkpoints: {through: number; fits: boolean; stored?: 'over'}[];
     chosen: number;
   }[];
   logs: {
@@ -42,11 +43,15 @@ const SKELETON = `/${HostService.typeName}/${HostService.method.skeleton.name}`;
 test('the simulated gateway has the service constants', () => {
   expect(GATEWAY_KEYFRAME_CANDIDATES).toBe(CONTRACT.constants.keyframeCandidates);
   expect(GATEWAY_REPLY_BYTES).toBe(CONTRACT.constants.replyBytes);
+  expect(GATEWAY_MAX_STORED_KEYFRAME).toBe(CONTRACT.constants.maxStoredKeyframe);
 });
 
 test('the simulated gateway chooses a checkpoint as the service does', () => {
   for (const c of CONTRACT.selection) {
-    const fits = new Map(c.checkpoints.map(point => [point.through, point.fits]));
+    // A checkpoint is usable when its reply fits and its stored form is within the read limit.
+    const fits = new Map(
+      c.checkpoints.map(point => [point.through, point.fits && point.stored !== 'over']),
+    );
     expect(
       chooseKeyframe([...fits.keys()], through => fits.get(through) === true) ?? 0,
       c.name,

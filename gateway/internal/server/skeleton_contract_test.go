@@ -19,12 +19,14 @@ type skeletonContract struct {
 	Constants struct {
 		KeyframeCandidates int `json:"keyframeCandidates"`
 		ReplyBytes         int `json:"replyBytes"`
+		MaxStoredKeyframe  int `json:"maxStoredKeyframe"`
 	} `json:"constants"`
 	Selection []struct {
 		Name        string `json:"name"`
 		Checkpoints []struct {
 			Through uint64 `json:"through"`
 			Fits    bool   `json:"fits"`
+			Stored  string `json:"stored"`
 		} `json:"checkpoints"`
 		Chosen uint64 `json:"chosen"`
 	} `json:"selection"`
@@ -70,7 +72,18 @@ func TestSkeletonKeyframeSelectionContract(t *testing.T) {
 				if !point.Fits {
 					size = contract.Constants.ReplyBytes + 1<<10
 				}
-				keyframes[point.Through] = []*storev1.EpochVersion{epochWith(point.Through, descriptorSet(fmt.Sprint("set", point.Through), size))}
+				set := descriptorSet(fmt.Sprint("set", point.Through), size)
+				epochs := []*storev1.EpochVersion{epochWith(point.Through, set)}
+				if point.Stored == "over" {
+					// Many epochs share one set: small addressed, over the read limit stored.
+					size = 600 << 10
+					set = descriptorSet(fmt.Sprint("set", point.Through), size)
+					epochs = nil
+					for epoch := 0; (epoch+1)*size <= contract.Constants.MaxStoredKeyframe+size; epoch++ {
+						epochs = append(epochs, epochWith(uint64(epoch)+1, set))
+					}
+				}
+				keyframes[point.Through] = epochs
 				last = max(last, point.Through)
 			}
 			storeRun(t, f, int(max(last, 6)), keyframes)
