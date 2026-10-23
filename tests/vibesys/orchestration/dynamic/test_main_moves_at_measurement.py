@@ -38,6 +38,7 @@ from vibesys.metrics import MetricRow
 from vibesys.orchestration.dynamic.search.api import (
     CandidateMeasured,
     Closing,
+    CoreHolds,
     Evidence,
     Proof,
     RecordState,
@@ -229,7 +230,8 @@ def fresh_record(noise: float) -> RunRecord:
             accuracy_passed=True, benchmark_passed=True, metrics=rows_of(*INPUT_READING)
         )
     )
-    return RunRecord(config(), BASE, baseline, terms_of(noise))
+    selected = config()
+    return RunRecord(selected, BASE, baseline, terms_of(noise), admissions=selected.start_budget)
 
 
 @dataclass
@@ -270,6 +272,9 @@ class Driver:
             BASE,
             terms_of(self.noise),
             RecordState.model_validate_json(state.model_dump_json()),
+            CoreHolds(
+                self.record.budget, tuple(item.settlement for item in self.record.kept.values())
+            ),
         )
 
 
