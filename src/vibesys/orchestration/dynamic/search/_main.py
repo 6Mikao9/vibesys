@@ -5,7 +5,7 @@ Main starts at the run's input. Two inputs move it, and nothing else does:
 - a candidate's settled trusted measurement (`MainLine.measured`): a candidate that holds main
   wholly, passed the trusted accuracy and benchmark checks, and whose measurement dominates
   main's (the one rule of `MetricSpace.compare`: no objective worse, one better) becomes main
-  at the moment its measurement lands, whether or not its workstream has closed;
+  as soon as it does, whether or not its workstream has closed;
 - a finished merge workstream (`MainLine.finished`): when the merger's commit passed the
   trusted accuracy check and measures no worse than main, main becomes that commit. A candidate
   that does not hold main (built on an older main) is brought in by a merge.
@@ -15,6 +15,16 @@ main's generation, which tells the search that a hypothesis started on an older 
 rebase. `MainLine` is folded by the run record and read by planning; like the record, it is
 rebuilt by replay.
 
+A candidate's verdict against main is derived, never frozen: it is a pure function of the
+candidate's stored measurement and of what main reads now, which is the input's bar until a
+candidate moves main (`MainLine.reading`). The bar grows as the ledger takes more samples of the
+input, and a sample can report an objective the earlier ones did not, so a measurement that did
+not dominate yesterday's bar may dominate today's. Every sound measured candidate is therefore
+kept (`Awaiting`) and judged again whenever main's reading changes (`MainLine.rejudge`), without
+measuring anything again; the first candidate in the order the measurements landed that holds
+main and dominates it moves it, and a move is judged again at once against the candidates built
+on the new main.
+
 What a merge must beat is a closed `MainReading`: pending while the input's measurement has not
 landed (nothing is mergeable and main cannot move), no headline when main and the input have no
 metrics (any verified candidate beats it), or main's complete metric row.
@@ -22,9 +32,12 @@ metrics (any verified candidate beats it), or main's complete metric row.
 
 from dataclasses import dataclass, field
 
+from pydantic import Field
+
 from vibesys.candidates import api as candidates
 from vibesys.metrics import HostContention, MetricRow, MetricSpace, reading_of
 from vibesys.orchestration.dynamic.search._outcomes import (
+    UNSETTLED,
     CandidateMeasured,
     WorkstreamDone,
     WorkstreamStart,
@@ -34,6 +47,8 @@ from vibesys.orchestration.dynamic.search._prompts import MergeableRow
 from vibesys.orchestration.dynamic.search._values import (
     Failure,
     FailureKind,
+    FinishedWork,
+    HypothesisRecord,
     MainMeasurement,
     MergeOutcome,
     MergeRecord,
@@ -91,6 +106,24 @@ class MergeOptions:
         return any(row.hypothesis_id == hypothesis_id for row in self.rows)
 
 
+class Awaiting(Value):
+    """A sound measured candidate, kept so main is judged from the facts as they stand.
+
+    What a candidate's own change measured is fixed once its measurement landed; whether that
+    dominates main is not, since main's reading moves (`MainLine.rejudge`). So the measurement is
+    kept as it landed, with the revision it was built on.
+    """
+
+    work_id: str
+    sequence: int = Field(gt=0)
+    parent: RevisionRef
+    """The revision the candidate was built on: it holds main wholly when this is main."""
+    candidate: RevisionRef
+    metrics: tuple[MetricRow, ...]
+    """What its trusted benchmark read."""
+    host_snapshot: HostContention | None = None
+
+
 class MainState(Value):
     """Everything `MainLine` knows but the input's measurement, to resume main from.
 
@@ -105,8 +138,12 @@ class MainState(Value):
     rounds: tuple[candidates.EligibleRound, ...]
     merged: tuple[tuple[str, str], ...]
     seen: tuple[tuple[str, int], ...] = ()
-    """The workstreams whose measurement main has judged (`MainLine.measured`): a checkpoint
+    """The workstreams whose measurement main has taken (`MainLine.measured`): a checkpoint
     from before they were kept holds none, and then a workstream's close is the first sight."""
+    awaiting: tuple[Awaiting, ...] | None = None
+    """The measured candidates main judges again whenever its reading changes, in the order they
+    landed. None in a checkpoint from before they were kept: the record derives them from its
+    rounds (`awaiting_of`), so that run is judged from its stored measurements on resume."""
 
 
 @dataclass
@@ -128,8 +165,11 @@ class MainLine:
     merged: set[tuple[str, str]] = field(default_factory=set)
     """The (hypothesis, revision) candidates a merge already brought into main."""
     seen: set[tuple[str, int]] = field(default_factory=set)
-    """The (hypothesis, sequence) workstreams whose measurement main judged once: a measurement is
-    judged at the first sight of it, whether its workstream reports it or only closes with it."""
+    """The (hypothesis, sequence) workstreams whose measurement main took once: a measurement is
+    taken at the first sight of it, whether its workstream reports it or only closes with it."""
+    awaiting: list[Awaiting] = field(default_factory=list)
+    """The sound measured candidates, in the order they landed, that main has not become: each
+    is judged against main's reading as it stands (`rejudge`)."""
 
     def state(self) -> MainState:
         """What main knows, to resume it from (`resumed`); ``merged`` sorted, as a set has no order."""
@@ -141,11 +181,16 @@ class MainLine:
             rounds=tuple(self.rounds),
             merged=tuple(sorted(self.merged)),
             seen=tuple(sorted(self.seen)),
+            awaiting=tuple(self.awaiting),
         )
 
     @classmethod
     def resumed(cls, baseline: candidates.Baseline | None, state: MainState) -> "MainLine":
-        """The main ``state`` describes, compared with the input's ``baseline``."""
+        """The main ``state`` describes, compared with the input's ``baseline``.
+
+        A state from before the measured candidates were kept holds none (``awaiting`` is None);
+        the record derives them from its rounds and hands them over (`awaiting_of`).
+        """
         return cls(
             revision=state.revision,
             baseline=baseline,
@@ -155,6 +200,7 @@ class MainLine:
             rounds=list(state.rounds),
             merged=set(state.merged),
             seen=set(state.seen),
+            awaiting=list(state.awaiting or ()),
         )
 
     def reading(self) -> MainReading:
@@ -231,67 +277,104 @@ class MainLine:
             )
         return MergeOptions(checkable=True, rows=tuple(rows), barred=tuple(barred))
 
-    def measured(
-        self, start: WorkstreamStart, seen: CandidateMeasured, terms: TaskTerms
-    ) -> MergeRecord | None:
-        """Judge a candidate's settled trusted measurement once, and move main to it if it dominates.
+    def measured(self, start: WorkstreamStart, seen: CandidateMeasured, terms: TaskTerms) -> None:
+        """Take a candidate's settled trusted measurement once, and judge main from it.
 
         This is the loop without a merge: a candidate built on main now (its parent is main) is
         already main plus its own change, and was measured once, officially, so a second
         workstream and a second measurement would only reproduce them. Main moves to it when it
-        is winner-eligible and retained, passed the trusted accuracy and benchmark checks, and
-        its benchmark beats main's: the one comparison of `MetricSpace.compare`, so a gain on
-        one objective is never lost to a headline that moved within its noise. It is folded as a
-        merge of itself (`MergeRecord`), so main's lineage and the planner's history need no
-        second case; any other candidate, built on an older main, still goes through a merge
-        workstream. It does not wait for its workstream to close.
+        is sound (eligible but for the base, `CandidateMeasured.sound`) and retained, passed the
+        trusted accuracy and benchmark checks, and its benchmark beats main's: the one comparison
+        of `MetricSpace.compare`, so a gain on one objective is never lost to a headline that
+        moved within its noise. It is folded as a merge of itself (`MergeRecord`), so main's
+        lineage and the planner's history need no second case; any other candidate, built on an
+        older main, still goes through a merge workstream. It does not wait for its workstream to
+        close.
 
-        A measurement is judged at its first sight (`seen`): the workstream reports it as soon as
+        A measurement is taken at its first sight (`seen`): the workstream reports it as soon as
         it lands, and the root offers it again when the workstream closes, in case the report was
-        lost; a second sight changes nothing. Everything it reads is recorded with the
-        measurement, so a replay decides the same.
+        lost; a second sight changes nothing. The verdict is not taken once: a sound
+        measurement is kept (`Awaiting`) and judged against main's reading whenever it changes
+        (`rejudge`), so what it recorded decides, not when it was first compared. Everything it
+        reads is recorded with the measurement, so a replay decides the same.
         """
         found = (start.plan.work_id, start.sequence)
         if found in self.seen:
-            return None
+            return
         self.seen.add(found)
         accuracy, benchmark = seen.accuracy, seen.benchmark
         if (
-            start.parent.revision_id.root != self.revision.revision_id.root
-            or not seen.eligible
+            not seen.fit
             or not checkable(terms)
             or accuracy is None
             or not accuracy.passed
             or benchmark is None
             or not benchmark.passed
         ):
-            return None
-        main = self.reading()
-        if not _beats(benchmark.metrics, main, candidates.space_of(terms)):
-            return None
+            return
+        self.awaiting.append(
+            Awaiting(
+                work_id=start.plan.work_id,
+                sequence=start.sequence,
+                parent=start.parent,
+                candidate=seen.candidate,
+                metrics=benchmark.metrics,
+                host_snapshot=benchmark.host_snapshot,
+            )
+        )
+        self.rejudge(terms)
+
+    def rejudge(self, terms: TaskTerms) -> None:
+        """Judge main again from the measured candidates it is waiting on, until none moves it.
+
+        This is the one decision that moves main for a candidate, and a pure function of what
+        was recorded: each candidate's own measurement, the revision it was built on, and main's
+        reading now. Main's reading changes when the input's bar takes a sample
+        (`RunRecord.refined`, `RunRecord.measured`) and when main moves, so the record calls this
+        at each. A candidate counts only while it holds main (its parent is main); the first
+        that dominates main, in the order the measurements landed, becomes main, and the rest are
+        judged against it. Nothing is measured again.
+        """
+        if not checkable(terms):
+            return
+        space = candidates.space_of(terms)
+        moved = True
+        while moved:
+            moved = False
+            main = self.reading()
+            for entry in self.awaiting:
+                if entry.parent.revision_id.root != self.revision.revision_id.root:
+                    continue
+                if _beats(entry.metrics, main, space):
+                    self._fast_forward(entry, main)
+                    moved = True
+                    break
+
+    def _fast_forward(self, entry: Awaiting, main: MainReading) -> None:
+        """Move main to a measured candidate built on it that dominates it: a merge of itself."""
         record = MergeRecord(
-            merge_id=start.plan.work_id,
-            sequence=start.sequence,
+            merge_id=entry.work_id,
+            sequence=entry.sequence,
             candidates=(
                 MergeSource(
-                    hypothesis_id=start.plan.work_id,
-                    revision=seen.candidate,
-                    built_on=start.parent,
+                    hypothesis_id=entry.work_id,
+                    revision=entry.candidate,
+                    built_on=entry.parent,
                 ),
             ),
             fast_forward=True,
-            base=start.parent,
+            base=entry.parent,
             outcome=MergeOutcome.MERGED,
-            revision=seen.candidate,
+            revision=entry.candidate,
             accuracy_passed=True,
             benchmark_passed=True,
-            metrics=benchmark.metrics,
+            metrics=entry.metrics,
             main_metrics=main.metrics if isinstance(main, Headline) else (),
             main_benchmark_passed=self._benchmark_passed(),
         )
+        self.awaiting.remove(entry)
         self.merges.append(record)
-        self._advance(record, seen.candidate, benchmark.host_snapshot)
-        return record
+        self._advance(record, entry.candidate, entry.host_snapshot)
 
     def finished(self, done: WorkstreamDone, terms: TaskTerms) -> MergeRecord:
         """Fold a finished merge workstream: move main when its commit is sound, record it.
@@ -417,3 +500,51 @@ def _beats(metrics: tuple[MetricRow, ...], main: MainReading, space: MetricSpace
             return True
         case Headline(metrics=baseline):
             return space.compare_rows(metrics, baseline) is ComparisonVerdict.BETTER
+
+
+def awaiting_of(
+    hypotheses: tuple[tuple[str, HypothesisRecord], ...],
+    finished: tuple[FinishedWork, ...],
+    state: MainState,
+) -> tuple[Awaiting, ...]:
+    """The measured candidates a checkpoint from before they were kept leaves main waiting on.
+
+    Each round a workstream took into main (``state.seen``) and that did not move it
+    (``state.merges``) is the measurement it recorded: the revision it retained, its trusted
+    benchmark and the revision it was built on. It is waiting when it is sound (eligible but for
+    the base, as `sound_for` reads a finished attempt), so a run whose candidate was judged
+    against a bar that has since grown is judged again from what it measured, without measuring.
+    The order is the order the workstreams were scheduled, the best a checkpoint says of the order
+    their measurements landed; the host snapshot a move would record is not kept in a round.
+    """
+    parents = {(item.plan.work_id, item.sequence): item.parent for item in finished}
+    moved = {(item.merge_id, item.sequence) for item in state.merges if item.fast_forward}
+    taken = set(state.seen)
+    found: list[Awaiting] = []
+    for hypothesis_id, record in hypotheses:
+        for round_ in record.rounds:
+            key = (hypothesis_id, round_.sequence)
+            candidate = round_.candidate
+            if (
+                key not in taken
+                or key in moved
+                or key not in parents
+                or candidate is None
+                or round_.accuracy_passed is not True
+                or round_.benchmark_passed is not True
+                or not round_.metrics
+                or round_.review_passed is False
+                or round_.outcome in UNSETTLED
+                or round_.failure is not None
+            ):
+                continue
+            found.append(
+                Awaiting(
+                    work_id=hypothesis_id,
+                    sequence=round_.sequence,
+                    parent=parents[key],
+                    candidate=candidate,
+                    metrics=round_.metrics,
+                )
+            )
+    return tuple(sorted(found, key=lambda item: item.sequence))

@@ -42,6 +42,7 @@ from vibesys.candidates._settlement import (
     measurement,
     outcome_of,
     settle_for,
+    sound_for,
     turned_down,
 )
 from vibesys.candidates._task import (
@@ -104,6 +105,7 @@ __all__ = [
     "run_deadline_at",
     "samples_of",
     "settle_for",
+    "sound_for",
     "space_of",
     "terms_of",
     "trusted",

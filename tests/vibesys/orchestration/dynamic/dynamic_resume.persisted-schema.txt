@@ -44,6 +44,13 @@ AttemptId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
 AttemptRef {"additionalProperties":false,"type":"object"}
 AttemptRef.attempt_id required {"$ref":"#/$defs/AttemptId"}
 AttemptRef.generation required {"$ref":"#/$defs/Generation"}
+Awaiting {"additionalProperties":false,"type":"object"}
+Awaiting.candidate required {"$ref":"#/$defs/RevisionRef"}
+Awaiting.host_snapshot optional {"anyOf":[{"$ref":"#/$defs/HostContention"},{"type":"null"}],"default":null}
+Awaiting.metrics required {"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
+Awaiting.parent required {"$ref":"#/$defs/RevisionRef"}
+Awaiting.sequence required {"exclusiveMinimum":0,"type":"integer"}
+Awaiting.work_id required {"type":"string"}
 Baseline {"oneOf":[{"$ref":"#/$defs/Measured"},{"$ref":"#/$defs/Unmeasurable"},{"$ref":"#/$defs/NotConfigured"},{"$ref":"#/$defs/_MeasuredBeforeS173"}]}
 Blocker {"additionalProperties":false,"type":"object"}
 Blocker.digest optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
@@ -221,6 +228,7 @@ MainMeasurement.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRo
 MainMeasurement.previous optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
 MainMeasurement.revision required {"$ref":"#/$defs/RevisionRef"}
 MainState {"additionalProperties":false,"type":"object"}
+MainState.awaiting optional {"anyOf":[{"items":{"$ref":"#/$defs/Awaiting"},"type":"array"},{"type":"null"}],"default":null}
 MainState.generation required {"type":"integer"}
 MainState.measurement required {"anyOf":[{"$ref":"#/$defs/MainMeasurement"},{"type":"null"}]}
 MainState.merged required {"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"string"}],"type":"array"},"type":"array"}

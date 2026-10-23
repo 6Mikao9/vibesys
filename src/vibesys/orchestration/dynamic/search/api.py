@@ -19,7 +19,7 @@ from vibesys.orchestration.dynamic.search._handoff import (
     WriteHandoff,
 )
 from vibesys.orchestration.dynamic.search._ids import planning_key, workstream_key
-from vibesys.orchestration.dynamic.search._main import MainLine, MainState
+from vibesys.orchestration.dynamic.search._main import Awaiting, MainLine, MainState
 from vibesys.orchestration.dynamic.search._operations import (
     INTERPRET_KIND,
     OPERATIONS,
@@ -174,6 +174,7 @@ __all__ = [
     "WRITE_HANDOFF_KIND",
     "AcceptedReading",
     "AgentName",
+    "Awaiting",
     "Blocker",
     "BlockerKind",
     "Bound",

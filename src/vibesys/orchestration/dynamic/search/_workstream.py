@@ -116,7 +116,7 @@ async def close_with(
         work.baseline = await the_bar(ctx, ws, await the_input(ctx, w, work))
         closing = closing.model_copy(update={"input": work.baseline})
     settled = keep(ctx, w, ws, closing, work.baseline)
-    measured = measured_by_workstream(w, closing, settled)
+    measured = measured_by_workstream(w, closing, settled, ctx.task.terms)
     if measured is not None:
         ctx.channel(REPORTS).send(measured)  # main may move now; the agents wait for nothing
     label_outcome(ctx, w, closing, settled, work)

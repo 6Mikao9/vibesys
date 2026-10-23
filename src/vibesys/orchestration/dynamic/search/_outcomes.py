@@ -18,6 +18,7 @@ from vibesys.candidates.api import (
     beats_input,
     gates_of,
     settle_for,
+    sound_for,
 )
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active
@@ -290,15 +291,28 @@ class CandidateMeasured(Value):
     candidate: RevisionRef
     eligible: bool
     """Whether its settlement is winner-eligible: it passed the task's gates and checks and
-    beats the input."""
+    beats the input, as the input stood when the settlement was asserted."""
+    sound: bool | None = None
+    """Whether it is eligible but for the base (`sound_for`): every fact about the candidate
+    itself. Main is judged on this, never on ``eligible``, whose verdict on the input is taken
+    once and cannot see the base's later samples. None in a report from before this was kept,
+    which read as ``eligible``."""
     accuracy: AcceptedReading | None = None
     benchmark: AcceptedReading | None = None
     input: Baseline | None = None
     """The input as the settlement was decided against (`Closing.input`)."""
 
+    @property
+    def fit(self) -> bool:
+        """Whether the candidate may become main if it beats main: ``sound``, else ``eligible``."""
+        return self.eligible if self.sound is None else self.sound
+
 
 def _measured(
-    start: WorkstreamStart, evidence: Evidence, settled: Settle | Settlement, bar: Baseline | None
+    start: WorkstreamStart,
+    closing: Closing,
+    settled: Settle | Settlement,
+    terms: TaskTerms,
 ) -> CandidateMeasured | None:
     """The measurement of an implementer's retained candidate; None for anything else."""
     candidate = settled.candidate
@@ -313,24 +327,25 @@ def _measured(
         key=start.key,
         candidate=candidate,
         eligible=settled.eligible,
-        accuracy=reading_of(evidence.readings, EvidenceKind.CORRECTNESS),
-        benchmark=reading_of(evidence.readings, EvidenceKind.BENCHMARK),
-        input=bar,
+        sound=sound_for(closing, gates=gates_of(terms), unsettled=UNSETTLED),
+        accuracy=reading_of(closing.readings, EvidenceKind.CORRECTNESS),
+        benchmark=reading_of(closing.readings, EvidenceKind.BENCHMARK),
+        input=closing.input,
     )
 
 
 def measured_by_workstream(
-    start: WorkstreamStart, closing: Closing, settle: Settle
+    start: WorkstreamStart, closing: Closing, settle: Settle, terms: TaskTerms
 ) -> CandidateMeasured | None:
     """The measurement a workstream reports once it has asserted what its closing established."""
-    return _measured(start, closing.evidence, settle, closing.input)
+    return _measured(start, closing, settle, terms)
 
 
-def measured_by_settlement(done: "WorkstreamDone") -> CandidateMeasured | None:
+def measured_by_settlement(done: "WorkstreamDone", terms: TaskTerms) -> CandidateMeasured | None:
     """The measurement of a finished workstream, as core settled it."""
     if done.settlement is None:
         return None
-    return _measured(done.start, done.evidence, done.settlement, done.input)
+    return _measured(done.start, done.closing(), done.settlement, terms)
 
 
 @dataclass
@@ -464,6 +479,17 @@ class WorkstreamDone:
             unreachable=closing.unreachable,
             merge=closing.merge,
             input=closing.input,
+        )
+
+    def closing(self) -> Closing:
+        """What the workstream's close established, as its `Closing` stated it."""
+        return Closing(
+            result=self.result,
+            evidence=self.evidence,
+            cause=self.failure,
+            unreachable=self.unreachable,
+            merge=self.merge,
+            input=self.input,
         )
 
 

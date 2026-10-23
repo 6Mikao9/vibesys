@@ -4,8 +4,9 @@ A candidate built on main whose trusted accuracy and benchmark checks passed and
 dominates main's (no objective worse, one better, by vs-core's rule) becomes main the moment its
 measurement is reported, not when its workstream closes; a candidate that does not dominate, was
 built on an older main, failed a check or is not eligible leaves main where it was. The root
-judges each measurement once, at its first sight: the report, or the close of the workstream when
-the report was lost with a restart.
+takes each measurement once, at its first sight: the report, or the close of the workstream when
+the report was lost with a restart. The verdict on it is derived, not taken once
+(`test_main_judged_from_facts`).
 
 These properties run the record under generated lineages and generated orders of starts,
 measurements and closes, beside a model that states the rule on its own, and crash the root at
@@ -204,7 +205,7 @@ def report_of(index: int, work: Work, start: WorkstreamStart) -> CandidateMeasur
         result=result_of(HypothesisOutcome.SUPPORTED, review=True, revision_=candidate),
         evidence=evidence_for(index, work),
     )
-    return measured_by_workstream(start, closing, settle)
+    return measured_by_workstream(start, closing, settle, terms_of(0.0))
 
 
 def done_of(index: int, work: Work, start: WorkstreamStart) -> WorkstreamDone:
@@ -376,12 +377,12 @@ def test_a_crash_at_any_boundary_recovers_the_main_and_the_record_the_run_reache
     assert crashed.main.revision == plain.main.revision
 
 
-def test_a_measurement_judged_once_is_not_judged_again_when_the_input_bar_later_moves() -> None:
-    """The close of a workstream offers its measurement again; the first judgement stands.
+def test_a_measurement_that_did_not_dominate_the_bar_dominates_once_the_bar_moves() -> None:
+    """The verdict is derived from the facts: a bar that later reads far higher makes it a gain.
 
-    The candidate's TTFT is within noise of the input's when its measurement lands. The input's
-    bar later rests on more samples and reads far higher, which would make the same measurement a
-    gain: main has been judged against it already, and the close changes nothing.
+    The candidate's TTFT is within noise of the input's when its measurement lands, so main stays.
+    The input's bar later rests on more samples and reads far higher: the same measurement now
+    dominates it, and main moves to the candidate without anything being measured again.
     """
     work = Work(
         on_main=True,
@@ -389,7 +390,7 @@ def test_a_measurement_judged_once_is_not_judged_again_when_the_input_bar_later_
         ttft=28000.0,
         accuracy=True,
         benchmark=True,
-        eligible=True,
+        eligible=False,
         reported=True,
         repeated=False,
     )
@@ -412,7 +413,8 @@ def test_a_measurement_judged_once_is_not_judged_again_when_the_input_bar_later_
             )
         )
     )
+    assert record.main.revision == candidate_of(0)
     record.finished(done_of(0, work, start))
 
-    assert record.main.revision == BASE
-    assert record.main.merges == []
+    assert record.main.revision == candidate_of(0)
+    assert [item.merge_id for item in record.main.merges] == ["h0"]

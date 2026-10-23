@@ -26,7 +26,7 @@ from vibesys.orchestration.dynamic.search._context import (
 )
 from vibesys.orchestration.dynamic.search._handoff import HandoffWritten
 from vibesys.orchestration.dynamic.search._ids import INPUT_KEY, planning_key, workstream_key
-from vibesys.orchestration.dynamic.search._main import MainLine, MainState
+from vibesys.orchestration.dynamic.search._main import MainLine, MainState, awaiting_of
 from vibesys.orchestration.dynamic.search._outcomes import (
     CandidateMeasured,
     WorkstreamDone,
@@ -430,6 +430,11 @@ class RunRecord:
             unseated=dict.fromkeys(state.unseated),
         )
         record.main = MainLine.resumed(state.baseline, state.main)
+        if state.main.awaiting is None:
+            record.main.awaiting = list(
+                awaiting_of(state.hypotheses, state.finished_work, state.main)
+            )
+        record.main.rejudge(terms)  # the verdicts are derived: a resume judges them from the facts
         record.outline = state.outline
         record.evaluations = EvaluationQueue.resumed(config.slots, config.pick, state.evaluations)
         return record
@@ -593,18 +598,22 @@ class RunRecord:
         if not candidates.trusted(baseline):
             self.accepted = []
         self.main.baseline = baseline
+        self.main.rejudge(self.terms)
 
     def refined(self, baseline: candidates.Baseline | None) -> None:
         """Fold the input as a settlement saw it, when its bar rests on more samples than ours.
 
         Settlements fold in the order they finished, and the samples of the input only grow, so
         the bar main is compared with is the best evidence any settlement so far was decided on.
+        A bar that changed is new evidence for main's verdict on every measured candidate it waits
+        on, so main is judged again from them (`MainLine.rejudge`).
         """
         if baseline is not None and candidates.samples_of(baseline) > candidates.samples_of(
             self.baseline
         ):
             self.baseline = baseline
             self.main.baseline = baseline
+            self.main.rejudge(self.terms)
 
     def _merge_ids(self) -> frozenset[str]:
         """The IDs merges were scheduled under, finished or running."""
@@ -1150,7 +1159,7 @@ class RunRecord:
         if start.plan.kind is WorkKind.MERGE:
             self.main.finished(done, self.terms)
         else:
-            settled = measured_by_settlement(done)
+            settled = measured_by_settlement(done, self.terms)
             if settled is not None:
                 self._judge_measurement(start, settled)  # a no-op when its report already was
         self._offer_as_parent(done)

@@ -152,24 +152,43 @@ def settle_for(
     """
     accuracy = reading_of(record.readings, EvidenceKind.CORRECTNESS)
     benchmark = reading_of(record.readings, EvidenceKind.BENCHMARK)
-    measured = bool(record.readings) and record.candidate is not None
-    buildable = measured and _gate(accuracy, configured=gates.accuracy)
-    eligible = (
-        buildable
-        and _gate(benchmark, configured=gates.benchmark)
-        and record.review_passed is not False
-        and record.outcome not in unsettled
-        and record.failure is None
-        and beats_input
-    )
+    buildable = _buildable(record, gates)
     return Settle(
         assessments=(
             *assessment(AssessmentKind.CORRECTNESS, accuracy, record.candidate),
             *assessment(AssessmentKind.BENCHMARK, benchmark, record.candidate),
             *_review(record),
         ),
-        eligible=eligible,
+        eligible=sound_for(record, gates=gates, unsettled=unsettled) and beats_input,
         retention="candidate" if buildable else "discard",
         outcome=outcome_of(record),
         candidate=record.candidate if buildable else None,
+    )
+
+
+def _buildable(record: FinishedAttempt, gates: Gates) -> bool:
+    """Whether the attempt's candidate is measured and passed the accuracy gate: a parent to build on."""
+    accuracy = reading_of(record.readings, EvidenceKind.CORRECTNESS)
+    measured = bool(record.readings) and record.candidate is not None
+    return measured and _gate(accuracy, configured=gates.accuracy)
+
+
+def sound_for(
+    record: FinishedAttempt, *, gates: Gates, unsettled: frozenset[HypothesisOutcome]
+) -> bool:
+    """Whether the attempt is winner-eligible but for the base: every fact about the candidate itself.
+
+    It passed every configured gate, was not rejected by review, reports no outcome in
+    ``unsettled`` and has no recorded failure. Whether it beats the input is a verdict on the
+    candidate and the base together (``beats_input``, `settle_for`), and the base's facts can
+    change after the settlement is asserted; this part cannot, so whoever judges the candidate
+    against a base later (`MainLine`) reads it, never the settlement's frozen ``eligible``.
+    """
+    benchmark = reading_of(record.readings, EvidenceKind.BENCHMARK)
+    return (
+        _buildable(record, gates)
+        and _gate(benchmark, configured=gates.benchmark)
+        and record.review_passed is not False
+        and record.outcome not in unsettled
+        and record.failure is None
     )
