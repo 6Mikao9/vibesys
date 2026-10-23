@@ -113,11 +113,11 @@ async def take_turn(  # noqa: PLR0913  # LW-220431 [PLR0913]; each argument is a
     if made is None:
         baseline = input_so_far(ctx, w)
         turn = await implementer_turn(sessions, w, work, earlier, baseline=baseline)
-        if isinstance(turn, Result) and _review_due(w, turn):
+        if isinstance(turn, Result) and _review_due(w, turn, ctx.task.limits.max_attempts):
             mark(ctx, w, work, ResumeStage.IMPLEMENTED, blockers=earlier, result=turn)
     else:
         turn = made
-    if isinstance(turn, Result) and _review_due(w, turn):
+    if isinstance(turn, Result) and _review_due(w, turn, ctx.task.limits.max_attempts):
         turn = await review(ctx, w, ws, work, sessions, turn)
     if isinstance(turn, Result):
         return turn
@@ -206,10 +206,10 @@ def _candidate_of(
     return result
 
 
-def _review_due(w: WorkstreamStart, result: Result) -> bool:
+def _review_due(w: WorkstreamStart, result: Result, admissions: int) -> bool:
     config = w.config
     hypothesis = HypothesisConfig(
-        max_rounds=config.start_budget,
+        max_rounds=admissions,
         judge_every=config.judge_every,
         max_retries_per_round=max(1, w.turns),
         max_continuation_rounds=config.max_continuation_rounds,

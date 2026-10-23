@@ -405,6 +405,8 @@ class PlanWorld:
     finished: tuple[FinishedWork, ...]
     refunded: int
     offered: tuple[ParentOption, ...]
+    budget: int
+    """The admission grant core supplied, projected by the run record."""
     handoffs: tuple[str, ...] = ()
     """The paths of earlier planning calls' handoff files, newest first."""
     offer: ProfileOffer | None = None
@@ -423,8 +425,6 @@ class PlanWorld:
     main_measurement: MainMeasurement | None = None
     merges: tuple[MergeRecord, ...] = ()
     """Every finished merge, oldest first."""
-    budget: int | None = None
-    """Workstreams the run may start in all (`RunRecord.budget`); None, the config's own."""
     merge_options: MergeOptions = field(default_factory=MergeOptions)
     """Which candidates a merge may name now; its rows are the prompt's mergeable list."""
     space: MetricSpace | None = None
@@ -455,8 +455,7 @@ class PlanWorld:
     @property
     def remaining(self) -> int:
         """Workstreams the run may still schedule."""
-        budget = self.config.start_budget if self.budget is None else self.budget
-        return remaining(budget, started=self.active + self.done, refunded=self.refunded)
+        return remaining(self.budget, started=self.active + self.done, refunded=self.refunded)
 
     @property
     def capacity(self) -> int:

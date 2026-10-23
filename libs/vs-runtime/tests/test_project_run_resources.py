@@ -27,7 +27,6 @@ from vs_runtime.api.infrastructure import (
     ProjectRunMismatchKind,
     ProjectRunRequest,
     ProjectRunResources,
-    ProjectRunWorkspaceLinkError,
     SDKRoots,
     open_project_run_resources,
 )
@@ -276,7 +275,7 @@ def test_candidate_construction_failure_removes_partial_worktree(tmp_path: Path)
             _RUN_ID, "candidate-1"
         )
 
-        with pytest.raises(GitError):
+        with pytest.raises(ValueError, match="not a commit"):
             resources.open_candidate("candidate-1", "not-a-revision")
 
         assert not candidate_path.exists()
@@ -587,19 +586,28 @@ def test_resume_reattaches_a_candidate_restored_after_git_dropped_it(tmp_path: P
         candidate.detach()
 
 
-def test_resume_names_an_unlinked_candidate_without_a_retained_commit(tmp_path: Path) -> None:
+@pytest.mark.regression
+@pytest.mark.parametrize("pointer", [True, False])
+def test_resume_derives_a_pre_snapshot_candidates_registration(
+    tmp_path: Path, *, pointer: bool
+) -> None:
     root = tmp_path / "project"
     _write_project(root)
     workspace, _ = _leave_candidate(root, "m-fresh", retain=False)
     before = _files(workspace)
     with _host(root, existing=True) as failed_resume:
         _lose_registration(failed_resume, workspace, tmp_path / "backup")
+    if not pointer:
+        (workspace / ".git").unlink()
 
-    with pytest.raises(ProjectRunWorkspaceLinkError, match="m-fresh") as raised:
-        _host(root, existing=True)
-
-    assert raised.value.workspace_id == "m-fresh"
-    assert _files(workspace) == before
+    with _host(root, existing=True) as resumed:
+        revision = resumed.git.retained_candidate("m-fresh")
+        assert revision is not None
+        candidate = resumed.reattach_candidate("m-fresh", revision)
+        assert candidate is not None
+        assert candidate.git.current_sha() == revision
+        assert _files(workspace) == before
+        candidate.detach()
 
 
 def test_a_failed_reattach_keeps_the_candidate_on_disk(tmp_path: Path) -> None:
@@ -616,3 +624,28 @@ def test_a_failed_reattach_keeps_the_candidate_on_disk(tmp_path: Path) -> None:
             resumed.reattach_candidate("m-held", revision)
 
         assert _files(workspace) == before
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("others", [1, 2, 4])
+def test_discarding_candidates_never_prunes_another_candidates_rollback_registration(
+    tmp_path: Path, others: int
+) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    with _host(root, existing=False) as host:
+        revision = host.git.current_sha()
+        assert revision is not None
+        held = host.open_candidate("m-held", revision)
+        held.detach()
+        backup = tmp_path / "held"
+        shutil.move(held.project_root, backup)
+        for index in range(others):
+            candidate = host.open_candidate(f"m-other-{index}", revision)
+            candidate.close()
+        shutil.move(backup, held.project_root)
+
+        assert host.git.is_linked_worktree(held.project_root)
+        reopened = host.reattach_candidate("m-held", revision)
+        assert reopened is not None
+        reopened.detach()

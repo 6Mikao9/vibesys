@@ -58,7 +58,7 @@ from vs_runtime.api.core_shell_fixtures import (
 )
 
 if TYPE_CHECKING:
-    from vs_core.api import SearchDef
+    from vs_core.api import Limits, SearchDef
     from vs_project.api import StateStore
 
 
@@ -524,7 +524,7 @@ def test_only_operator_resume_renews_the_original_duration(
         shell.release_lease(now_at=started)
 
 
-_BUDGET = ("max_attempts", "max_turns", "max_parallel", "max_refunds", "max_adoption_rounds")
+_BUDGET = ("max_attempts", "max_turns", "max_refunds", "max_adoption_rounds")
 
 
 @pytest.mark.regression
@@ -540,11 +540,38 @@ def test_an_operator_resume_raises_the_runs_budget_to_the_new_plan_and_never_low
     Before, a resume kept the limits the run started with, so every start past the old budget
     was refused (`BUDGET`) however the operator resumed it. A crash recovery keeps the record's.
     """
+    stored = _limits_after(first, then, resume=resume)
+    expected = max(first, then) if resume else first
+    assert {name: getattr(stored, name) for name in _BUDGET} == dict.fromkeys(_BUDGET, expected)
+
+
+@pytest.mark.regression
+@example(first=84, then=2, resume=True)
+@example(first=84, then=2, resume=False)
+@example(first=2, then=84, resume=True)
+@given(first=st.integers(1, 500), then=st.integers(1, 500), resume=st.booleans())
+def test_an_operator_resume_runs_at_the_plans_width_whether_it_is_lower_or_higher(
+    first: int, then: int, *, resume: bool
+) -> None:
+    """The width is the operator's setting, not a budget: a resume replaces it, never keeps the larger.
+
+    A run started under a width that followed its attempt budget (84 at ``--max-in-flight 2``)
+    resumed under that width, because the resume only raised limits. A crash recovery keeps the
+    record's.
+    """
+    stored = _limits_after(first, then, resume=resume)
+    assert stored.max_parallel == (then if resume else first)
+
+
+def _limits_after(first: int, then: int, *, resume: bool) -> Limits:
+    """The limits stored after a run planned with ``first`` and a later start planned with ``then``."""
     store = FakeStateStore()
     initial = declared(counter)
 
     def planned(count: int) -> CoreState:
-        limits = initial.run.limits.model_copy(update=dict.fromkeys(_BUDGET, count))
+        limits = initial.run.limits.model_copy(
+            update={**dict.fromkeys(_BUDGET, count), "max_parallel": count}
+        )
         return initial.model_copy(update={"run": initial.run.model_copy(update={"limits": limits})})
 
     for now_at, plan in ((0.0, planned(first)), (100.0, planned(then))):
@@ -556,20 +583,11 @@ def test_an_operator_resume_raises_the_runs_budget_to_the_new_plan_and_never_low
             bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
         )
         shell.start("host", now_at=now_at, lease_duration=1, resume=resume)
+        stored = shell.record.envelope.core.run.limits
         shell.release_lease(now_at=now_at)
-    limits = CoreRuntime(
-        store,
-        counter.driver(CounterConfig()),
-        initial,
-        config=CounterConfig(),
-        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
-    )
-    limits.start("host", now_at=200.0, lease_duration=1, resume=resume)
-    stored = limits.record.envelope.core.run.limits
-    expected = max(first, then) if resume else first
-    assert {name: getattr(stored, name) for name in _BUDGET} == dict.fromkeys(_BUDGET, expected)
     # core's own wait bounds are the run's, whatever a later plan says
     assert stored.cleanup_bound == initial.run.limits.cleanup_bound
+    return stored
 
 
 @pytest.mark.regression

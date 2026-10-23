@@ -251,7 +251,7 @@ class GitTracker:
         (``__pycache__``, ``.pytest_cache``) into the bind-mounted tree that
         ``git`` then declines to delete. Follow up with an explicit recursive
         delete so per-candidate workspaces don't accumulate across a run, then
-        prune any stale admin entry. Both the ``git`` failure and any
+        keep other worktrees' registrations. Both the ``git`` failure and any
         undeletable leftovers are non-fatal: unregistration is what matters for
         correctness, so ``ignore_errors`` keeps a stubborn file from sinking the
         run.
@@ -260,7 +260,6 @@ class GitTracker:
         self._git.remove_worktree(destination)
         if destination.exists():
             shutil.rmtree(destination, ignore_errors=True)
-        self._git.prune_worktrees()
 
     def publish_revision(
         self,

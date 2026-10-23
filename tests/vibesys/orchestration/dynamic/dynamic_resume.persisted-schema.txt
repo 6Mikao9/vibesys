@@ -81,7 +81,7 @@ DynamicConfig {"additionalProperties":false,"type":"object"}
 DynamicConfig.evaluation_slots optional {"anyOf":[{"$ref":"#/$defs/Width"},{"type":"null"}],"default":null}
 DynamicConfig.input_wait_seconds optional {"anyOf":[{"$ref":"#/$defs/Wait"},{"type":"null"}],"default":3600.0}
 DynamicConfig.judge_every optional {"$ref":"#/$defs/Positive","default":1}
-DynamicConfig.max_backlog optional {"anyOf":[{"maximum":32,"minimum":0,"type":"integer"},{"type":"null"}],"default":null}
+DynamicConfig.max_backlog optional {"default":0,"maximum":32,"minimum":0,"type":"integer"}
 DynamicConfig.max_continuation_rounds optional {"$ref":"#/$defs/NonNegative","default":2}
 DynamicConfig.max_in_flight optional {"$ref":"#/$defs/Width","default":2}
 DynamicConfig.max_rounds required {"$ref":"#/$defs/Positive"}

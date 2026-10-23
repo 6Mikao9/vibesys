@@ -27,7 +27,7 @@ from ._recovery_owners import known_owner, operation_decision, typed_job_owner
 from ._recovery_unanswered import Inspection, Settlement, settlement
 from ._registry import ContractError
 from ._request_forward import turn_of
-from ._session_scope import lost_turn_authority
+from ._session_scope import lost_cancellation_ask, lost_turn_authority
 from ._waits import owned_job_subject, recovery_waits
 from .types.attempts import (
     AttemptPhase,
@@ -753,14 +753,6 @@ def _settle_unanswered(
         # The target itself answers nothing: its host is dead, and it is not dispatched yet.
         if subjects or any(request != check.target for request in requests):
             continue
-        # A fact can reach the target by a path other than its inspections: the release of a
-        # lost turn closes the turn's dispatch (``_end_released_dispatch``), and ``_observe``
-        # re-resolves only the checks an inspection names. Settling by kind is for a target its
-        # facts cannot resolve, so its facts are read first, as ``_recheck`` reads them.
-        current = _aggregate_resolution(record, context, state)
-        if current != "pending":
-            checks[index] = check.model_copy(update={"resolution": current, "wait": None})
-            continue
         verdict = settlement(
             record,
             inspection=_inspection_of(state, check),
@@ -814,15 +806,8 @@ def _recheck(
     barrier = state.recovery
     if not recovery_waits(barrier.phase):
         return AreaChange(state=state)
-    checks = tuple(
-        _with_resolution(check, _aggregate_resolution(record, context, state))
-        if check.target == event.target
-        and check.resolution == "pending"
-        and (record := state.record(check.target)) is not None
-        else check
-        for check in barrier.checks
-    )
-    return _finish(state, barrier.model_copy(update={"checks": checks}), context)
+    del event
+    return _finish(state, barrier, context)
 
 
 def _finish(
@@ -834,6 +819,22 @@ def _finish(
     """*barrier* stored with its phase from its checks, each pending one naming its wait."""
     sent_ids = frozenset(
         outbound.request.request_id for outbound in sent if outbound.request.request_id is not None
+    )
+    # A check is a projection of its target's facts. Refresh every unresolved
+    # check at this one boundary, including facts delivered by cancellation,
+    # ownership transfer or another check. Persisted verdicts only retain the
+    # fail-closed decision when the facts still cannot resolve the target.
+    barrier = barrier.model_copy(
+        update={
+            "checks": tuple(
+                _with_resolution(check, resolution)
+                if check.resolution in ("pending", "blocked")
+                and (record := state.record(check.target)) is not None
+                and (resolution := _aggregate_resolution(record, context, state)) != "pending"
+                else check
+                for check in barrier.checks
+            )
+        }
     )
     state, barrier = _settle_unanswered(state, context, barrier, sent_ids)
     barrier = barrier.model_copy(
@@ -1564,7 +1565,10 @@ def _deadline(
         reason=reason,
     )
     requests: list[Outbound] = []
-    signals = _lost_turn(context, record, first=previous_block is None)
+    signals = (
+        *_lost_turn(context, record, first=previous_block is None),
+        *_lost_turn_asked_again(context, record, first=previous_block is None),
+    )
     if previous_block is None:
         requests.append(_probe(block, context))
     state, events = _end_open_record(
@@ -1715,6 +1719,33 @@ def _lost_turn(
     return (
         InvocationCancellationRequested(
             invocation=invocation, authority=lost_turn_authority(invocation)
+        ),
+    )
+
+
+def _lost_turn_asked_again(
+    context: RecordsContext, record: RequestRecord, *, first: bool
+) -> tuple[Signal, ...]:
+    """The next ask to cancel a lost turn whose cancellation ended unanswered at its bound.
+
+    A cancellation that never answered proves nothing: the turn may still run, and the session
+    waits on it for ever, so the ask it serves (a planner call, an implementer's turn) has no
+    next step. Cancelling is idempotent, so core asks again under the next authority, up to
+    ``Limits.request_retries.limit`` more asks (as for a job's cancel, ``cancel_settled``),
+    each one given the bound to answer. Past it the cancellation stays unanswered and the
+    session keeps its wait, which halts the run loudly (``OrphanWaitError``).
+    """
+    request = record.request
+    if not first or not isinstance(request, CancelTurn) or not is_open(record):
+        return ()
+    limit = context.run.limits.request_retries.limit
+    ask = lost_cancellation_ask(request.invocation, cancellation=request.request_id, limit=limit)
+    if ask is None or ask >= limit:
+        return ()
+    return (
+        InvocationCancellationRequested(
+            invocation=request.invocation,
+            authority=lost_turn_authority(request.invocation, ask + 1),
         ),
     )
 

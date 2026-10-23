@@ -160,7 +160,7 @@ def test_combining_while_evaluation_is_busy_keeps_each_revisions_facts_local(
 ) -> None:
     # Repeat across durable boundaries, including after the submissions and their measurements.
     host = begin(
-        DynamicConfig(max_rounds=len(states) + 4, max_in_flight=1),
+        DynamicConfig(max_rounds=len(states) + 4, max_in_flight=1, max_backlog=len(states) + 4),
         restarting=RestartPolicy(steps=frozenset({5, 20, 40, 70, 100})),
         view=FakeView(),
         throughputs={

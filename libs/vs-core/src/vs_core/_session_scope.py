@@ -83,14 +83,41 @@ def inspect_turn(context: SessionsContext, invocation: Invocation) -> InspectTur
     )
 
 
-def lost_turn_authority(ref: InvocationRef) -> RequestId:
-    """Authority of the cancellation that releases a turn whose acceptance stayed unknown."""
-    return turn_request_id(ref, "lost")
+def lost_turn_authority(ref: InvocationRef, retry: int = 0) -> RequestId:
+    """Authority of the cancellation that releases a turn whose acceptance stayed unknown.
+
+    ``retry`` numbers the asks: a cancellation that stayed unanswered is asked again under the
+    next authority, so each ask is its own request (the first keeps the identity it always had).
+    """
+    return turn_request_id(ref, "lost" if retry == 0 else f"lost:{retry}")
 
 
-def lost_turn_cancellation(ref: InvocationRef) -> RequestId:
+def lost_turn_cancellation(ref: InvocationRef, retry: int = 0) -> RequestId:
     """Identity of the cancellation ``lost_turn_authority`` issues for a lost turn."""
-    return turn_request_id(ref, f"cancel:{lost_turn_authority(ref).root}")
+    return turn_request_id(ref, f"cancel:{lost_turn_authority(ref, retry).root}")
+
+
+def lost_turn_ask(ref: InvocationRef, *, authority: RequestId, limit: int) -> int | None:
+    """Which ask of the lost turn's cancellation ``authority`` is (0 the first), or None.
+
+    Only the first ``limit + 1`` asks are the turn's own, the bound on how often core asks again.
+    """
+    return next(
+        (retry for retry in range(limit + 1) if authority == lost_turn_authority(ref, retry)), None
+    )
+
+
+def lost_cancellation_ask(
+    ref: InvocationRef, *, cancellation: RequestId | None, limit: int
+) -> int | None:
+    """Which ask of the lost turn's cancellation the request ``cancellation`` is, or None.
+
+    A request not yet issued has no identity and is none of them.
+    """
+    return next(
+        (retry for retry in range(limit + 1) if cancellation == lost_turn_cancellation(ref, retry)),
+        None,
+    )
 
 
 def write_turn_authority(ref: InvocationRef) -> RequestId:

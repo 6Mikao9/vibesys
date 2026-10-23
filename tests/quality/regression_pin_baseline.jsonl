@@ -43,7 +43,6 @@
 {"path": "tests/vibesys/api/test_runtime_commit_events.py", "test": "test_a_commit_whose_view_cannot_be_built_warns_once_and_loses_no_round"}
 {"path": "tests/vibesys/loops/test_rocprof_remote_capture.py", "test": "test_a_trace_is_profile_evidence_only_when_every_workload_ran"}
 {"path": "tests/vibesys/loops/test_torch_capture_ops.py", "test": "test_pick_primary_trace_is_the_max_kernel_trace"}
-{"path": "tests/vibesys/orchestration/dynamic/test_evaluation_queue_stories.py", "test": "test_by_default_the_planner_fills_agent_slots_while_candidates_wait_for_a_measurement"}
 {"path": "tests/vibesys/orchestration/dynamic/test_orphan_job_cancel.py", "test": "test_an_orphaned_jobs_cancel_that_ends_at_its_bound_is_sent_again"}
 {"path": "tests/vibesys/orchestration/evolve/population/test_population_search.py", "test": "test_openevolve_state_size_bounded_across_many_admits"}
 {"path": "tests/vibesys/test_profilers.py", "test": "test_auto_picks_a_profiler_that_fits_the_backend_or_says_why_it_picked_none"}

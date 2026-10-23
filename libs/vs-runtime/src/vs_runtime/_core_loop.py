@@ -522,7 +522,7 @@ class CoreRuntime[S: StrategyState]:
             else self.record.envelope.core
         )
         if self._record is not None and resume:
-            limits = _raised_budget(core.run.limits, self._initial.run.limits)
+            limits = _resumed_limits(core.run.limits, self._initial.run.limits)
             core = core.model_copy(update={"run": core.run.model_copy(update={"limits": limits})})
         duration = core.run.duration_seconds or self._initial.run.duration_seconds
         if duration is not None and (self._record is None or resume):
@@ -1559,24 +1559,31 @@ def _search_generators() -> Iterator[None]:
         sys.set_asyncgen_hooks(*previous)
 
 
-_BUDGET_FIELDS = ("max_attempts", "max_turns", "max_parallel", "max_refunds", "max_adoption_rounds")
+_BUDGET_FIELDS = ("max_attempts", "max_turns", "max_refunds", "max_adoption_rounds")
+"""The counts a resume only raises: what the run may spend, never what it may run at once."""
 
 
-def _raised_budget(stored: Limits, planned: Limits) -> Limits:
-    """The budget of a run the operator resumes: each of its counts raised to the plan's, never lowered.
+def _resumed_limits(stored: Limits, planned: Limits) -> Limits:
+    """The limits of a run the operator resumes: its budget raised to the plan's, its width the plan's.
 
     A resume re-plans the run from its recorded options and the operator's flags, so a larger
     ``--max-rounds`` plans a larger budget. Core's limits are written once, when the run starts;
     without this a resume would keep the old ones and refuse every start past them. A smaller
     plan (a lower flag is refused before here, but a code change may shrink a derived count)
-    never takes back what the run was granted. Core's own wait bounds are left as stored.
+    never takes back what the run was granted.
+
+    ``max_parallel`` is not a budget but the width the operator chose: the plan's value replaces
+    the stored one, up or down, so a run stored under a wrong width resumes under the right one.
+    Attempts admitted beyond a lower width stay admitted; core admits no new one until they end.
+    Core's own wait bounds are left as stored.
     """
     raised = {
         name: getattr(planned, name)
         for name in _BUDGET_FIELDS
         if getattr(planned, name) > getattr(stored, name)
     }
-    return stored.model_copy(update=raised) if raised else stored
+    resumed = stored.model_copy(update={**raised, "max_parallel": planned.max_parallel})
+    return stored if resumed == stored else resumed
 
 
 def _started_at(core: CoreState, now_at: float) -> CoreState:

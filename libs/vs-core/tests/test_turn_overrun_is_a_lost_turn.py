@@ -11,15 +11,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hypothesis import given, settings
+import pytest
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api.testing import Answer, Failed, Running
+from vs_core.api.testing import Answer, Failed, Running, Unknown
 
 from .test_agent_turn_runs import assert_ended_closed
 from .test_role_limits_through_core import implementer_turns
 from .toy_agent_search import IMPLEMENTER, ToyHost, run_toy, summary, toy_search
+
+RETRIES = 2
+"""`toy_search`'s ``request_retries.limit``: how often core asks again to cancel a lost turn."""
 
 _SETTINGS = settings(max_examples=12, deadline=None, derandomize=True, database=None)
 
@@ -104,3 +108,49 @@ def test_a_failed_cancellation_never_releases_the_turn_and_the_run_halts_loudly(
     ]
     assert invocation.phase == core.SessionPhase.UNKNOWN
     assert core.WaitKind.SESSION in {w.waiter for w in core.orphan_waits(trace.core)}
+
+
+@dataclass
+class SilentCancelHost(OverrunningHost):
+    """A host whose first ``silent`` cancellations of the lost turn never answer (a hung executor)."""
+
+    silent: int = 0
+    asks: int = 0
+
+    def __call__(self, request: core.Request, state: core.CoreState) -> Answer:
+        if (
+            isinstance(request, core.CancelTurn)
+            and request.request_id is not None
+            and not request.request_id.root.endswith("close")
+        ):
+            self.asks += 1
+            if self.asks <= self.silent:
+                return Unknown()
+        return super().__call__(request, state)
+
+
+@pytest.mark.regression
+@_SETTINGS
+@example(silent=1, lost_turns=1)
+@given(silent=st.integers(0, RETRIES + 1), lost_turns=st.integers(0, core.MAX_LOST_TURNS))
+def test_a_cancellation_that_never_answers_is_asked_again_within_the_retry_limit(
+    silent: int, lost_turns: int
+) -> None:
+    """The reported hang: the cancel of a lost planner turn timed out and nothing was scheduled.
+
+    Cancelling is idempotent, so core asks again, up to ``request_retries.limit`` more times; the
+    turn then is released and the role asks it again. Only when every ask stayed silent does the
+    session keep its wait and the run halt loudly (the cancel proved nothing about the writer).
+    """
+    implementer = IMPLEMENTER.model_copy(update={"lost_turns": lost_turns})
+    host = SilentCancelHost(overruns=1, silent=silent)
+
+    trace = run_toy(host, definition=toy_search(implementer=implementer))
+
+    if silent <= RETRIES:
+        assert_ended_closed(trace)
+        assert host.asks == silent + 1
+    else:
+        assert not trace.finished
+        assert host.asks == RETRIES + 1
+        assert core.WaitKind.SESSION in {w.waiter for w in core.orphan_waits(trace.core)}

@@ -112,6 +112,7 @@ from vibesys.orchestration.dynamic.search._roles import (
     ROLES,
 )
 from vibesys.orchestration.dynamic.search._run_state import (
+    CoreHolds,
     DynamicResume,
     NoPlan,
     Outlined,
@@ -179,6 +180,7 @@ __all__ = [
     "CombineSource",
     "ComposedJobs",
     "CompositeRow",
+    "CoreHolds",
     "DropReason",
     "Dropped",
     "DynamicConfig",

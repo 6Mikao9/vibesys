@@ -48,6 +48,7 @@ from vibesys.candidates.api import InputReading, Measured, input_metrics, space_
 from vibesys.dynamic_migration import migrate_objective_policy, recorded_objective_readings
 from vibesys.metrics import MetricComparison, MetricRow
 from vibesys.orchestration.dynamic.search.api import (
+    CoreHolds,
     DynamicConfig,
     DynamicResume,
     FinishedWork,
@@ -572,7 +573,14 @@ def test_objective_migration_preserves_work_and_reprojects_verified_checkpoints(
     assert policy.relative_noise == pytest.approx(expected)
     assert tuple(sample.value for sample in policy.baseline_values) == observed
     run = RunRecord.resumed(
-        fresh.config, migrated.envelope.core.run.facts.baseline, terms, fresh.record
+        fresh.config,
+        migrated.envelope.core.run.facts.baseline,
+        terms,
+        fresh.record,
+        CoreHolds(
+            migrated.envelope.core.run.limits.max_attempts,
+            migrated.envelope.core.settlement.settlements,
+        ),
     )
     parent = run.offered()[0].snapshot
     assert parent.benchmark is not None

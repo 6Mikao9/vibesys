@@ -69,7 +69,7 @@ from vs_runtime.api.core import (
 )
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
+    from pydantic import BaseModel, JsonValue
 
     from vibesys.run.contracts import PluginProjection
     from vs_core.api import TaskTerms
@@ -263,6 +263,17 @@ def _project_max_rounds(options: BaseModel) -> int:
 _BUDGET_OPTION = "max_rounds"
 
 
+def _unbudgeted(descriptor: OrchestrationDescriptor) -> dict[str, JsonValue]:
+    """The options a resume holds exact: all but ``max_rounds``, a legacy ``null`` backlog read as 0.
+
+    A run recorded before the backlog defaulted to 0 spells that default ``null``.
+    """
+    options = {k: v for k, v in descriptor.options.items() if k != _BUDGET_OPTION}
+    if options.get("max_backlog", 0) is None:
+        options["max_backlog"] = 0
+    return options
+
+
 def dynamic_resume_policy(
     recorded: OrchestrationDescriptor, requested: OrchestrationDescriptor
 ) -> OrchestrationResumeDecision:
@@ -278,9 +289,7 @@ def dynamic_resume_policy(
     if recorded == requested:
         return OrchestrationResumeDecision(descriptor=None)
     old, new = recorded.options.get(_BUDGET_OPTION), requested.options.get(_BUDGET_OPTION)
-    others_equal = {k: v for k, v in recorded.options.items() if k != _BUDGET_OPTION} == {
-        k: v for k, v in requested.options.items() if k != _BUDGET_OPTION
-    }
+    others_equal = _unbudgeted(recorded) == _unbudgeted(requested)
     if (
         recorded.id != requested.id
         or recorded.config_version != requested.config_version

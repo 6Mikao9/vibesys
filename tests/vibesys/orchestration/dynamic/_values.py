@@ -383,11 +383,13 @@ def finished_merge(identifier: str, sequence: int) -> FinishedWork:
 
 def run_record(cfg: DynamicConfig | None = None, **changes: object) -> RunRecord:
     """An empty record of a run whose input measured fine; ``changes`` set its fields."""
+    cfg = cfg or config()
     record = RunRecord(
-        cfg or config(),
+        cfg,
         BASE,
         Measured(reading=InputReading(accuracy_passed=True, benchmark_passed=True)),
         TERMS,
+        admissions=cfg.start_budget,
     )
     for name, value in changes.items():
         setattr(record, name, value)
