@@ -753,14 +753,6 @@ def _settle_unanswered(
         # The target itself answers nothing: its host is dead, and it is not dispatched yet.
         if subjects or any(request != check.target for request in requests):
             continue
-        # A fact can reach the target by a path other than its inspections: the release of a
-        # lost turn closes the turn's dispatch (``_end_released_dispatch``), and ``_observe``
-        # re-resolves only the checks an inspection names. Settling by kind is for a target its
-        # facts cannot resolve, so its facts are read first, as ``_recheck`` reads them.
-        current = _aggregate_resolution(record, context, state)
-        if current != "pending":
-            checks[index] = check.model_copy(update={"resolution": current, "wait": None})
-            continue
         verdict = settlement(
             record,
             inspection=_inspection_of(state, check),
@@ -814,15 +806,8 @@ def _recheck(
     barrier = state.recovery
     if not recovery_waits(barrier.phase):
         return AreaChange(state=state)
-    checks = tuple(
-        _with_resolution(check, _aggregate_resolution(record, context, state))
-        if check.target == event.target
-        and check.resolution == "pending"
-        and (record := state.record(check.target)) is not None
-        else check
-        for check in barrier.checks
-    )
-    return _finish(state, barrier.model_copy(update={"checks": checks}), context)
+    del event
+    return _finish(state, barrier, context)
 
 
 def _finish(
@@ -834,6 +819,22 @@ def _finish(
     """*barrier* stored with its phase from its checks, each pending one naming its wait."""
     sent_ids = frozenset(
         outbound.request.request_id for outbound in sent if outbound.request.request_id is not None
+    )
+    # A check is a projection of its target's facts. Refresh every unresolved
+    # check at this one boundary, including facts delivered by cancellation,
+    # ownership transfer or another check. Persisted verdicts only retain the
+    # fail-closed decision when the facts still cannot resolve the target.
+    barrier = barrier.model_copy(
+        update={
+            "checks": tuple(
+                _with_resolution(check, resolution)
+                if check.resolution in ("pending", "blocked")
+                and (record := state.record(check.target)) is not None
+                and (resolution := _aggregate_resolution(record, context, state)) != "pending"
+                else check
+                for check in barrier.checks
+            )
+        }
     )
     state, barrier = _settle_unanswered(state, context, barrier, sent_ids)
     barrier = barrier.model_copy(

@@ -162,7 +162,9 @@ def test_no_merge_runs_and_main_stays_until_the_input_lands_and_a_restart_change
 
 def _restored(baseline: Measured | None) -> RunRecord:
     """A record restored with a verified candidate of ``h1`` that beats any input."""
-    run = RunRecord(config(max_rounds=4), BASE, baseline, TERMS)
+    run = RunRecord(
+        config(max_rounds=4), BASE, baseline, TERMS, admissions=config(max_rounds=4).start_budget
+    )
     run.parents = (snapshot("h1", 1, value=500.0),)
     return run
 

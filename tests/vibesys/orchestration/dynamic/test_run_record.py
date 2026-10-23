@@ -49,6 +49,7 @@ from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.models import StrategyReason
 from vibesys.orchestration.dynamic.search.api import (
     Candidate,
+    CoreHolds,
     EvaluationQueue,
     Failure,
     FailureKind,
@@ -231,7 +232,13 @@ def _check(run: RunRecord, trace: Trace) -> None:
     # resumed after a code change from what it checkpoints, the record is the same record
     state = run.state()
     assert RecordState.model_validate_json(state.model_dump_json()) == state
-    resumed = RunRecord.resumed(run.config, run.base, run.terms, state)
+    resumed = RunRecord.resumed(
+        run.config,
+        run.base,
+        run.terms,
+        state,
+        CoreHolds(run.budget, tuple(item.settlement for item in run.kept.values())),
+    )
     assert resumed.state() == state
     assert resumed.snapshot() == snapshot
     assert [item.plan.work_id for item in snapshot.running] == [
@@ -389,7 +396,13 @@ def _restarted(run: RunRecord, trace: Trace) -> RunRecord:
 
     New work not yet lent a slot reopens its admitted workspace and reports it again.
     """
-    resumed = RunRecord.resumed(run.config, run.base, run.terms, run.state())
+    resumed = RunRecord.resumed(
+        run.config,
+        run.base,
+        run.terms,
+        run.state(),
+        CoreHolds(run.budget, tuple(item.settlement for item in run.kept.values())),
+    )
     resumed.held_over()
     held = [key for key in resumed.resuming if key in trace.seated]
     trace.idle = dict.fromkeys(held, 0)
@@ -575,8 +588,39 @@ def test_a_resumed_record_schedules_up_to_cores_admission_limit_not_its_checkpoi
     cfg = config(max_rounds=rounds, max_in_flight=1)
     done = [finished_profile(f"p{n}", n) for n in range(1, cfg.start_budget + 1)]
     spent = run_record(cfg, finished_work=done)
-    resumed = RunRecord.resumed(cfg, spent.base, spent.terms, spent.state())
-    resumed.admissions = cfg.start_budget + raised
+    resumed = RunRecord.resumed(
+        cfg,
+        spent.base,
+        spent.terms,
+        spent.state(),
+        CoreHolds(cfg.start_budget + raised, ()),
+    )
     assert resumed.capacity() == min(1, raised)
     assert resumed.over(planning=False, measuring=False, stopping=False) == (raised == 0)
     assert resumed.world().remaining == raised
+
+
+@given(cached=st.booleans(), authoritative=st.booleans(), eligible=st.booleans())
+def test_resume_projects_kept_candidates_from_core_settlements(
+    *, cached: bool, authoritative: bool, eligible: bool
+) -> None:
+    """Checkpoint caches neither invent a winner nor hide a core-retained candidate."""
+    settlement = settlement_of(
+        eligible=eligible, retention="candidate", candidate=revision("candidate"), name="kept"
+    )
+    retained = Kept.of(settlement)
+    assert retained is not None
+    record = run_record()
+    state = record.state().model_copy(
+        update={"kept": ((settlement.settlement_id.root, retained),) if cached else ()}
+    )
+    restored = RunRecord.resumed(
+        record.config,
+        record.base,
+        record.terms,
+        state,
+        CoreHolds(record.budget, (settlement,) if authoritative else ()),
+    )
+    expected = {settlement.settlement_id.root: retained} if authoritative and eligible else {}
+    assert restored.kept == expected
+    assert dict(restored.state().kept) == expected

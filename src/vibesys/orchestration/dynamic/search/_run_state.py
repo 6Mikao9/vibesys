@@ -93,6 +93,7 @@ from vs_core.api.search import (
     Label,
     NoWinner,
     RevisionRef,
+    Settlement,
     TaskTerms,
     Uncompared,
     Value,
@@ -100,6 +101,19 @@ from vs_core.api.search import (
 
 _DROPPED_SHOWN = 8
 """The most recent dropped evaluations the orchestrator is shown."""
+
+
+@dataclass(frozen=True)
+class CoreHolds:
+    """What core holds of the run, which a resumed record reads and its checkpoint only caches.
+
+    ``admissions`` is the grant core admits workstreams under (``ctx.task.limits.max_attempts``),
+    which a resume with a larger budget raises; ``settlements`` are the attempts core settled,
+    from which the retained candidates follow.
+    """
+
+    admissions: int
+    settlements: tuple[Settlement, ...]
 
 
 @dataclass(frozen=True)
@@ -297,10 +311,10 @@ class RunRecord:
     it (`at_work`): its attempt may still queue for core's admission. Once its workspace opened
     (`Opened`) it waits for a slot like a resumed turn (wait 0, `resumes`), so new work queued
     for admission never holds the slot a parked turn needs to resume and close its attempt."""
-    admissions: int | None = None
+    admissions: int = field(kw_only=True)
     """Workstreams the run may start: core's admission limit (``ctx.task.limits.max_attempts``),
-    which a resume with a larger budget raises; None, the config's own ``start_budget``. Read from
-    core, not kept in the record, so a checkpointed config never caps a raised budget."""
+    which a resume with a larger budget raises. Required on every construction and resume;
+    checkpointed configuration is never an admission authority."""
     planned_by: dict[str, str] = field(default_factory=dict)
     """The agent whose reply planned each plan, by work id: the planner, or the outliner for a
     step it outlined; it starts the plan's workstreams (`WorkstreamStart.started_by`)."""
@@ -359,7 +373,12 @@ class RunRecord:
 
     @classmethod
     def resumed(
-        cls, config: DynamicConfig, base: RevisionRef, terms: TaskTerms, state: RecordState
+        cls,
+        config: DynamicConfig,
+        base: RevisionRef,
+        terms: TaskTerms,
+        state: RecordState,
+        held: CoreHolds,
     ) -> "RunRecord":
         """The record ``state`` describes, in the run ``config``, ``base`` and ``terms`` fix."""
         record = cls(
@@ -367,6 +386,7 @@ class RunRecord:
             base,
             state.baseline,
             terms,
+            admissions=held.admissions,
             hypotheses=dict(state.hypotheses),
             finished_work=list(state.finished_work),
             running={start.key: start for start in state.running},
@@ -382,7 +402,13 @@ class RunRecord:
             ),
             calls=state.calls,
             handoffs=state.handoffs,
-            kept=dict(state.kept),
+            # The legacy checkpoint keeps this projection for shape compatibility;
+            # only core settlements authorize retained candidates on resume.
+            kept={
+                row.settlement_id.root: retained
+                for row in held.settlements
+                if row.eligible and (retained := Kept.of(row)) is not None
+            },
             main_seen=dict(state.main_seen),
             submitted={item.key: item for item in state.submitted},
             input_overdue=state.input_overdue,
@@ -464,8 +490,8 @@ class RunRecord:
 
     @property
     def budget(self) -> int:
-        """Workstreams the run may start in all: core's admission limit, else the config's."""
-        return self.config.start_budget if self.admissions is None else self.admissions
+        """Workstreams the run may start in all: the grant core supplied."""
+        return self.admissions
 
     @property
     def started(self) -> int:
@@ -478,7 +504,8 @@ class RunRecord:
 
         These are the earliest to wait, up to the run's backlog; any later one keeps its slot.
         """
-        return frozenset(list(self.waits)[: self.config.backlog])
+        backlog = self.budget if self.config.max_backlog is None else self.config.max_backlog
+        return frozenset(list(self.waits)[:backlog])
 
     @property
     def working(self) -> tuple[WorkstreamStart, ...]:

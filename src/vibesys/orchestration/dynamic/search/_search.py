@@ -61,6 +61,7 @@ from vibesys.orchestration.dynamic.search._reports import (
 )
 from vibesys.orchestration.dynamic.search._roles import ROLES
 from vibesys.orchestration.dynamic.search._run_state import (
+    CoreHolds,
     DynamicResume,
     NoPlan,
     Outlined,
@@ -96,12 +97,16 @@ async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner |
     task = ctx.task
     base, terms = ctx.facts.baseline, task.terms
     if isinstance(given, DynamicResume):
-        run = RunRecord.resumed(given.config, base, terms, given.record)
+        run = RunRecord.resumed(
+            given.config,
+            base,
+            terms,
+            given.record,
+            CoreHolds(task.limits.max_attempts, ctx.settlements),
+        )
         run.held_over()
     else:
-        run = RunRecord(given, base, None, terms)
-    # core holds the run's budget; a resume with a larger one raises it, the checkpoint does not
-    run.admissions = task.limits.max_attempts
+        run = RunRecord(given, base, None, terms, admissions=task.limits.max_attempts)
     ctx.fall_back_to_input(run.leading()[1])
     # typed, so the match on what they yield below is checked exhaustive
     # unbounded: the record bounds the workstreams started (`RunRecord.room`) and the agents at
@@ -112,11 +117,17 @@ async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner |
     built = BuildsOn()
     async with workstreams, planning, measuring:
         resume(ctx, run, workstreams, measuring)
-        while not run.over(
-            planning=not planning.free,
-            measuring=not measuring.free,
-            stopping=ctx.stop_requested,
-        ):
+        while True:
+            # Limits are mutable run facts, not part of the checkpoint's config.
+            # Each decision frontier journals its own grant: historical decisions
+            # replay unchanged; the first live frontier sees an operator's raise.
+            run.admissions = ctx.task.limits.max_attempts
+            if run.over(
+                planning=not planning.free,
+                measuring=not measuring.free,
+                stopping=ctx.stop_requested,
+            ):
+                break
             for key, wait in run.resumes():  # before new work takes the free slots
                 ctx.latch(RESUMES.of(f"{key}.{wait}")).set(Granted())
             for start in run.ready_to_start(run.room()):

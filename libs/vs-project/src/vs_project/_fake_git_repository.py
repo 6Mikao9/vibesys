@@ -1130,8 +1130,6 @@ class FakeGitRepository:
                 )
             if self._disk.exact(resolved) is not None:
                 self._refuse(command, f"fatal: '{destination}' is already a linked worktree")
-            for stale in self._disk.stale():
-                self._disk.unregister(stale)
             name = self._admin_name(scope.repo, resolved)
             checkout = Checkout(
                 path=resolved,

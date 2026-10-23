@@ -677,7 +677,6 @@ class CliGitRepository:
         # either a prunable sibling or a pointer the next reattach replaces.
         staging = target.with_name(f"{target.name}-reattach")
         shutil.rmtree(staging, ignore_errors=True)
-        self.prune_worktrees()
         self._run_checked(["worktree", "add", "--detach", "--no-checkout", str(staging), commit])
         location = self.linked_worktree_location(staging)
         replacement = target / ".git.reattach"

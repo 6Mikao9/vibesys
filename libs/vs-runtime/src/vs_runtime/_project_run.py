@@ -329,6 +329,9 @@ class ProjectRunResources:
         try:
             if not reattach:
                 teardown_stack.callback(self.git.remove_worktree, workspace)
+                # Retain the base before creation: even a pre-snapshot crash leaves
+                # enough durable intent to derive a lost Git registration.
+                self.git.retain_candidate(workspace_id, revision)
                 self.git.add_worktree(workspace, revision)
                 copy_support_directories(
                     self._request.project_root, workspace, self._request.candidate_support_dirs
@@ -562,7 +565,7 @@ def _reattach_unlinked_candidates(project: Project, run_id: str, git: GitTracker
         return
     for entry in sorted(worktrees.iterdir(), key=lambda path: path.name):
         workspace = entry / "workspace"
-        if not (workspace / ".git").exists() or git.is_linked_worktree(workspace):
+        if not workspace.is_dir() or git.is_linked_worktree(workspace):
             continue
         commit = git.retained_candidate(entry.name)
         if commit is None:
