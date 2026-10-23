@@ -29,6 +29,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
     create_trusted_evaluation_executor,
+    job_failure,
 )
 from vs_sandbox.api import CommandResult
 from vs_sandbox.api.testing import FakeCommandRunner
@@ -178,3 +179,16 @@ def test_a_setup_the_run_cannot_make_is_never_the_candidates() -> None:
 @given(failure=st.sampled_from(MeasurementFailure))
 def test_only_a_workload_failure_charges_the_candidate(failure: MeasurementFailure) -> None:
     assert failure.charges_candidate == (failure is MeasurementFailure.WORKLOAD)
+
+
+@given(
+    kinds=st.lists(st.none() | st.sampled_from(BenchmarkFailureKind), max_size=6),
+)
+def test_a_job_charges_the_candidate_only_when_every_failed_stage_judged_it(
+    kinds: list[BenchmarkFailureKind | None],
+) -> None:
+    """The class of a failed job is its stages' worst: one stage the machinery, the clock or an
+    unclassified cause stopped means no verdict about the candidate."""
+    judged = bool(kinds) and all(kind is BenchmarkFailureKind.WORKLOAD for kind in kinds)
+
+    assert job_failure(kinds).charges_candidate == judged

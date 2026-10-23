@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 from tests.support.core_host_world import open_core_host
 from tests.support.docker_environment import (
     fake_docker_environment,
@@ -40,6 +44,7 @@ from vs_runtime.api import (
     RuntimeContractError,
     Workspace,
 )
+from vs_runtime.api.infrastructure import job_failure
 from vs_runtime.api.testing import FakeWorkspace, idle_environment_system
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
@@ -47,13 +52,13 @@ from vs_sim.api import DISCARD, Capture, OsThreads
 from vs_sim.api.testing import (
     ManualClock,
     SimThreads,
+    examples,
     wait_or_fail,
     wait_until_started,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-    from pathlib import Path
     from typing import TypeVar
 
     from vibesys.run.host import CoreHost
@@ -340,6 +345,36 @@ def test_multiple_metrics_without_objectives_have_no_implicit_headline(tmp_path:
         assert "objectives.toml" in result.feedback
     finally:
         integration.close()
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=2, nightly=10), deadline=None)
+@example(names=["latency", "throughput"])
+@given(
+    names=st.lists(
+        st.from_regex(r"[a-z][a-z_]{0,7}", fullmatch=True), min_size=2, max_size=4, unique=True
+    )
+)
+def test_a_task_that_names_no_objectives_never_charges_the_candidate_for_what_its_evaluator_reports(
+    names: list[str],
+) -> None:
+    """Regression: a task that configures no objectives cannot name its headline, which no
+    candidate can fix; the failure was a verdict about the candidate, so the candidate failed for it."""
+
+    async def body(ctx: CoreHost) -> BenchmarkEvaluation:
+        return await ctx.evaluation.benchmark(ctx.workspaces.root, output=DISCARD)
+
+    row = {name: float(index + 1) for index, name in enumerate(names)}
+    with tempfile.TemporaryDirectory() as directory:
+        project_root = Path(directory) / "project"
+        _write_project(project_root, protocol_row=row)
+        result, integration = _run_project(project_root, body)
+        try:
+            assert not result.passed
+            assert result.failure_kind is not None
+            assert not job_failure([result.failure_kind]).charges_candidate
+        finally:
+            integration.close()
 
 
 def test_executed_benchmark_failure_has_policy_feedback(tmp_path: Path) -> None:

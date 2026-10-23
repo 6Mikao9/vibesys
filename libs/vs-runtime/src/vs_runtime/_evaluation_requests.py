@@ -567,7 +567,11 @@ class MeasurementRequests:
                 request.plan, request.scope, handle, deadline_at=context.until.at
             )
         except RejectedPlanError as error:
-            return self._rejected(request, context, str(error), failure=MeasurementFailure.WORKLOAD)
+            # The plan the framework built can never run; no candidate caused that, so it is the
+            # machinery's fault and charges nobody (`MeasurementFailure.charges_candidate`).
+            return self._rejected(
+                request, context, str(error), failure=MeasurementFailure.INFRASTRUCTURE
+            )
         fences = _fences_of(request, handle)
         by = core_identity(request)
         with self._store.exclusive():

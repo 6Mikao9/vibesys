@@ -651,7 +651,9 @@ class _EvaluationAdapter:
                     feedback,
                     max_chars=GATE_FEEDBACK_TAIL_CHARS,
                 ),
-                failure_kind=BenchmarkFailureKind.WORKLOAD,
+                # The task cannot name its headline: no candidate can fix that, so it is not a
+                # verdict about the candidate (`MeasurementFailure.charges_candidate`).
+                failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
                 row=result.row,
             )
         objective = next((item for item in objectives if item.name == name), None)

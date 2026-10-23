@@ -27,6 +27,7 @@ from vs_core.api import (
     InspectOwnedJob,
     JobObserved,
     MeasurementFailure,
+    MeasurementSubmissionObserved,
     ObservationStatus,
     ObserveOwnedJob,
     RequestId,
@@ -74,7 +75,7 @@ from vs_slurm.api import SlurmJobStatus
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
-    from vs_core.api import Observation, RequestBase
+    from vs_core.api import MeasurementPlan, Observation, RequestBase
     from vs_evaluation.api import (
         AvailabilitySnapshot,
         EvaluationRequest,
@@ -608,6 +609,54 @@ async def test_a_revision_whose_digest_is_not_its_own_git_commit_is_rejected(dig
         got = await run(w, sub)
         assert got.observation.observation.status is ObservationStatus.REJECTED
         assert "git commit" in got.observation.observation.diagnostic
+        assert w.cluster.submissions == []
+
+
+def _unrunnable(kind: str, w: World, junk: str) -> MeasurementPlan:
+    """A plan that can never run, for one reason: ``junk`` is text a field cannot hold."""
+    base = plan(candidate=w.stack.snapshot)
+    stage = base.stages[0]
+    match kind:
+        case "evaluator digest":
+            return base.model_copy(update={"evaluator_digest": "sha256:not-hex-" + junk})
+        case "unknown stage":
+            return base.model_copy(
+                update={"stages": (stage.model_copy(update={"stage_id": "nowhere-" + junk}),)}
+            )
+        case "unknown output":
+            outputs = (stage.model_copy(update={"required_outputs": ("no-field-" + junk,)}),)
+            return base.model_copy(update={"stages": outputs})
+        case _:
+            stale = RevisionRef(revision_id=RevisionId(root=w.stack.snapshot), digest=junk)
+            return base.model_copy(update={"candidate": stale})
+
+
+@pytest.mark.regression
+@settings(
+    max_examples=examples(pr=6, nightly=40),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@example(kind="unknown stage", junk="x")
+@given(
+    kind=st.sampled_from(("evaluator digest", "unknown stage", "unknown output", "revision")),
+    junk=st.text(alphabet="abcdef0123456789", min_size=1, max_size=12),
+)
+async def test_a_plan_that_can_never_run_charges_nobody_whatever_makes_it_unrunnable(
+    kind: str, junk: str
+) -> None:
+    """Regression: a plan the framework built wrongly was a verdict about the candidate, so the
+    candidate failed for it. Only a verdict about the candidate charges it
+    (`MeasurementFailure.charges_candidate`)."""
+    async with world() as w:
+        sub = submission(override=_unrunnable(kind, w, junk))
+        got = await run(w, sub)
+
+        assert got.observation.observation.status is ObservationStatus.REJECTED
+        (observed,) = got.owner_events
+        assert isinstance(observed, MeasurementSubmissionObserved)
+        assert observed.failure is not None
+        assert not observed.failure.charges_candidate
         assert w.cluster.submissions == []
 
 
