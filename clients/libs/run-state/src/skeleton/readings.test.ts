@@ -112,3 +112,34 @@ test('an unmeasured input has no ratio, and a run without the field uses its hea
   const older2 = measuredSpans(spans, older, 100).find(span => span.id === 'c');
   expect(JSON.parse(older2?.label?.attrs_json ?? '{}').vs_baseline).toBe(2.5);
 });
+
+test("the input span the fact names also gives the input's reading of every other objective", () => {
+  const base = view({'gate:input:0': 100, 'gate:input:1': 90, c: 250}, 100);
+  const epoch = base.epochs[0]?.epoch;
+  if (!epoch) throw new Error('epoch required');
+  epoch.series.push(
+    create(MetricSeriesDeclSchema, {name: 'latency', unit: 'ms', direction: Direction.MIN}),
+  );
+  const latency = (span: string, value: number, at: number) =>
+    create(MetricVersionSchema, {
+      seq: BigInt(20 + at),
+      point: create(MetricPointSchema, {series: 'latency', span, value, clock: at}),
+    });
+  const withLatency: StoreView = {
+    ...base,
+    metrics: [
+      ...base.metrics,
+      create(MetricHistorySchema, {
+        series: 'latency',
+        // Another input gate reads another latency; only the named span's is the input's.
+        points: [latency('gate:input:0', 12.4, 0), latency('gate:input:1', 99, 1)],
+      }),
+    ],
+  };
+  const row = measuredSpans([gate('c', 'GATE_SUBJECT_CANDIDATE')], withLatency)[0];
+  const inputs = JSON.parse(row?.label?.attrs_json ?? '{}').input_metrics;
+  expect(inputs).toEqual([
+    {name: 'speed', value: 100, unit: 'ops', direction: 'max'},
+    {name: 'latency', value: 12.4, unit: 'ms', direction: 'min'},
+  ]);
+});

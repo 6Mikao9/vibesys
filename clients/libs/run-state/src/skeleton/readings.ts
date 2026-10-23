@@ -35,6 +35,8 @@ function readingsBySpan(view: StoreView): ReadonlyMap<string, readonly Reading[]
 }
 
 interface InputFact {
+  /** The span that measured the input, when the run states it. */
+  readonly span?: string;
   readonly name: string;
   readonly value: number;
   readonly unit: string;
@@ -57,6 +59,7 @@ function inputFact(view: StoreView, fallback: number | undefined): InputFact | n
   if (value === undefined) return null;
   const declaration = epoch.series.find(item => item.name === objective.series);
   return {
+    ...(stated?.case === 'measured' ? {span: stated.value.span} : {}),
     name: objective.series,
     value,
     unit: declaration?.unit ?? '',
@@ -77,7 +80,15 @@ export function measuredSpans(
   const bySpan = readingsBySpan(view);
   const input = inputFact(view, inputFallback);
   const metric = input?.name ?? view.epochs.at(-1)?.epoch?.run?.objectives[0]?.series;
-  const inputReadings = input ? [input] : [];
+  // The span the fact names also holds the input's reading of every other declared objective.
+  const inputReadings = input
+    ? [
+        {name: input.name, value: input.value, unit: input.unit, direction: input.direction},
+        ...(input.span === undefined ? [] : (bySpan.get(input.span) ?? [])).filter(
+          reading => reading.name !== input.name,
+        ),
+      ]
+    : [];
   const inputValue = input?.value;
   return spans.map(span => {
     if (span.label?.kind !== 'gate') return span;
