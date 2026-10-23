@@ -1,7 +1,7 @@
 /** Socket-free implementation of the session role. The peer can send only wire data and trailers. */
 import type {Duplex} from 'node:stream';
 import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
-import {type GatewaySession, GrpcDecoder, grpcFrame, grpcStatus} from '../shell/grpc.js';
+import {type GatewaySession, GrpcDecoder, GrpcError, grpcFrame, grpcStatus} from '../shell/grpc.js';
 import type {Schedule} from './schedule.js';
 
 export interface GatewayWireCall {
@@ -9,7 +9,8 @@ export interface GatewayWireCall {
   readonly bytes: Uint8Array;
   readonly signal: AbortSignal;
   message(bytes: Uint8Array): void;
-  trailers(status: string, message: string): void;
+  /** The closing trailers; no status is a peer that ended the stream without one. */
+  trailers(status: string | undefined, message: string): void;
   close(): void;
 }
 
@@ -33,15 +34,17 @@ export class FakeGatewaySession implements GatewaySession {
       method,
       bytes,
       signal,
-      value => {
-        response = value;
+      message => {
+        if (response !== undefined) throw new GrpcError(13, 'unary returned multiple messages');
+        response = message;
       },
       15_000,
     );
-    if (response === undefined) throw new Error('unary returned no message');
+    if (response === undefined) throw new GrpcError(13, 'unary returned no message');
     return response;
   }
 
+  /** Refuses what `Http2GatewaySession` refuses before a byte is sent, with the same errors. */
   stream(
     method: string,
     bytes: Uint8Array,
@@ -49,6 +52,14 @@ export class FakeGatewaySession implements GatewaySession {
     receive: (bytes: Uint8Array) => void,
     deadlineMs?: number,
   ): Promise<void> {
+    if (!/^\/[A-Za-z][\w.]*\/[A-Za-z]\w*$/.test(method))
+      return Promise.reject(new Error(`invalid gRPC method: ${method}`));
+    if (signal.aborted) return Promise.reject(signal.reason);
+    try {
+      grpcFrame(bytes);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     return new Promise((resolve, reject) => {
       const lane = {};
       const decoder = new GrpcDecoder();
@@ -74,10 +85,12 @@ export class FakeGatewaySession implements GatewaySession {
         }
       };
       this.#calls.add(close);
-      const registration = registerAbort(signal, () => finish(new Error('cancelled')));
+      const registration = registerAbort(signal, () =>
+        finish(signal.reason ?? new Error('cancelled')),
+      );
       detach = registration.detach;
       if (registration.aborted) {
-        finish(new Error('cancelled'));
+        finish(signal.reason ?? new Error('cancelled'));
         return;
       }
       if (deadlineMs !== undefined)
