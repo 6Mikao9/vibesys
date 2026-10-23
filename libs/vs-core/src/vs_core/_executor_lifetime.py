@@ -16,6 +16,23 @@ Core therefore declares, once and for every request kind, which of the two a req
   request holds nothing a new executor could find or release, so its outcome follows from the
   fact that the instance is gone (`_recovery_unanswered`), not from an answer nobody can give.
 
+Which kind is which (the whole classification; `executor_lifetime` is its only statement):
+
+==========================================================  ===========  ==============================
+request kinds                                               lifetime     what a restart finds
+==========================================================  ===========  ==============================
+ensure_session, dispatch_turn, resume_session_turn,         ``INSTANCE`` a receipt at most: the provider
+inspect_turn, cancel_turn, close_session, and a registered               process, the open turn and the
+operation that is an agent turn                                          session handle are gone
+ensure_workspace, restore_revision, snapshot_and_retain,    ``DURABLE``  the directory and the git
+snapshot_and_retain_run, retain_revision,                                history
+discard_workspace, adopt_revision, verify_adoption
+submit_measurement, observe_owned_job, inspect_owned_job,   ``DURABLE``  the job in its scheduler or
+cancel_owned_job, collect_evidence, close_attempt_scope                  container, and its receipts
+every other registered operation                            ``DURABLE``  its receipt and what it wrote
+inspect_request, cancel_owned_resource, block_request       ``DURABLE``  the receipts and the journal
+==========================================================  ===========  ==============================
+
 The shell makes the premise true: a resumed run holds its exclusive host lock and ends the
 agents the dead host left (`RunEnvironment.reap_orphans`) before the new host dispatches
 anything. The classification is a property of the request kind, never of a backend, and it is

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._request_recovery import is_open
+from ._record_ending import is_open
 from .types.attempts import AttemptPhase
 from .types.records import ReconciliationDeadline
 from .types.until import FailureReason, WhileAlive, WhileOpen

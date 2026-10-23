@@ -233,6 +233,10 @@ class ResumeWorld:
     resume_width: ClassVar[int] = 1
     backlog: ClassVar[int | None] = None
     resume_backlog: ClassVar[int | None] = None
+    delay: int = 0
+    """Durable points between the provider wedging and the stop (`Fault.WEDGED_STOP`)."""
+    grace: int = 0
+    """Durable points between the stop and the kill of the host (`Fault.WEDGED_STOP`)."""
 
     def __init__(
         self,
@@ -242,13 +246,11 @@ class ResumeWorld:
         fault: Fault,
         at: int,
         boundary: Point = Point.COMMIT,
-        delay: int = 0,
-        grace: int = 0,
     ) -> None:
         root.mkdir()
         (root / "candidate.py").write_text("VALUE = 1\n")
         self.git = FakeGitRepositories()
-        self.store = DurableStore(fault, at, boundary, delay, grace)
+        self.store = DurableStore(fault, at, boundary, self.delay, self.grace)
         self.effects = Effects()
         self.delivery = FakePublicationDelivery()
         self.rounds = 1
@@ -425,6 +427,14 @@ class ResumeWorld:
             resources.remove_leftover(member_workspace_id(request.scope.owner.root))
             self.workspaces.pop(member_workspace_id(request.scope.owner.root), None)
         return self.script(request, core)
+
+
+class WedgedStopWorld(ResumeWorld):
+    """A run whose provider wedges, then is stopped, and is killed after its grace."""
+
+    def __init__(self, root: Path, *, at: int, boundary: Point, delay: int, grace: int) -> None:
+        self.delay, self.grace = delay, grace
+        super().__init__(root, extra=0, fault=Fault.WEDGED_STOP, at=at, boundary=boundary)
 
 
 class WideWorld(ResumeWorld):

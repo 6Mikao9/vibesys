@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._request_recovery import is_open
+from ._record_ending import is_open
 from ._run_pause import run_pause
 from .types.common import PauseOwner, RunStatus
 from .types.records import RequestPhase

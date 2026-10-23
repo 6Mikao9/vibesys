@@ -25,7 +25,7 @@ import pytest
 from hypothesis import Phase, example, given, settings
 from hypothesis import strategies as st
 from tests.support.dynamic_script import REGISTRY
-from tests.vibesys.orchestration.dynamic._crash_resume import Fault, Point, ResumeWorld
+from tests.vibesys.orchestration.dynamic._crash_resume import Point, WedgedStopWorld
 
 from vs_core.api import CancelTurn, FlowState, RecoveryPhase, RunStatus
 from vs_core.api.testing import Budget, End, liveness
@@ -45,14 +45,8 @@ def resume_after_wedged_stop(
     """The core state the stopped host left, and the run the resumed host made of it."""
     with TemporaryDirectory() as directory, pytest.MonkeyPatch.context() as environment:
         environment.setenv("VIBESYS_STATE_HOME", str(Path(directory) / "state"))
-        world = ResumeWorld(
-            Path(directory) / "project",
-            extra=0,
-            fault=Fault.WEDGED_STOP,
-            at=at,
-            boundary=boundary,
-            delay=delay,
-            grace=grace,
+        world = WedgedStopWorld(
+            Path(directory) / "project", at=at, boundary=boundary, delay=delay, grace=grace
         )
         with world.open(resume=False) as resources:
             first = world.host(resume=False, now=1)
