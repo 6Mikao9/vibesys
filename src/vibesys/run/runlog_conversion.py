@@ -40,7 +40,9 @@ if TYPE_CHECKING:
 
 
 _PRELOCK_QUIET_SECONDS = 300
-_PROJECTION_VERSION = 1
+# Bump with any change to what a converted run.log says (it is rebuilt once, and the receipt says so):
+# 2: gate events of older journals name their subject (input or candidate).
+_PROJECTION_VERSION = 2
 
 
 class RunLogConversionError(ValueError):
@@ -371,15 +373,15 @@ def _convert_stopped(
     journal = directory / "core-events.jsonl"
     receipt_path = directory / "run.conversion-source.pb"
     source = journal.stat() if journal.is_file() else None
-    drifted = source is not None and _source_drifted(
-        receipt_path, source.st_size, source.st_mtime_ns
-    )
-    if not drifted and (sequence := _complete_sequence(destination)):
+    drift = None if source is None else _drift(receipt_path, source.st_size, source.st_mtime_ns)
+    if drift is None and (sequence := _complete_sequence(destination)):
         if _has_checkpoint(directory, sequence):
             return ConversionResult(ConversionStatus.EXISTS, "already converted")
         with FileRunLogWriter(destination, clock=clock, threads=threads, sync=install_sync):
             pass
         return ConversionResult(ConversionStatus.CONVERTED, "repaired run.head and keyframes")
+    if drift is None and destination.is_file() and destination.stat().st_size > 0:
+        drift = "log failed its checks"
     journal = directory / "core-events.jsonl"
     if not journal.exists():
         return ConversionResult(ConversionStatus.SKIPPED, "journal is missing")
@@ -418,7 +420,10 @@ def _convert_stopped(
     )
     validate(receipt)
     atomic_write_bytes(receipt_path, receipt.to_binary())
-    return ConversionResult(ConversionStatus.CONVERTED, "converted journal to run.log")
+    reason = "converted journal to run.log"
+    return ConversionResult(
+        ConversionStatus.CONVERTED, reason if drift is None else f"{reason} (rebuilt: {drift})"
+    )
 
 
 @dataclass(frozen=True)
@@ -432,16 +437,17 @@ class RunConversion:
     cursor: str = ""
 
 
-def _source_drifted(path: Path, size: int, modified_ns: int) -> bool:
+def _drift(path: Path, size: int, modified_ns: int) -> str | None:
+    """Why the receipt no longer vouches for the log: the journal changed, or the format did."""
     if not path.is_file():
-        return False
+        return None
     receipt = RunConversionReceipt.from_binary(path.read_bytes())
     validate(receipt)
-    return (receipt.journal_size, receipt.journal_modified_ns, receipt.projection_version) != (
-        size,
-        modified_ns,
-        _PROJECTION_VERSION,
-    )
+    if receipt.projection_version != _PROJECTION_VERSION:
+        return f"projection {receipt.projection_version} to {_PROJECTION_VERSION}"
+    if (receipt.journal_size, receipt.journal_modified_ns) != (size, modified_ns):
+        return "journal changed"
+    return None
 
 
 def _require_unchanged(journal: Path, size: int, modified_ns: int) -> None:

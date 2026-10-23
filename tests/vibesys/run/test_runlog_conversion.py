@@ -49,6 +49,7 @@ from vs_proto.api import (
     LegacyEvent,
     Oneof,
     Record,
+    RunConversionReceipt,
     RunHead,
 )
 from vs_runlog.api import (
@@ -1111,3 +1112,40 @@ def test_liveness_is_decided_on_the_injected_clock_over_mtime_and_writer_state(
         live = writer == "lock-held" or (writer == "no-lock" and not quiet)
         assert (result.status is ConversionStatus.SKIPPED) == live
         assert prelock_writer_is_live(modified=now - age, now=now, ended=False) == (age < 300)
+
+
+def test_a_log_of_an_older_projection_is_rebuilt_once_and_the_reason_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    journal.close()
+    directory = Project.log_directory_for(project.root, "run-1")
+    os.utime(directory / "core-events.jsonl", (100, 100))
+    kwargs = {
+        "clock": ManualClock(start=1000),
+        "threads": SimThreads(),
+        "install_sync": FakeFileSync(),
+    }
+    assert convert_run(project, "run-1", **kwargs).status is ConversionStatus.CONVERTED
+    receipt = directory / "run.conversion-source.pb"
+    current = RunConversionReceipt.from_binary(receipt.read_bytes())
+    # The same projection and the same journal: nothing is written, however often it is asked.
+    settled = {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()}
+    for _ in range(3):
+        assert convert_run(project, "run-1", **kwargs).status is ConversionStatus.EXISTS
+    assert {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()} == settled
+    # A receipt of an older projection rebuilds the log, once, and says which projection moved.
+    older = RunConversionReceipt(
+        journal_size=current.journal_size,
+        journal_modified_ns=current.journal_modified_ns,
+        projection_version=current.projection_version - 1,
+    )
+    receipt.write_bytes(older.to_binary())
+    rebuilt = convert_run(project, "run-1", **kwargs)
+    assert rebuilt.status is ConversionStatus.CONVERTED
+    assert (
+        f"rebuilt: projection {older.projection_version} to {current.projection_version}"
+        in rebuilt.reason
+    )
+    assert convert_run(project, "run-1", **kwargs).status is ConversionStatus.EXISTS

@@ -313,6 +313,9 @@ func TestHostReadDeadlineIsNotAnUnconfirmedAdmission(t *testing.T) {
 			if err != nil || got != want || response.GetFailure().GetMessage() == "" {
 				t.Fatalf("read failure: %v %v", response, err)
 			}
+			if want == hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED && !strings.Contains(response.GetFailure().GetMessage(), "list-tasks deadline exceeded after") {
+				t.Fatalf("the deadline names no command: %q", response.GetFailure().GetMessage())
+			}
 		})
 	}
 }
