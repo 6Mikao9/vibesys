@@ -269,14 +269,13 @@ class MetricSpace(BaseModel):
         Configured axes supply directions, regardless of metric order or a
         reporting default on a secondary metric. Tradeoffs and missing axes
         are incomparable. With no configured axes, preserve headline comparison.
+
+        This is the one dominance rule: ``BETTER`` is "no objective worse beyond
+        its tolerance and at least one better beyond it", whatever the other
+        objectives say, so a large gain on one axis is never lost to a headline
+        that moved within its noise. `no_worse_metrics` and `dominates` read it.
         """
-        comparisons = set(self._metric_comparisons(candidate, baseline))
-        if not comparisons or MetricComparison.INCOMPARABLE in comparisons:
-            return MetricComparison.INCOMPARABLE
-        comparisons.discard(MetricComparison.WITHIN_NOISE)
-        if not comparisons:
-            return MetricComparison.WITHIN_NOISE
-        return comparisons.pop() if len(comparisons) == 1 else MetricComparison.INCOMPARABLE
+        return _dominance(self._metric_comparisons(candidate, baseline))
 
     def no_worse_metrics(
         self, candidate: tuple[MetricRow, ...], baseline: tuple[MetricRow, ...]
@@ -286,10 +285,19 @@ class MetricSpace(BaseModel):
         Unlike reversing dominance, this rejects a tradeoff with a material
         regression, even when another objective improves.
         """
-        comparisons = self._metric_comparisons(candidate, baseline)
-        return bool(comparisons) and all(
-            item in {MetricComparison.BETTER, MetricComparison.WITHIN_NOISE} for item in comparisons
-        )
+        return self.compare_metrics(candidate, baseline) in {
+            MetricComparison.BETTER,
+            MetricComparison.WITHIN_NOISE,
+        }
+
+    def objective_comparisons(
+        self, candidate: Mapping[str, float], baseline: Mapping[str, float]
+    ) -> dict[str, MetricComparison]:
+        """How ``candidate`` stands against ``baseline`` on each configured axis, by name."""
+        return {
+            axis.name: self.compare(_reading(axis, candidate), _reading(axis, baseline))
+            for axis in self.objectives
+        }
 
     def _metric_comparisons(
         self, candidate: tuple[MetricRow, ...], baseline: tuple[MetricRow, ...]
@@ -307,9 +315,7 @@ class MetricSpace(BaseModel):
             )
         mine = {item.name: item.value for item in candidate}
         theirs = {item.name: item.value for item in baseline}
-        return tuple(
-            self.compare(_reading(axis, mine), _reading(axis, theirs)) for axis in self.objectives
-        )
+        return tuple(self.objective_comparisons(mine, theirs).values())
 
     def compare_to_best(
         self,
@@ -345,20 +351,9 @@ class MetricSpace(BaseModel):
         """
         if not self.objectives:
             return False
-        materially_better = False
-        for objective in self.objectives:
-            comparison = self.compare(
-                _reading(objective, a),
-                _reading(objective, b),
-            )
-            match comparison:
-                case MetricComparison.INCOMPARABLE | MetricComparison.WORSE:
-                    return False
-                case MetricComparison.BETTER:
-                    materially_better = True
-                case MetricComparison.WITHIN_NOISE:
-                    pass
-        return materially_better
+        return (
+            _dominance(tuple(self.objective_comparisons(a, b).values())) is MetricComparison.BETTER
+        )
 
     def frontier[T](
         self,
@@ -377,6 +372,21 @@ class MetricSpace(BaseModel):
     def complete(self, row: Mapping[str, float]) -> bool:
         """Return whether *row* carries a value for every configured axis."""
         return bool(self.objectives) and all(objective.name in row for objective in self.objectives)
+
+
+def _dominance(comparisons: Sequence[MetricComparison]) -> MetricComparison:
+    """One verdict over per-objective ones: no objective worse and at least one better is ``BETTER``.
+
+    An objective that cannot be compared, or a better one beside a worse one (a tradeoff),
+    leaves the rows incomparable; all objectives within their noise is ``WITHIN_NOISE``.
+    """
+    found = set(comparisons)
+    if not found or MetricComparison.INCOMPARABLE in found:
+        return MetricComparison.INCOMPARABLE
+    found.discard(MetricComparison.WITHIN_NOISE)
+    if not found:
+        return MetricComparison.WITHIN_NOISE
+    return found.pop() if len(found) == 1 else MetricComparison.INCOMPARABLE
 
 
 def _reading(objective: Objective, row: Mapping[str, float]) -> Measurement | None:

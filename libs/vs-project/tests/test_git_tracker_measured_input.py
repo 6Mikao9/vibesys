@@ -22,6 +22,8 @@ from vs_sim.api.testing import examples
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vs_project.api import GitTracker
+
 _READ = ("main.py", "src/kernel.py")
 _UNREAD = ("NOTES.md", "notes/round.md")
 _DECLARED = ("NOTES.md", "notes/")
@@ -196,26 +198,92 @@ def test_commits_with_one_measured_input_are_evaluated_on_byte_identical_trees(
                 assert tree == other_tree
 
 
-@pytest.mark.parametrize(
-    "declared",
-    [(), ("NOTES.md",), ("notes/",), ("NOTES.md", "notes/", "other.md")],
+_DECLARATIONS = st.sampled_from(
+    [
+        (),
+        ("NOTES.md",),
+        ("notes/",),
+        ("notes", "NOTES.md"),
+        ("NOTES.md", "notes/", "other.md"),
+        ("evidence/",),
+    ]
 )
-def test_another_unread_declaration_is_another_measured_input(
-    tmp_path: Path, declared: tuple[str, ...]
-) -> None:
-    """Even where it withholds nothing more, a changed declaration moves the digest.
+"""Declarations a task may state: some withhold paths the tree holds, some name none of them."""
+_NAMES_NOTHING = ("evidence/", "other.md", "a/b/")
+"""Paths no edit above ever writes."""
 
-    The same commit read under two declarations is evaluated on two trees whenever the
-    declarations withhold different paths, so the declaration is part of the input; its
-    order and a directory's trailing slash are not.
+
+def _evaluated(
+    case: Path, tracker: GitTracker, commit: str, declared: tuple[str, ...], number: int
+) -> tuple[str, dict[str, tuple[str, str]]]:
+    """A commit's measured input under ``declared``, and the tree an evaluation of it receives."""
+    root = case / "repo"
+    worktree = case / f"evaluated-{number}"
+    _git(root, "worktree", "add", "-q", "--detach", str(worktree), commit)
+    real_git_tracker(worktree, run_id="input-run", events=NullGitTrackerEvents()).withhold_unread(
+        declared
+    )
+    return tracker.measured_input(commit, declared), _tree(worktree)
+
+
+@pytest.mark.regression
+@settings(
+    max_examples=examples(pr=4, nightly=25),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    edits=st.lists(_EDITS, max_size=5),
+    declarations=st.tuples(_DECLARATIONS, _DECLARATIONS),
+    nothing=st.lists(st.sampled_from(_NAMES_NOTHING), max_size=3),
+)
+@example(edits=[], declarations=((), ("evidence/",)), nothing=["evidence/"])
+@example(edits=[], declarations=((), ("NOTES.md",)), nothing=[])
+def test_the_measured_input_is_the_content_an_evaluation_receives_not_its_declaration(
+    tmp_path: Path,
+    edits: list[tuple[str, str, int | str]],
+    declarations: tuple[tuple[str, ...], tuple[str, ...]],
+    nothing: list[str],
+) -> None:
+    """Two declarations that give an evaluator different trees give different inputs, and a
+    declaration that names nothing the tree holds changes nothing.
+
+    A task that adds ``unread = ["evidence/"]`` to a tree with no ``evidence/`` withholds
+    nothing, so it must not turn the measurements already taken of that commit into another
+    input's (run 142822: a base with three samples was left with one). A path the baseline
+    holds is withheld from every commit, so it is part of the input though no patch shows it.
     """
+    case = tmp_path / f"case-{len(list(tmp_path.iterdir()))}"
+    root = case / "repo"
+    root.mkdir(parents=True)
+    (root / "main.py").write_text("VALUE = 0\n", encoding="utf-8")
+    (root / "NOTES.md").write_text("baseline notes\n", encoding="utf-8")
+    tracker = real_git_tracker(root, run_id="input-run", events=NullGitTrackerEvents())
+    tracker.init(existing=False)
+    for number, edit in enumerate(edits):
+        _apply(root, edit)
+        _git(root, "add", "-A", "-f", "--", ".", ":(exclude).vibesys/state")
+        _git(root, "commit", "-q", "--allow-empty", "-m", f"step {number}")
+    commit = _git(root, "rev-parse", "HEAD").strip()
+    first, second = (
+        _evaluated(case, tracker, commit, declared, number)
+        for number, declared in enumerate(declarations)
+    )
+    assert (first[0] == second[0]) <= (first[1] == second[1])
+    bare = _evaluated(case, tracker, commit, (), 2)
+    padded = _evaluated(case, tracker, commit, tuple(nothing), 3)
+    assert bare == padded
+
+
+def test_a_declaration_order_and_a_directory_slash_are_not_part_of_the_input(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "main.py").write_text("VALUE = 0\n", encoding="utf-8")
     tracker = real_git_tracker(tmp_path, run_id="input-run", events=NullGitTrackerEvents())
     tracker.init(existing=False)
     tracker.snapshot("step")
     commit = tracker.current_sha()
     assert commit is not None
-    assert tracker.measured_input(commit, declared) != tracker.measured_input(commit, _DECLARED)
     assert tracker.measured_input(commit, ("notes", "NOTES.md")) == tracker.measured_input(
         commit, _DECLARED
     )

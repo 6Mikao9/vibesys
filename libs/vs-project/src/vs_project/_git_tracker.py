@@ -394,11 +394,14 @@ class GitTracker:
         """The digest of what an evaluation of *commit* reads: its tree, less *unread*.
 
         *unread* names workspace paths (files or directories) the task's evaluation never
-        reads, such as an agent's notes. Two commits that differ only there have the same
-        digest, so they are one measured input. The digest covers the sorted *unread* list
-        and every other tracked path,
-        VibeSys's own files included, as the patch from the baseline commit, which is part of
-        the digest too, so commits of different workspaces never share one.
+        reads, such as an agent's notes. The digest is of the content the evaluation
+        receives, not of the declaration that withheld it: two commits that differ only in
+        withheld paths have the same digest, and so does one commit read under a declaration
+        that names nothing the tree holds (``unread = ["evidence/"]`` over a tree without
+        one). It covers every other tracked path, VibeSys's own files included, as the patch
+        from the baseline commit, which is part of the digest too, so commits of different
+        workspaces never share one. A path the baseline itself holds is outside that patch,
+        so the digest names which of the declared paths the baseline holds.
 
         A worktree of *commit* after :meth:`withhold_unread` holds exactly what this digests:
         two commits with one digest are evaluated on byte-identical trees.
@@ -410,12 +413,17 @@ class GitTracker:
         withheld = sorted({Path(path).as_posix().rstrip("/") for path in unread})
         skipped = [f":(exclude){_wildcard_safe(path)}" for path in withheld]
         patch = self._git.diff_patch(root, commit, [".", *skipped], style=PatchStyle.EXACT)
+        held = [path for path in withheld if self._holds(root, path)]
         digest = hashlib.sha256(f"{root}\n".encode())
-        # The declaration is part of the input: one tree read under another declaration is
-        # another evaluated tree, since a different set of paths is withheld from it.
-        digest.update(f"{json.dumps(withheld)}\n".encode())
+        digest.update(f"{json.dumps(held)}\n".encode())
         digest.update(patch.encode())
         return f"sha256:{digest.hexdigest()}"
+
+    def _holds(self, revision: str, path: str) -> bool:
+        """Whether *revision*'s tree holds a file at *path* or anything below it."""
+        return self._git.read_blob(revision, path) is not None or bool(
+            self._git.tree_files(revision, path)
+        )
 
     def withhold_unread(self, unread: Sequence[str]) -> None:
         """Remove *unread* from this worktree, so it holds what :meth:`measured_input` digests.
