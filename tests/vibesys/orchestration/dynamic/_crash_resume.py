@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import replace
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from tests.support.dynamic_script import FACTS, Executors, config, harness
 from tests.vibesys.orchestration.dynamic._replies import (
@@ -156,6 +156,25 @@ class DurableStore(FakeStateStore):
         elif self.fault is Fault.PROVIDER:
             self.outage, self.hung_cancels = PROVIDER_OUTAGE, 1
 
+    def provider_silence(self, request: Request) -> Unknown | None:
+        """Silence for an agent call the outage swallows: no reply ever arrives.
+
+        Core ends a swallowed turn at its limit, cancels it and asks again as the role says;
+        the same outage hangs the first cancellation of a lost turn.
+        """
+        if isinstance(request, DispatchTurn | ResumeSessionTurn) and self.outage:
+            self.outage -= 1
+            return Unknown()
+        if (
+            isinstance(request, CancelTurn)
+            and self.hung_cancels
+            and request.request_id is not None
+            and not request.request_id.root.endswith("close")
+        ):
+            self.hung_cancels -= 1
+            return Unknown()
+        return None
+
     def attach(self, shell: CoreRuntime, clock: VirtualClock) -> None:
         self.clock = clock
 
@@ -174,7 +193,13 @@ class DurableStore(FakeStateStore):
 
 
 class ResumeWorld:
-    """A scripted dynamic flow that really creates, snapshots and discards Fake Git trees."""
+    """A scripted dynamic flow that really creates, snapshots and discards Fake Git trees.
+
+    ``width`` is the run's ``--max-in-flight`` and ``resume_width`` the one its resume plans.
+    """
+
+    width: ClassVar[int] = 1
+    resume_width: ClassVar[int] = 1
 
     def __init__(
         self,
@@ -184,15 +209,7 @@ class ResumeWorld:
         fault: Fault,
         at: int,
         boundary: Point = Point.COMMIT,
-        width: int = 1,
-        resume_width: int | None = None,
     ) -> None:
-        """``resume_width`` is the width the resume plans, when it is not the run's own.
-
-        The CLI keeps ``--max-in-flight`` exact on a resume, so a narrower plan over a run that
-        admitted ``width`` attempts is the state a run stored under a wrong admission limit
-        leaves; the world resolves that resume with a policy that accepts it.
-        """
         root.mkdir()
         (root / "candidate.py").write_text("VALUE = 1\n")
         self.git = FakeGitRepositories()
@@ -200,8 +217,6 @@ class ResumeWorld:
         self.effects = Effects()
         self.delivery = FakePublicationDelivery()
         self.rounds = 1
-        self.width = width
-        self.resume_width = width if resume_width is None else resume_width
         self.extra = extra
         self.refusals = 0
         self.outages = 0
@@ -219,11 +234,11 @@ class ResumeWorld:
         self.resources: ProjectRunResources | None = None
         self.script = Executors(
             planner=deque(
-                plan_reply(*(implement(f"h{n}-{m}") for m in range(width)))
+                plan_reply(*(implement(f"h{n}-{m}") for m in range(self.width)))
                 for n in range(self.rounds + extra)
             ),
-            implementer=deque(implemented() for _ in range((self.rounds + extra) * width)),
-            judge=deque(reviewed() for _ in range((self.rounds + extra) * width)),
+            implementer=deque(implemented() for _ in range((self.rounds + extra) * self.width)),
+            judge=deque(reviewed() for _ in range((self.rounds + extra) * self.width)),
             exhausted="not json",
         )
         self.workspaces: dict[str, str] = {}
@@ -331,17 +346,9 @@ class ResumeWorld:
             # The backend owns retries; only its final try reaches core. The
             # scripted far side heals on try two, as the production wrapper does.
             return self.script(request, core)
-        if isinstance(request, DispatchTurn | ResumeSessionTurn) and self.store.outage:
-            # The CLI hangs or exits mid-turn: no reply ever arrives, and core ends the turn at
-            # its limit, cancels it and asks again as the role says.
-            self.store.outage -= 1
-            self.outages += 1
-            return Unknown()
-        if isinstance(request, CancelTurn) and self.store.hung_cancels:
-            if not request.request_id.root.endswith("close"):
-                # The same outage hangs the cancellation of the lost turn.
-                self.store.hung_cancels -= 1
-                return Unknown()
+        if (silence := self.store.provider_silence(request)) is not None:
+            self.outages += isinstance(request, DispatchTurn | ResumeSessionTurn)
+            return silence
         if isinstance(request, EnsureWorkspace):
             key = member_workspace_id(request.scope.owner.root)
             base = request.plan.base.git_commit
@@ -372,6 +379,24 @@ class ResumeWorld:
             resources.remove_leftover(member_workspace_id(request.scope.owner.root))
             self.workspaces.pop(member_workspace_id(request.scope.owner.root), None)
         return self.script(request, core)
+
+
+class WideWorld(ResumeWorld):
+    """A run two agents wide, resumed two wide."""
+
+    width = 2
+    resume_width = 2
+
+
+class NarrowedWorld(ResumeWorld):
+    """A run two attempts wide whose resume plans one.
+
+    The CLI keeps ``--max-in-flight`` exact on a resume, so this is the state a run stored under
+    a wrong admission limit leaves; the world resolves that resume with a policy that accepts it.
+    """
+
+    width = 2
+    resume_width = 1
 
 
 def _any_width(

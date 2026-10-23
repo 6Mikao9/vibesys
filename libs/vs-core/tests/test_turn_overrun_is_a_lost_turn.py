@@ -118,7 +118,11 @@ class SilentCancelHost(OverrunningHost):
     asks: int = 0
 
     def __call__(self, request: core.Request, state: core.CoreState) -> Answer:
-        if isinstance(request, core.CancelTurn) and not request.request_id.root.endswith("close"):
+        if (
+            isinstance(request, core.CancelTurn)
+            and request.request_id is not None
+            and not request.request_id.root.endswith("close")
+        ):
             self.asks += 1
             if self.asks <= self.silent:
                 return Unknown()
@@ -128,9 +132,7 @@ class SilentCancelHost(OverrunningHost):
 @pytest.mark.regression
 @_SETTINGS
 @example(silent=1, lost_turns=1)
-@given(
-    silent=st.integers(0, RETRIES + 1), lost_turns=st.integers(0, core.MAX_LOST_TURNS)
-)
+@given(silent=st.integers(0, RETRIES + 1), lost_turns=st.integers(0, core.MAX_LOST_TURNS))
 def test_a_cancellation_that_never_answers_is_asked_again_within_the_retry_limit(
     silent: int, lost_turns: int
 ) -> None:

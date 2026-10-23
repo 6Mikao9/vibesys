@@ -107,14 +107,15 @@ def lost_turn_ask(ref: InvocationRef, *, authority: RequestId, limit: int) -> in
     )
 
 
-def lost_cancellation_ask(ref: InvocationRef, *, cancellation: RequestId, limit: int) -> int | None:
-    """Which ask of the lost turn's cancellation the request ``cancellation`` is, or None."""
+def lost_cancellation_ask(
+    ref: InvocationRef, *, cancellation: RequestId | None, limit: int
+) -> int | None:
+    """Which ask of the lost turn's cancellation the request ``cancellation`` is, or None.
+
+    A request not yet issued has no identity and is none of them.
+    """
     return next(
-        (
-            retry
-            for retry in range(limit + 1)
-            if cancellation == lost_turn_cancellation(ref, retry)
-        ),
+        (retry for retry in range(limit + 1) if cancellation == lost_turn_cancellation(ref, retry)),
         None,
     )
 

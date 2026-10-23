@@ -24,8 +24,10 @@ from tests.support.dynamic_script import REGISTRY
 from tests.vibesys.orchestration.dynamic._crash_resume import (
     PROVIDER_OUTAGE,
     Fault,
+    NarrowedWorld,
     Point,
     ResumeWorld,
+    WideWorld,
 )
 
 from vs_core.api import FlowState, RecoveryPhase, RunStatus
@@ -52,13 +54,12 @@ def test_a_provider_outage_on_agent_calls_ends_the_run_in_a_typed_terminal_state
 ) -> None:
     with TemporaryDirectory() as directory, pytest.MonkeyPatch.context() as environment:
         environment.setenv("VIBESYS_STATE_HOME", str(Path(directory) / "state"))
-        world = ResumeWorld(
+        world = (WideWorld if width == 2 else ResumeWorld)(
             Path(directory) / "project",
             extra=extra,
             fault=Fault.PROVIDER,
             at=at,
             boundary=boundary,
-            width=width,
         )
         with world.open(resume=False):
             run = world.host(resume=False, now=1).run()
@@ -85,14 +86,7 @@ def test_a_resume_under_a_narrower_width_keeps_every_admitted_attempt_and_ends_u
     """The stored run admitted two attempts at once; the resume plans one (``max_parallel`` 1)."""
     with TemporaryDirectory() as directory, pytest.MonkeyPatch.context() as environment:
         environment.setenv("VIBESYS_STATE_HOME", str(Path(directory) / "state"))
-        world = ResumeWorld(
-            Path(directory) / "project",
-            extra=extra,
-            fault=Fault.CRASH,
-            at=at,
-            width=2,
-            resume_width=1,
-        )
+        world = NarrowedWorld(Path(directory) / "project", extra=extra, fault=Fault.CRASH, at=at)
         with world.open(resume=False):
             first = world.host(resume=False, now=1)
             with suppress(HostCrashError):
