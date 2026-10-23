@@ -9,8 +9,9 @@
 import {afterAll, beforeAll, expect, test} from 'bun:test';
 import type {RunEvent} from '@vibesys/contracts';
 import type {HostRun} from '@vibesys/hosts';
-import {fixtureNamed} from '@vibesys/run-fixtures';
+import {FIXTURE_NAMES, fixtureNamed} from '@vibesys/run-fixtures';
 import {Seeded} from '@vibesys/store/testing';
+import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act} from 'react';
@@ -25,6 +26,7 @@ import {
   runPageInitial,
   runPageStep,
 } from '../../state/index.js';
+import {createRunPageStore, type RunPagePorts, type RunPageStore} from '../index.js';
 import {RunScreen} from './run-screen.js';
 
 const window = new Window();
@@ -114,25 +116,44 @@ function replay(size: number, total: number | undefined): readonly RunPageState[
   return states;
 }
 
-async function screenText(state: RunPageState): Promise<string> {
+async function screenText(state: RunPageState, resume?: RunPageStore): Promise<string> {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
   const model = createRunReader().read(state.run.trace, null);
-  await act(async () =>
+  const render = () => {
+    const current = resume?.getState() ?? state;
     root.render(
       <RunScreen
-        state={state}
+        state={current}
         model={model}
         whole={model}
-        core={state.run.core}
+        core={current.run.core}
         route={RUN_ROUTE}
         zoom={() => undefined}
-        dispatch={() => undefined}
+        dispatch={action => resume?.dispatch(action)}
       />,
-    ),
-  );
+    );
+  };
+  const unsubscribe = resume?.subscribe(render);
+  await act(async () => render());
+  if (resume) {
+    const button = [...container.querySelectorAll('button')].find(
+      each => each.textContent === 'Resume',
+    );
+    if (!button) throw new Error('Resume required');
+    const before = container.textContent;
+    await act(async () => button.click());
+    expect(container.textContent).not.toBe(before);
+    expect(container.textContent).toContain('Waiting for the run to start');
+    expect(
+      [...container.querySelectorAll('button')]
+        .find(each => each.textContent === 'Resume')
+        ?.getAttribute('aria-disabled'),
+    ).toBe('true');
+  }
   const text = container.textContent ?? '';
+  unsubscribe?.();
   await act(async () => root.unmount());
   container.remove();
   return text;
@@ -252,5 +273,87 @@ test('property: every legacy ending renders the host-admitted Resume, regardless
       },
     ),
     {numRuns: 12, seed: 3436, examples: [['completed', false]]},
+  );
+});
+
+/** A recorded host that accepts Resume while its next listing has not arrived yet. */
+function resumePorts(name: string): RunPagePorts {
+  const fixture = fixtureNamed(name);
+  const page: HistoryReply = {
+    kind: 'page',
+    events: fixture.events,
+    next: (fixture.events.at(-1)?.sequence ?? 0) + 1,
+    complete: true,
+    bytes: 0,
+  };
+  return {
+    attach: async () => null,
+    release: () => {},
+    attachReader: async () => ({kind: 'unsupported'}),
+    openSession: () => {
+      throw new Error('An ended run needs no live session');
+    },
+    readHistory: async () => page,
+    readTrace: async () => page,
+    readSummary: async () => ({kind: 'unsupported'}),
+    readSpan: async () => ({kind: 'unsupported'}),
+    resumeEnded: async () => {},
+    openWindow: () => {},
+    now: () => 0,
+    archive: () => {},
+    runAgain: () => {},
+    logs: null,
+  };
+}
+
+test('property: Resume visibly acts on every recorded fixture with every legacy ending and compatibility flag', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.constantFrom(...FIXTURE_NAMES),
+      fc.constantFrom('completed', 'failed', 'stopped'),
+      fc.boolean(),
+      async (name, status, resumable) => {
+        const clock = new FakeClock();
+        const store = createRunPageStore(
+          {
+            identity: {host: 'local', runId: fixtureNamed(name).runId},
+            title: {project: '/project', task: 'mpmc'},
+            hostLabel: 'host-a',
+            unavailable: {},
+          },
+          resumePorts(name),
+          clock.schedule,
+        );
+        try {
+          await act(async () =>
+            store.dispatch({
+              type: 'record',
+              record: {
+                kind: 'ended',
+                run: {
+                  ...ENDED,
+                  status,
+                  phase: status,
+                  end: {
+                    outcome: status === 'completed' ? 'adopted' : status,
+                    reason: '',
+                    resumable,
+                  },
+                },
+              },
+            }),
+          );
+          await screenText(store.getState(), store);
+        } finally {
+          store.dispose();
+        }
+        expect(clock.pending).toBe(0);
+      },
+    ),
+    {
+      numRuns: 16,
+      seed: 34366,
+      examples: FIXTURE_NAMES.map(name => [name, 'completed' as const, false]),
+    },
   );
 });

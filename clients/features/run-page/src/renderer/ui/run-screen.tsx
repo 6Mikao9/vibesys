@@ -285,6 +285,8 @@ function EndedBanner(props: {
         <Button
           variant="primary"
           text={ended.resume}
+          quietReason
+          {...(state.resumeStatus?.pending ? {disabledReason: 'Waiting for the run to start'} : {})}
           press={() => dispatch({type: 'resume-ended'})}
         />
       )}
@@ -504,6 +506,19 @@ function RunHeader(
   );
 }
 
+function CommandStatus({state}: {readonly state: RunPageState}): JSX.Element {
+  return (
+    <>
+      {state.resumeStatus === null ? null : (
+        <Banner tone="neutral" title="Resume" body={state.resumeStatus.message} />
+      )}
+      {state.notice === null ? null : (
+        <Banner tone="err" title="The run did not take the command" body={state.notice} />
+      )}
+    </>
+  );
+}
+
 function RunScreenBody(props: {
   readonly state: RunPageState;
   readonly model: RunModel;
@@ -581,9 +596,7 @@ function RunScreenBody(props: {
     >
       {props.toolbar}
       <PauseNowBanner state={state} dispatch={dispatch} />
-      {state.notice === null ? null : (
-        <Banner tone="err" title="The run did not take the command" body={state.notice} />
-      )}
+      <CommandStatus state={state} />
       <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
       {problem === null ? null : (
         <Banner tone="warn" title="The run’s history is not available" body={problem} />

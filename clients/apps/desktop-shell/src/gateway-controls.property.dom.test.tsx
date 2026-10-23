@@ -558,3 +558,30 @@ function deliverLead(
     );
   }
 }
+
+test('property: every offered writer control changes visible content across lifecycle, liveness and history states', async () => {
+  const exercised = new Set<string>();
+  await fc.assert(
+    fc.asyncProperty(STATE, LIVENESS, BACKGROUND, async (lifecycle, liveness, background) => {
+      const scenario = {...background, lifecycle, liveness, loading: false};
+      const labels: string[] = [];
+      await withPeer(peerFor(scenario), async container => {
+        labels.push(...controlButtons(container));
+      });
+      for (const label of labels) {
+        exercised.add(label);
+        await withPeer(peerFor(scenario), async container => {
+          const button = [...container.querySelectorAll('button')].find(
+            each => each.textContent === label,
+          );
+          if (!button) throw new Error(`Missing ${label}`);
+          const before = container.textContent;
+          await act(async () => button.click());
+          expect(container.textContent, label).not.toBe(before);
+        });
+      }
+    }),
+    {numRuns: 32, seed: 34364},
+  );
+  expect([...exercised].sort()).toEqual(['Guidance', 'Pause', 'Pause now', 'Resume']);
+});

@@ -36,6 +36,7 @@ import {
   readerWanted,
   reconcileReader,
 } from './reader.js';
+import type {ResumeStatus} from './resume.js';
 import type {RunSummaryState, SummaryReply} from './run-summary.js';
 import {receiveTracePage, startTraceHistory, type TraceHistory} from './trace-history.js';
 import {USAGE_CONTROLS_DEFAULT, type UsageControls} from './usage-view.js';
@@ -288,6 +289,7 @@ export interface RunPageState {
   readonly view: RunView;
   /** Why the last command the run refused failed, until the next one. */
   readonly notice: string | null;
+  readonly resumeStatus: ResumeStatus | null;
   /** The run's summary, which opens the run level (`run-summary.ts`). */
   readonly summary: RunSummaryState;
   /** A pane asked for the transcript, even if the summary has not arrived yet. */
@@ -322,6 +324,7 @@ export type RunPageAction =
   | {readonly type: 'log-view'; readonly streamId: string; readonly view: LogView}
   | {readonly type: 'pause'}
   | {readonly type: 'resume-ended'}
+  | {readonly type: 'resume-status'; readonly status: ResumeStatus | null}
   | {readonly type: 'open-window'}
   | {readonly type: 'archive'}
   | {readonly type: 'run-again'}
@@ -427,6 +430,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     clockMs: null,
     view: {at: 'live'},
     notice: null,
+    resumeStatus: null,
     summary: {kind: 'idle'},
     wantsHistory: false,
     history: {kind: 'idle'},
@@ -1051,10 +1055,13 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
       });
     case 'resume-ended': {
       const end = phase.kind === 'ended' ? phase.end : null;
-      return offered(phase.kind === 'ended' || phase.kind === 'historical', {
-        kind: 'resume-ended',
-        fromRound: end?.resume_from_round ?? null,
-      });
+      return offered(
+        !state.resumeStatus?.pending && (phase.kind === 'ended' || phase.kind === 'historical'),
+        {
+          kind: 'resume-ended',
+          fromRound: end?.resume_from_round ?? null,
+        },
+      );
     }
     case 'open-window':
       return offered(state.unavailable['open-window'] === undefined, {kind: 'open-window'});
@@ -1216,6 +1223,8 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
       };
     case 'tick':
       return {state: {...state, clockMs: action.wallMs}, requests: []};
+    case 'resume-status':
+      return {state: {...state, resumeStatus: action.status}, requests: []};
     case 'command-refused':
       return {state: {...state, notice: action.message}, requests: []};
     case 'view':
