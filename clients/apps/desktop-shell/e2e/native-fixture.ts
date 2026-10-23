@@ -18,7 +18,7 @@ import type {RunFixture, StoreRunFixture} from '@vibesys/run-fixtures';
 import {gatewayScript, wire} from './fake-gateway.js';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const projector = join(root, 'tests/support/retained_client_fixture.py');
+const projector = join(root, 'tests/e2e/retained_client_fixture.py');
 const cache = join(
   tmpdir(),
   `vibesys-native-fixtures-${hash(
@@ -26,6 +26,7 @@ const cache = join(
       API_SCHEMA_HASH,
       STORE_SCHEMA_HASH,
       readFileSync(projector).toString(),
+      readFileSync(join(root, 'tests/support/retained_events.py')).toString(),
       ...files(join(root, 'src/vibesys/records'))
         .filter(path => path.endsWith('.py'))
         .sort()

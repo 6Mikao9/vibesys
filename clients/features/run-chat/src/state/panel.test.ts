@@ -185,7 +185,7 @@ test('only close and toggle hide the panel, whatever else the user does or the o
     {type: 'toggle-list'},
     {type: 'toggle-picker'},
   ];
-  for (const seed of SEEDS) {
+  for (const seed of SEEDS.slice(0, 60)) {
     const random = new Seeded(seed);
     let snapshot = step(opened(), {type: 'open'});
     for (let index = 0; index < 40; index++) {

@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.retained_client_fixture import (
+from tests.support.retained_events import (
     ANNOUNCEMENTS,
     CORE_TYPES,
     SESSION_FACTS,
     core_event,
-    write_fixture,
+    replay_of,
 )
 
 from server.events import EventType
@@ -105,10 +105,9 @@ FIXTURES = sorted((ROOT / "clients/libs/run-fixtures/src/data").glob("*.json"))
 
 
 @pytest.mark.parametrize("path", FIXTURES, ids=lambda path: path.stem)
-def test_every_committed_run_fixture_converts(path: Path, tmp_path: Path) -> None:
+def test_every_committed_run_fixture_converts(path: Path) -> None:
     """The journeys' own run data reaches the native path whole, in every state a fixture takes."""
     fixture = json.loads(path.read_text())
     if "runId" not in fixture:
         pytest.skip("not a run: a catalogue of examples")
-    write_fixture(tmp_path / "fixture", fixture)
-    assert (tmp_path / "fixture" / ".complete").exists()
+    assert replay_of(fixture).batches

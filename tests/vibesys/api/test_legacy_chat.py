@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.api.test_chat_sessions import chat_project
 
@@ -107,6 +107,19 @@ def text_of(root: str, run_id: str, thread: str, message: ChatMessage) -> str:
 
 
 @pytest.mark.regression
+@example(
+    events=[
+        {
+            "sequence": 1,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "type": "chat",
+            "text": "why?",
+            "chat_thread_id": None,
+            "data": {"kind": "chat", "answer": "because"},
+        }
+    ],
+    noise=True,
+)
 @settings(deadline=None, max_examples=12)
 @given(events=journals(), noise=st.booleans())
 def test_every_journal_conversation_becomes_one_session_with_its_exchanges(

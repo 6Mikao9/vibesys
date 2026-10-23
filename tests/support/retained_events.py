@@ -1,15 +1,7 @@
-"""Replay retained browser fixtures through the shipping typed-record projection.
-
-The output is existing Record protobufs and content bytes. There is no second
-record mapper here: the same pure owner used by RunLogTee interprets the events.
-"""
+"""The journey fixtures' event adapter: which frontend events are core journal facts, and as what."""
 
 from __future__ import annotations
 
-import fcntl
-import json
-import sys
-from pathlib import Path
 from typing import Any
 
 from vibesys.events import CoreEvent, CoreEventType
@@ -69,44 +61,31 @@ def core_event(original: dict[str, Any]) -> dict[str, Any] | None:
     return event
 
 
-def write_fixture(root: Path, fixture: dict[str, Any]) -> None:
-    """Publish one immutable fixture under the caller's content-addressed directory."""
-    root.parent.mkdir(parents=True, exist_ok=True)
-    with root.with_suffix(".lock").open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        if (root / ".complete").exists():
-            return
-        replay = ClientReplay()
-        streams: dict[str, bytearray] = {}
-        state = MappingState(
-            str(fixture["runId"]), native_intents=True, project_root="/work/queue-rs"
-        )
-        for original in fixture["events"]:
-            event = core_event(original)
-            if event is None:
-                continue
-            projected = map_event(state, CoreEvent.model_validate(event))
-            state = projected.state
-            replay.batches.append(
-                ClientReplayBatch(
-                    source_sequence=original["sequence"],
-                    records=[record.to_binary() for record in projected.records],
-                )
+def replay_of(fixture: dict[str, Any]) -> ClientReplay:
+    """The records, blobs and streams the shipping projection makes of a fixture's events."""
+    replay = ClientReplay()
+    streams: dict[str, bytearray] = {}
+    state = MappingState(str(fixture["runId"]), native_intents=True, project_root="/work/queue-rs")
+    for original in fixture["events"]:
+        event = core_event(original)
+        if event is None:
+            continue
+        projected = map_event(state, CoreEvent.model_validate(event))
+        state = projected.state
+        replay.batches.append(
+            ClientReplayBatch(
+                source_sequence=original["sequence"],
+                records=[record.to_binary() for record in projected.records],
             )
-            for blob in projected.blobs:
-                replay.blobs[blob.sha256] = blob.content
-            for stream in projected.streams:
-                content = streams.setdefault(stream.id, bytearray())
-                if len(content) != stream.offset:
-                    message = "fixture stream offset is not contiguous"
-                    raise ValueError(message)
-                content.extend(stream.content)
-        replay.streams.update({key: bytes(value) for key, value in streams.items()})
-        root.mkdir(parents=True, exist_ok=True)
-        (root / "replay.pb").write_bytes(replay.to_binary())
-        (root / ".complete").touch()
+        )
+        for blob in projected.blobs:
+            replay.blobs[blob.sha256] = blob.content
+        for stream in projected.streams:
+            content = streams.setdefault(stream.id, bytearray())
+            if len(content) != stream.offset:
+                message = "fixture stream offset is not contiguous"
+                raise ValueError(message)
+            content.extend(stream.content)
+    replay.streams.update({key: bytes(value) for key, value in streams.items()})
 
-
-if __name__ == "__main__":
-    for item in json.load(sys.stdin):
-        write_fixture(Path(sys.argv[1]) / item["key"], item["fixture"])
+    return replay

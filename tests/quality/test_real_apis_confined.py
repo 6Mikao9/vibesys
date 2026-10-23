@@ -1221,6 +1221,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.PROCESS_BOUNDARY,
         "the detached session's process output log",
     ),
+    "src/vibesys/chat/_legacy.py": (
+        EdgeKind.LOG,
+        "the one-shot import that reads the authoritative server journal into session logs",
+    ),
     "src/vibesys/chat/_session.py": (
         EdgeKind.LOG,
         "session log shell: reads the run head and its own answer blobs through Project paths",
