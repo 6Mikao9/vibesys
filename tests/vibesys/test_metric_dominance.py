@@ -137,7 +137,27 @@ def test_every_comparison_of_rows_is_the_result_of_the_one_rule(
 
 @settings(max_examples=examples(pr=60, nightly=2000), deadline=None)
 @given(case=_cases())
-def test_dominance_of_rows_is_the_rule_on_one_run_each_and_never_both_ways(
+@example(
+    case=(
+        MetricSpace(
+            objectives=(
+                Objective("tpot_ms_avg", "max"),
+                Objective("ttft_ms_avg", "min"),
+                Objective("completed_requests", "min"),
+                Objective("accuracy", "max"),
+            ),
+            relative_noise=0.5,
+        ),
+        dict.fromkeys(_NAMES, Runs(mean=1.0, count=1)),
+        {
+            "tpot_ms_avg": Runs(mean=0.9, count=1),
+            "ttft_ms_avg": Runs(mean=2.5, count=1),
+            "completed_requests": Runs(mean=0.4, count=1),
+            "accuracy": Runs(mean=0.9, count=1),
+        },
+    )
+)
+def test_dominance_of_rows_is_the_rule_on_one_run_each_and_the_frontier_of_two_is_never_empty(
     case: tuple[MetricSpace, dict[str, Runs], dict[str, Runs]],
 ) -> None:
     space, candidate, base = case
@@ -151,8 +171,10 @@ def test_dominance_of_rows_is_the_rule_on_one_run_each_and_never_both_ways(
     assert space.dominates(values, against) is (
         _by_the_rule(space, one, other) is ComparisonVerdict.BETTER
     )
-    if space.dominates(values, against):
-        assert not space.dominates(against, values)
+    # near the edge of a band each of two rows can beat the other on a different objective:
+    # neither is behind, so a frontier of two complete rows always keeps one
+    pair = [values, against]
+    assert space.frontier(pair, lambda row: row)
 
 
 @settings(max_examples=examples(pr=60, nightly=1000), deadline=None)

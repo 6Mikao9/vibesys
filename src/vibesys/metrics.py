@@ -343,12 +343,21 @@ class MetricSpace(BaseModel):
         points: Sequence[T],
         row: Callable[[T], Mapping[str, float]],
     ) -> list[T]:
-        """Return the members of *points* that nothing else dominates."""
+        """Return the members of *points* that nothing else dominates.
+
+        The judgement is read against a base's size (a ratio), so near its edge two rows can each
+        beat the other, one on each objective: neither is then behind the other, and a row
+        removes another only if the other does not remove it in return. The frontier of
+        any rows with a complete one is never empty for want of that.
+        """
         return [
             point
             for point in points
             if not any(
-                other is not point and self.dominates(row(other), row(point)) for other in points
+                other is not point
+                and self.dominates(row(other), row(point))
+                and not self.dominates(row(point), row(other))
+                for other in points
             )
         ]
 
