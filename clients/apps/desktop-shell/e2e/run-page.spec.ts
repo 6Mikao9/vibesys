@@ -1,5 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
+import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {expect, type Page, test} from '@playwright/test';
+import {HostCallRequestSchema, HostCallResponseSchema} from '@vibesys/proto';
+import {intentReplay} from '@vibesys/run-fixtures';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -114,16 +117,36 @@ async function push(page: Page, listing: unknown): Promise<void> {
   }
 }
 
-async function calls(page: Page): Promise<unknown[][]> {
-  return page.evaluate(() => (window as unknown as FakeHostWindow).fakeHost.calls);
-}
-
 test.use({colorScheme: 'dark'});
 
 test('a run starts, writes its logs, permits cancellation during drain, and resumes after ending', async ({
   page,
 }) => {
   await page.clock.install();
+  // The host admits what the page posts: a pending intent, or the epoch a relaunch starts.
+  const posted: string[] = [];
+  await page.exposeFunction('postIntent', (_host: string, bytes: number[]) => {
+    const {method} = fromBinary(HostCallRequestSchema, new Uint8Array(bytes));
+    if (method.case === 'relaunch') {
+      posted.push('relaunch');
+      return [
+        ...toBinary(
+          HostCallResponseSchema,
+          create(HostCallResponseSchema, {
+            result: {case: 'relaunch', value: {outcome: {case: 'epoch', value: 2n}}},
+          }),
+        ),
+      ];
+    }
+    if (method.case !== 'postIntent') throw new Error('Expected PostIntent');
+    posted.push(method.value.intent.case ?? '');
+    return [
+      ...toBinary(
+        HostCallResponseSchema,
+        intentReplay('pending', method.value.requestId).admission,
+      ),
+    ];
+  });
   await open(page, SEED);
 
   // Starting: the header and the startup timeline, the active step showing its live log.
@@ -156,18 +179,15 @@ test('a run starts, writes its logs, permits cancellation during drain, and resu
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-logs');
 
-  // Pause now is immediately available while a graceful Pause drains.
+  // Pause now is immediately available while a graceful Pause drains, and is admitted at once.
   await push(page, listed([server('stopping')], []));
   await expect(page.getByText('Pausing', {exact: true}).first()).toBeVisible();
-  await page.getByRole('button', {name: 'Pause now', exact: true}).click();
   await expect(
     page.getByText('Unfinished work may need repeating and may still incur charges.'),
   ).toBeVisible();
-  await shot(page, 'ink-pause-now-confirm');
-  await page.getByRole('button', {name: 'Pause now', exact: true}).last().click();
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as FakeHostWindow).fakeHost.commands))
-    .toContain('command.control:pause_now');
+  await shot(page, 'ink-pause-now');
+  await page.getByRole('button', {name: 'Pause now', exact: true}).click();
+  await expect.poll(() => posted).toEqual(['pauseNow']);
 
   // Ended: the banner reads the end record; Resume names the round, only when resumable.
   await push(
@@ -184,13 +204,11 @@ test('a run starts, writes its logs, permits cancellation during drain, and resu
       ],
     ),
   );
-  await expect(page.getByText('W6’s benchmark timed out after 300 s.')).toBeVisible();
+  await expect(page.getByText('W6’s benchmark timed out after 300 s.').first()).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-ended');
   await page.getByRole('button', {name: 'Resume', exact: true}).click();
-  await expect
-    .poll(async () => (await calls(page)).at(-1))
-    .toEqual(['resume', 'ssh:host-b', PROJECT, RUN_ID]);
+  await expect.poll(() => posted.at(-1)).toBe('relaunch');
 });
 
 test('the run level says what will appear before anything is measured, and keeps the search', async ({
