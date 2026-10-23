@@ -275,7 +275,7 @@ def _suspend(run: RunRecord, trace: Trace, pick: int) -> None:
         key = busy[pick % len(busy)]
         trace.idle[key] = pick + 1
         run.suspend(Suspended(key=key, wait=pick + 1))
-        assert key in run.parked or len(run.waits) > run.config.backlog
+        assert key in run.parked or len(run.waits) > run.config.max_backlog
 
 
 def _resume(run: RunRecord, trace: Trace, pick: int) -> None:
@@ -424,7 +424,7 @@ def play(
     cfg: DynamicConfig, steps: list[Step], *, input_pending: bool = False, limit: int | None = None
 ) -> tuple[RunRecord, Trace]:
     run = run_record(cfg)
-    trace = Trace(limit=cfg.max_in_flight + cfg.backlog if limit is None else limit)
+    trace = Trace(limit=cfg.admission_limit if limit is None else limit)
     if input_pending:
         run.baseline = None
     for action in steps:
@@ -453,10 +453,10 @@ def play(
 def test_the_record_keeps_its_budget_slots_gate_and_leader_whatever_order_things_happen_in(
     steps: list[Step], rounds: int, width: int, data: st.DataObject, *, input_pending: bool
 ) -> None:
-    backlog = data.draw(st.sampled_from([0, 1, 2, 3, None]), label="max_backlog")
+    backlog = data.draw(st.sampled_from([0, 1, 2, 3]), label="max_backlog")
     cfg = config(max_rounds=rounds, max_in_flight=width, max_backlog=backlog)
     # any admission limit an operator may set, up to the attempts the run may hold open
-    limit = data.draw(st.integers(1, width + cfg.backlog), label="admission limit")
+    limit = data.draw(st.integers(1, cfg.admission_limit), label="admission limit")
     play(cfg, steps, input_pending=input_pending, limit=limit)
 
 

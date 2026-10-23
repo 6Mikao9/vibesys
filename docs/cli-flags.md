@@ -88,9 +88,10 @@ slot to new work, so planning and implementing go on while measurements queue.
 A parked turn resumes only once an agent slot is free, and a new workstream's
 agents start only once its workspace opened and an agent slot is free, so a
 workstream waiting for admission never holds the slot a parked turn needs.
-`--max-backlog K` caps how many workstreams park at once (default: every
-waiting one, up to 32); `--max-backlog 0` keeps each agent slot held until its
-workstream ends.
+`--max-backlog K` lets up to K workstreams park at once, each holding one more
+attempt than `--max-in-flight` (default 0: every agent slot is held until its
+workstream ends, and the run holds `--max-in-flight` attempts at once, whatever
+`--max-rounds` is).
 
 A dynamic **round** is the durable result of an implementation workstream
 recorded under a hypothesis. Profile and merge workstreams still appear in the

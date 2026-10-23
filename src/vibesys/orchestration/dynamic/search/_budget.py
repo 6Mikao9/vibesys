@@ -3,9 +3,11 @@
 The run schedules `max_rounds * max_in_flight` workstreams, and each is one admitted attempt.
 Agents work in at most `max_in_flight` of them at once; a parked one (waiting for its trusted
 measurement, or in a turn suspended on its evaluations) keeps its attempt open without an agent,
-so core admits up to `max_in_flight + backlog` attempts (`RunRecord.parked`) and new work runs
-beside the parked. That is throughput, not liveness: the search lends an agent slot only to an
-admitted attempt (`RunRecord.unseated`), so any admission limit of 1 or more completes the run.
+so core admits up to `max_in_flight + max_backlog` attempts (`DynamicConfig.admission_limit`,
+`RunRecord.parked`) and new work runs beside the parked. The backlog defaults to none, so the
+limit is the width the operator asked for and the budget never moves it. That is throughput, not
+liveness: the search lends an agent slot only to an admitted attempt (`RunRecord.unseated`), so
+any admission limit of 1 or more completes the run.
 Core enforces the numbers; this module is the one place that derives them from what the search
 does, so a change to a role's corrections or to the planner's bounds changes the budget with it.
 """
@@ -50,9 +52,7 @@ def budget(config: DynamicConfig) -> RunBudget:
     return RunBudget(
         attempts=starts,
         turns=(starts + 1) * planning + starts * per_workstream + outlining,
-        # the strategy bounds the agents at work; core admits the work started beside the parked
-        # attempts, so it runs while they wait (a lower limit only queues it)
-        parallel=max(config.max_in_flight, min(config.max_in_flight + config.backlog, starts)),
+        parallel=config.admission_limit,
         refunds=starts,
         adoption_rounds=ADOPTION_ROUNDS,
     )

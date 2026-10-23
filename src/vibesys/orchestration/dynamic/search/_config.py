@@ -8,7 +8,7 @@ running the search again with the same config and the same events reproduces eve
 
 from typing import Annotated, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from vibesys.orchestration.dynamic.search._queue import PickPolicy
 from vibesys.orchestration.dynamic.search._steps import Outline, PlanMode
@@ -36,12 +36,13 @@ class DynamicConfig(Value):
     evaluation executor admits at once, which the launch fills in (`DynamicLaunch.search_config`);
     1 when no launch did. More slots than the executor admits would dispatch a measurement that
     waits in the executor's queue while its deadline runs."""
-    max_backlog: Annotated[int, Field(ge=0, le=MAX_WIDTH)] | None = None
-    """Workstreams whose candidate waits for, or holds, an evaluation slot without holding one of
-    the ``max_in_flight`` agent slots, so new work starts while measurements wait. Past it, a
-    waiting workstream keeps its agent slot, so no new work starts until a measurement ends.
-    None, the default: every waiting workstream parks, within the run's work budget. 0 keeps
-    every agent slot held until its workstream ends, so the run serializes on the measurements."""
+    max_backlog: Annotated[int, Field(ge=0, le=MAX_WIDTH)] = 0
+    """Workstreams that may park: their candidate waits for, or holds, an evaluation slot without
+    holding one of the ``max_in_flight`` agent slots, so new work starts while measurements wait.
+    0, the default, keeps every agent slot held until its workstream ends, so the run holds
+    ``max_in_flight`` workstreams in all and serializes on the measurements. Parked workstreams
+    stay admitted attempts, so each one raises the run's admission limit by one
+    (`admission_limit`): the limit is the sum of these two settings and never follows the budget."""
     pick: PickPolicy = "newest"
     """Which waiting candidate a free evaluation slot measures: ``newest`` (the latest submitted),
     or ``ranked`` (the orchestrator's order, then the newest)."""
@@ -62,6 +63,12 @@ class DynamicConfig(Value):
     every step is done, to explore from there."""
     plan: Outline | None = None
     """The task's plan (its ``[plan]`` table); read only when ``mode`` is ``follow_plan``."""
+
+    @field_validator("max_backlog", mode="before")
+    @classmethod
+    def _unset_backlog_is_none(cls, value: object) -> object:
+        """A descriptor recorded before 0 was the default spells it ``null`` (it meant: no ceiling)."""
+        return 0 if value is None else value
 
     @model_validator(mode="after")
     def _a_plan_to_follow(self) -> Self:
@@ -84,9 +91,13 @@ class DynamicConfig(Value):
         return self.evaluation_slots or 1
 
     @property
-    def backlog(self) -> int:
-        """Workstreams that may park: no additional ceiling unless explicitly configured."""
-        return self.start_budget if self.max_backlog is None else self.max_backlog
+    def admission_limit(self) -> int:
+        """Attempts core admits at once: the agent slots and the parked beside them, within the budget.
+
+        The one place this is derived. The operator sets the two terms; the budget
+        (`start_budget`) only caps it, so raising ``max_rounds`` never raises it.
+        """
+        return min(self.max_in_flight + self.max_backlog, self.start_budget)
 
     @property
     def start_budget(self) -> int:

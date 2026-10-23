@@ -504,8 +504,7 @@ class RunRecord:
 
         These are the earliest to wait, up to the run's backlog; any later one keeps its slot.
         """
-        backlog = self.budget if self.config.max_backlog is None else self.config.max_backlog
-        return frozenset(list(self.waits)[:backlog])
+        return frozenset(list(self.waits)[: self.config.max_backlog])
 
     @property
     def working(self) -> tuple[WorkstreamStart, ...]:
