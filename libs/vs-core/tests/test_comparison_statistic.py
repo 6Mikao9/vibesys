@@ -18,7 +18,7 @@ import math
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -271,6 +271,7 @@ def test_a_measurement_without_a_known_direction_or_a_base_is_not_compared(
 
 
 @pytest.mark.regression
+@example(ratio=0.57, direction="min")
 @given(
     ratio=st.floats(min_value=0.0001, max_value=0.8, allow_nan=False),
     direction=st.sampled_from(("max", "min")),
@@ -289,6 +290,7 @@ def test_one_run_a_side_and_no_declared_noise_still_decide_a_large_effect(
 
 
 @pytest.mark.regression
+@example(runs=[3.0, 3.0], direction="max")
 @given(
     runs=st.lists(VALUES, min_size=2, max_size=6),
     direction=st.sampled_from(("max", "min")),

@@ -15,6 +15,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ValidationError
 
+from vibesys.orchestration.dynamic.models import hardware_limit_bound
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.orchestration.evolve.search.api import evolve
 from vibesys.orchestration.issue_queue.models import IssuePerfEvalResult, PerfMetrics
@@ -45,7 +46,7 @@ _ROLES: tuple[Role, ...] = tuple(
 )
 
 _Schema = dict[str, Any]
-_DEPTH = 4
+_DEPTH = 5
 _TREND_FIELDS = (
     "throughput_trend",
     "latency_trend",
@@ -158,6 +159,22 @@ def _perf_evaluations(draw: st.DrawFn, schema: _Schema, defs: _Schema) -> _Schem
     return value
 
 
+def _with_hardware_limits(value: object) -> object:
+    """``value`` whose every ``bounds`` list is the one hardware-limit bound a planner must state.
+
+    A planner reply is valid only when its bounds name a hardware limit with its assumptions,
+    which independent random bounds almost never do: the bound is built, not filtered for.
+    """
+    if isinstance(value, list):
+        return [_with_hardware_limits(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    found = {key: _with_hardware_limits(item) for key, item in value.items()}
+    if isinstance(found.get("bounds"), list):
+        found["bounds"] = [hardware_limit_bound().model_dump(mode="json")]
+    return found
+
+
 def _replies(model: type[BaseModel]) -> st.SearchStrategy[BaseModel]:
     """Valid replies of ``model``: schema-shaped JSON the model's own validators then accept."""
     schema = model.model_json_schema()
@@ -167,8 +184,10 @@ def _replies(model: type[BaseModel]) -> st.SearchStrategy[BaseModel]:
         if model is IssuePerfEvalResult
         else _instances(schema, defs)
     )
-    return shaped.filter(lambda value: _accepts(model, value)).map(
-        lambda value: model.model_validate_json(json.dumps(value))
+    return (
+        shaped.map(_with_hardware_limits)
+        .filter(lambda value: _accepts(model, value))
+        .map(lambda value: model.model_validate_json(json.dumps(value)))
     )
 
 
