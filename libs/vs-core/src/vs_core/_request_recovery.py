@@ -6,6 +6,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 from . import _host_epochs, _wait_clock
+from ._executor_lifetime import ExecutorLifetime, executor_lifetime
 from ._failure_routing import FailureHearer, failure_hearer
 from ._measurements import cancel_settled
 from ._proofs import (
@@ -726,8 +727,26 @@ _VERDICT: Mapping[Settlement, Resolution] = MappingProxyType(
         "unknown": "unknown",
         "terminal": "terminal",
         "blocked": "blocked",
+        # Core ended the record itself, and its owner hears of it as of any ended record.
+        "lost": "terminal",
     }
 )
+
+
+def _instance_replaced(record: RequestRecord, epoch: int) -> bool:
+    """Whether the record's executor is a host instance that is gone.
+
+    An agent session and its turns are owned by the host instance that dispatched them
+    (`executor_lifetime`). That instance is gone once a later host epoch is current: a resume
+    holds the run's exclusive host lock and ends the agents the dead host left before the new
+    host dispatches anything. A request never dispatched has no executor yet.
+    """
+    return (
+        executor_lifetime(record.request) is ExecutorLifetime.INSTANCE
+        and record.phase != RequestPhase.PREPARED
+        and record.dispatched_in is not None
+        and record.dispatched_in < epoch
+    )
 
 
 def _settle_unanswered(
@@ -735,16 +754,19 @@ def _settle_unanswered(
     context: RecordsContext,
     barrier: RecoveryBarrier,
     sent: frozenset[RequestId],
-) -> tuple[RecordsState, RecoveryBarrier]:
+) -> tuple[AreaChange[RecordsState], RecoveryBarrier]:
     """Settle every pending check that nothing is left to answer.
 
     The inspections about its target have all ended and no child job or session can move it:
     waiting more would hold recovery open in silence. The policy is `settlement`; a ``resend``
-    puts the record back to PREPARED, which the check then reads as safe to dispatch. Only
-    ``unknown`` (a result that is discarded) settles at once: any other verdict about an open
-    record with a limit waits for that limit, which ends the record and blocks its check.
+    puts the record back to PREPARED, which the check then reads as safe to dispatch, and a
+    ``lost`` ends the record now (`_end_record`). Only ``unknown`` (a result that is discarded)
+    and the verdicts of a request whose executor is a gone host instance settle at once: any
+    other verdict about an open record with a limit waits for that limit, which ends the record
+    and blocks its check.
     """
     checks = list(barrier.checks)
+    consequences = AreaChange(state=state)
     for index, check in enumerate(checks):
         record = state.record(check.target)
         if check.resolution != "pending" or record is None:
@@ -753,6 +775,7 @@ def _settle_unanswered(
         # The target itself answers nothing: its host is dead, and it is not dispatched yet.
         if subjects or any(request != check.target for request in requests):
             continue
+        gone = _instance_replaced(record, barrier.epoch)
         verdict = settlement(
             record,
             inspection=_inspection_of(state, check),
@@ -761,16 +784,29 @@ def _settle_unanswered(
                 for child in state.children
             ),
             resendable=_prepared_episode(record, context),
+            executor_gone=gone,
         )
-        if verdict != "unknown" and not _unbounded(state, context, record):
+        if verdict != "unknown" and not gone and not _unbounded(state, context, record):
             continue  # its own limit ends it when that passes, as it ends any open record
         if verdict == "resend" and record.phase != RequestPhase.PREPARED:
             state = _replace_record(
                 state,
                 resent(record, context.run.now_at, context.run.limits.reconciliation_bound),
             )
+        if verdict == "lost":
+            ended = _end_record(state, context, record, FailureReason.LOST)
+            state = ended.state
+            consequences = AreaChange(
+                state=state,
+                signals=(*consequences.signals, *ended.signals),
+                requests=(*consequences.requests, *ended.requests),
+                events=(*consequences.events, *ended.events),
+            )
         checks[index] = check.model_copy(update={"resolution": _VERDICT[verdict], "wait": None})
-    return state, barrier.model_copy(update={"checks": tuple(checks)})
+    return (
+        consequences.model_copy(update={"state": state}),
+        barrier.model_copy(update={"checks": tuple(checks)}),
+    )
 
 
 def _owner_sessions(
@@ -836,7 +872,8 @@ def _finish(
             )
         }
     )
-    state, barrier = _settle_unanswered(state, context, barrier, sent_ids)
+    settled, barrier = _settle_unanswered(state, context, barrier, sent_ids)
+    state = settled.state
     barrier = barrier.model_copy(
         update={
             "checks": tuple(
@@ -862,7 +899,12 @@ def _finish(
         and (state.recovery.phase != RecoveryPhase.READY or state.recovery.epoch != barrier.epoch)
         else ()
     )
-    return AreaChange(state=state.model_copy(update={"recovery": barrier}), signals=signals)
+    return AreaChange(
+        state=state.model_copy(update={"recovery": barrier}),
+        signals=(*settled.signals, *signals),
+        requests=settled.requests,
+        events=settled.events,
+    )
 
 
 def _restart_command(
@@ -1018,9 +1060,15 @@ def _start(
             and _resolution(record, context) not in ("terminal", "reattached")
             else None
         )
-        if resolution == "pending" and _blocked_before(barrier, record):
+        if (
+            resolution == "pending"
+            and _blocked_before(barrier, record)
+            and not _instance_replaced(record, event.epoch)
+        ):
             # The dead host's recovery already blocked on this record; a restart learns
-            # nothing new by itself, so recovery stays blocked until an answer settles it.
+            # nothing new by itself, so recovery stays blocked until an answer settles it. A
+            # request whose executor was a host instance is settled by that instance being
+            # gone, which this restart knows however the earlier recovery ended.
             resolution = "blocked"
         checks.append(
             RecoveryCheck(
@@ -1043,7 +1091,7 @@ def _start(
         context,
         tuple(requests),
     )
-    return change.model_copy(update={"requests": tuple(requests)})
+    return change.model_copy(update={"requests": (*requests, *change.requests)})
 
 
 def _blocked_before(barrier: RecoveryBarrier, record: RequestRecord) -> bool:
@@ -1402,7 +1450,10 @@ def _observe(
         updated, barrier.model_copy(update={"checks": tuple(checks)}), context, requests
     )
     return change.model_copy(
-        update={"signals": (*release_signals, *change.signals), "requests": requests}
+        update={
+            "signals": (*release_signals, *change.signals),
+            "requests": (*requests, *change.requests),
+        }
     )
 
 
@@ -1509,43 +1560,21 @@ def _awaiting_report(state: RecordsState, record: RequestRecord) -> float | None
     return inspection.until.at
 
 
-def _deadline(
-    state: RecordsState, context: RecordsContext, event: ReconciliationDeadline
+def _end_record(
+    state: RecordsState,
+    context: RecordsContext,
+    record: RequestRecord,
+    reason: FailureReason,
+    bound_at: float | None = None,
 ) -> AreaChange[RecordsState]:
-    record = _deadline_target(state, event.request_id)
-    now_at = max(context.run.now_at, event.now_at)
-    _validate_children(state)
-    unresolved_children = any(
-        record.request_id in child.source_requests and not _child_released(child, state)
-        for child in state.children
-    )
+    """End an open *record* for *reason*, with everything its ending sends and tells.
+
+    The record becomes BLOCKED (or stays as it is when it already concluded), a lost turn is
+    cancelled, the owner hears the failure, jobs the record started are terminated and any
+    resource it still holds is cancelled. A fence for the record goes out once, as a
+    ``BlockRequest``. Recovery's barrier is the caller's.
+    """
     resolution = _resolution(record, context)
-    # A passed limit always ends a record that still owes a result, whatever the executor is
-    # doing (a reattached live one included): the shell cancels its flight at the same
-    # instant. A record already proven terminal, or one that already concluded and has no
-    # children to release, keeps its result. Ending moves the record to BLOCKED, which is
-    # not open, so the deadline cannot be raised for it again. One exception: a record the
-    # restarted host is still asking the executor about (see ``_awaiting_report``) waits for
-    # the answer or the inspection's bound, because the limit may have passed while the host
-    # was down and the far side may have finished in time.
-    timed = event.reason == FailureReason.TIMED_OUT
-    # A limit counts from the job's start, and a job may wait in its queue only for the
-    # queue budget (``_wait_clock``): the bound says when, and which of the two ended it.
-    bound = _wait_clock.record_bound(record, context.evaluation, context.run, state.hosts)
-    reason = (
-        FailureReason.QUEUE_BUDGET_SPENT
-        if timed and bound.by == WaitEnd.QUEUE_BUDGET
-        else event.reason
-    )
-    concluded = not is_open(record) and not unresolved_children
-    asked_until = _awaiting_report(state, record)
-    if (
-        (timed and now_at < bound.at)
-        or (timed and asked_until is not None and now_at < asked_until)
-        or (resolution == "terminal" and not unresolved_children)
-        or (timed and concluded and resolution == "reattached")
-    ):
-        return AreaChange(state=state)
     block_id = RequestId(root=f"recovery:block:{state.recovery.epoch}:{record.request_id.root}")
     previous_block = state.record(block_id)
     if previous_block is not None:
@@ -1571,7 +1600,7 @@ def _deadline(
     state, events = _end_open_record(
         state,
         record,
-        _failure(record, reason, bound.at),
+        _failure(record, reason, bound_at if bound_at is not None else record.until.at),
         lost=bool(signals),
         first=previous_block is None,
     )
@@ -1616,20 +1645,72 @@ def _deadline(
         within(cancellation, context.run.limits.cancellation_bound)
         for cancellation in _pending_cancellations(state, tuple(cancellations))
     )
-    barrier = state.recovery
-    if barrier.phase != RecoveryPhase.READY:
-        # Recovery is gating the run: record the blocked check and inspect once more. A
-        # bound passing while the run is live (an executor answered and went silent) blocks
-        # the record for the strategy to handle and leaves scheduling open.
-        barrier, inspection = _deadline_barrier(state, context, record)
-        if inspection is not None:
-            requests.append(_probe(inspection, context))
+    return AreaChange(state=state, signals=signals, requests=tuple(requests), events=events)
 
+
+def _deadline(
+    state: RecordsState, context: RecordsContext, event: ReconciliationDeadline
+) -> AreaChange[RecordsState]:
+    record = _deadline_target(state, event.request_id)
+    now_at = max(context.run.now_at, event.now_at)
+    _validate_children(state)
+    unresolved_children = any(
+        record.request_id in child.source_requests and not _child_released(child, state)
+        for child in state.children
+    )
+    resolution = _resolution(record, context)
+    # A passed limit always ends a record that still owes a result, whatever the executor is
+    # doing (a reattached live one included): the shell cancels its flight at the same
+    # instant. A record already proven terminal, or one that already concluded and has no
+    # children to release, keeps its result. Ending moves the record to BLOCKED, which is
+    # not open, so the deadline cannot be raised for it again. One exception: a record the
+    # restarted host is still asking the executor about (see ``_awaiting_report``) waits for
+    # the answer or the inspection's bound, because the limit may have passed while the host
+    # was down and the far side may have finished in time.
+    timed = event.reason == FailureReason.TIMED_OUT
+    # A limit counts from the job's start, and a job may wait in its queue only for the
+    # queue budget (``_wait_clock``): the bound says when, and which of the two ended it.
+    bound = _wait_clock.record_bound(record, context.evaluation, context.run, state.hosts)
+    reason = (
+        FailureReason.QUEUE_BUDGET_SPENT
+        if timed and bound.by == WaitEnd.QUEUE_BUDGET
+        else event.reason
+    )
+    concluded = not is_open(record) and not unresolved_children
+    asked_until = _awaiting_report(state, record)
+    if (
+        (timed and now_at < bound.at)
+        or (timed and asked_until is not None and now_at < asked_until)
+        or (resolution == "terminal" and not unresolved_children)
+        or (timed and concluded and resolution == "reattached")
+    ):
+        return AreaChange(state=state)
+    ended = _end_record(state, context, record, reason, bound.at)
+    barrier = ended.state.recovery
+    if barrier.phase == RecoveryPhase.READY:
+        return ended
+    if _instance_replaced(record, barrier.epoch):
+        # Its executor is a gone host instance: no answer is owed, so the check settles by that
+        # fact (`settlement`) instead of blocking recovery on a record nobody can answer for.
+        settled = _finish(ended.state, barrier, context)
+        return AreaChange(
+            state=settled.state,
+            signals=(*ended.signals, *settled.signals),
+            requests=(*ended.requests, *settled.requests),
+            events=(*ended.events, *settled.events),
+        )
+    # Recovery is gating the run: record the blocked check and inspect once more. A
+    # bound passing while the run is live (an executor answered and went silent) blocks
+    # the record for the strategy to handle and leaves scheduling open.
+    barrier, inspection = _deadline_barrier(ended.state, context, record)
+    requests = (
+        ended.requests if inspection is None else (*ended.requests, _probe(inspection, context))
+    )
     return AreaChange(
-        state=state.model_copy(update={"recovery": barrier}),
-        signals=signals,
-        requests=tuple(requests),
-        events=events,
+        state=ended.state.model_copy(update={"recovery": barrier}),
+        signals=ended.signals,
+        requests=requests,
+        events=ended.events,
     )
 
 
