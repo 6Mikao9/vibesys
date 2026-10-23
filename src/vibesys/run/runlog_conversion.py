@@ -355,6 +355,25 @@ def _convert_revision(
     return result
 
 
+def _unconvertible(journal: Path) -> ConversionResult | None:
+    """Why a journal has nothing to convert: it records no event, or predates the run trace."""
+    first = None
+    has_trace = False
+    for _, event in _events(journal):
+        if first is None:
+            first = event
+        has_trace |= event.type in (
+            CoreEventType.SPAN_STARTED,
+            CoreEventType.SPAN_UPDATED,
+            CoreEventType.SPAN_ENDED,
+        )
+    if first is None:
+        return ConversionResult(ConversionStatus.SKIPPED, "journal has no events")
+    if not has_trace:
+        return ConversionResult(ConversionStatus.SKIPPED, "journal predates the run trace")
+    return None
+
+
 def _convert_stopped(
     directory: Path,
     run_id: str,
@@ -386,20 +405,8 @@ def _convert_stopped(
     if not journal.exists():
         return ConversionResult(ConversionStatus.SKIPPED, "journal is missing")
     source_revision = journal.stat()
-    first = None
-    has_trace = False
-    for _, event in _events(journal):
-        if first is None:
-            first = event
-        has_trace |= event.type in (
-            CoreEventType.SPAN_STARTED,
-            CoreEventType.SPAN_UPDATED,
-            CoreEventType.SPAN_ENDED,
-        )
-    if first is None:
-        return ConversionResult(ConversionStatus.SKIPPED, "journal has no events")
-    if not has_trace:
-        return ConversionResult(ConversionStatus.SKIPPED, "journal predates the run trace")
+    if (unconvertible := _unconvertible(journal)) is not None:
+        return unconvertible
     with TemporaryDirectory(prefix=f".convert-{run_id}-", dir=directory.parent.parent) as temporary:
         staged = Path(temporary) / "run.log"
 

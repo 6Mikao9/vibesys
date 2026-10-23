@@ -42,13 +42,13 @@ async function recoveryTimes(random: Seeded): Promise<{longest: number; settled:
   const actor = createActor(
     gatewayMachine.provide({
       actors: {
-        dial: fromPromise(async () => {
-          const outcome = script[next++ % script.length];
-          if (outcome === 'hang') return new Promise<never>(() => {});
-          return outcome === 'ok'
-            ? {ok: true as const}
-            : {ok: false as const, fatal: false, error: 'link lost'};
-        }),
+        dial: fromPromise<{ok: true} | {ok: false; fatal: boolean; error: string}, void>(
+          async () => {
+            const outcome = script[next++ % script.length];
+            if (outcome === 'hang') return new Promise<never>(() => {});
+            return outcome === 'ok' ? {ok: true} : {ok: false, fatal: false, error: 'link lost'};
+          },
+        ),
       },
     }),
     {clock: clockFrom(clock.scheduleTimeout)},

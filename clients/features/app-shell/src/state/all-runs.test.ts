@@ -603,8 +603,6 @@ test('property: a link dropped at any point while reading converges to the host 
     // No card says "can't read run state" or "reading" once the host answers.
     const rows = dashboardRows(state, CLOCK);
     expect(rows.length).toBeGreaterThan(0);
-    expect(
-      rows.filter(each => each.row.problem !== null || each.row.result === 'reading…'),
-    ).toEqual([]);
+    expect(rows.filter(each => each.row.problem !== null || each.row.digest === null)).toEqual([]);
   }
 });
