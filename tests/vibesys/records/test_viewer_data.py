@@ -357,3 +357,69 @@ def test_list_and_page_token_totals_share_the_event_source(
         assert summary.consume(wire)
         state = map_event(state, e.CoreEvent.model_validate_json(wire)).state
         assert_usage_sources(state, summary)
+
+
+def turn_input_tokens(state: MappingState) -> dict[str, int | None]:
+    totals: dict[str, int | None] = {}
+    for key, value in state.spans:
+        span = p.Span.from_binary(value)
+        if (
+            span.label is not None
+            and span.label.kind == "agent_turn"
+            and span.label.attrs is not None
+        ):
+            usage = p.AgentTurnAttrs.from_binary(span.label.attrs.value).usage
+            totals[key] = None if usage is None or not usage.has_field("input") else usage.input
+    return totals
+
+
+@pytest.mark.regression
+@given(
+    sources=st.dictionaries(
+        st.integers(1000, 1100),
+        st.tuples(st.integers(0, 2), st.integers(0, 100000)),
+        min_size=1,
+        max_size=6,
+    ),
+    deliveries=st.lists(st.integers(0, 5), min_size=1, max_size=14),
+    restart_at=st.integers(0, 14),
+)
+@example(sources={1000: (0, 100)}, deliveries=[0, 0], restart_at=1)
+def test_usage_counts_each_source_event_once_however_it_is_delivered(
+    usage_source: tuple[MappingState, SummaryState, e.CoreEvent, e.CoreEvent],
+    sources: dict[int, tuple[int, int]],
+    deliveries: list[int],
+    restart_at: int,
+) -> None:
+    """Repeated, reordered and replayed deliveries, and a restart from a saved state, add once."""
+    state, _, template, finish = usage_source
+    ordered = sorted(sources.items())
+
+    def event(sequence: int, turn: int, tokens: int) -> e.CoreEvent:
+        return template.model_copy(
+            update={
+                "sequence": sequence,
+                "timestamp": finish.timestamp,
+                "execution_id": None,
+                "data": e.TurnUsageData(span_id=f"op:turn-{turn}", input_tokens=tokens),
+            }
+        )
+
+    stream = [ordered[index % len(ordered)] for index in deliveries]
+    stream += ordered  # every source arrives at least once
+    saved = state
+    for position, (sequence, (turn, tokens)) in enumerate(stream):
+        if position == restart_at:
+            saved = state
+        state = map_event(state, event(sequence, turn, tokens)).state
+    # A restart resumes from the saved state and sees the whole stream again, as a replay does.
+    for sequence, (turn, tokens) in stream:
+        saved = map_event(saved, event(sequence, turn, tokens)).state
+    expected: dict[str, int] = {}
+    for _, (turn, tokens) in ordered:
+        expected[f"op:turn-{turn}"] = expected.get(f"op:turn-{turn}", 0) + tokens
+    base = turn_input_tokens(usage_source[0])
+    for each in (state, saved):
+        totals = turn_input_tokens(each)
+        for span, total in expected.items():
+            assert totals[span] == total + (base.get(span) or 0)

@@ -31,6 +31,7 @@ class MappingState:
     waits: tuple[tuple[str, str], ...] = ()
     intents: tuple[tuple[str, bytes], ...] = ()
     metric_values: tuple[tuple[tuple[str, str | None], tuple[float, float]], ...] = ()
+    usage_sources: tuple[tuple[str, int], ...] = ()
     ending: bytes | None = None
     pending: tuple[bytes, ...] = ()
 

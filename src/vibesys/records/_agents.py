@@ -121,6 +121,13 @@ def usage(projection: Projection) -> None:
     if not isinstance(data, e.TurnUsageData):
         message = "turn_usage_recorded requires TurnUsageData"
         raise TypeError(message)
+    # A source event counts once: its sequence names it, however often it is delivered or replayed.
+    # An unsequenced event (0) has no identity, so each delivery of it is a distinct observation.
+    source = (owner(projection), projection.event.sequence)
+    if source[1] > 0:
+        if source in projection.usage_sources:
+            return
+        projection.usage_sources.add(source)
     span, attrs = turn(projection)
     attrs.ended_at = p.Timestamp.from_datetime(projection.event.timestamp)
     increment = p.TokenUsage(

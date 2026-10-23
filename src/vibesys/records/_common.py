@@ -48,6 +48,7 @@ class Projection:
         self.waits = dict(state.waits)
         self.intents = dict(state.intents)
         self.metric_values = dict(state.metric_values)
+        self.usage_sources = set(state.usage_sources)
         self.records: list[p.Record] = []
         self.blobs: list[BlobWrite] = []
         self.streams: list[StreamWrite] = []
@@ -190,6 +191,7 @@ class Projection:
             waits=tuple(self.waits.items()),
             intents=tuple(self.intents.items()),
             metric_values=tuple(self.metric_values.items()),
+            usage_sources=tuple(sorted(self.usage_sources)),
             ending=self.ending,
             pending=tuple(self.pending),
         )

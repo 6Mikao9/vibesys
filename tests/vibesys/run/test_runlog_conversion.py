@@ -26,6 +26,7 @@ from vs_proto.api import (
     API_SCHEMA_HASH,
     RUN_LOG_MAGIC,
     STORE_SCHEMA_HASH,
+    AgentTurnAttrs,
     EpochStarted,
     Keyframe,
     LegacyEvent,
@@ -571,3 +572,80 @@ def test_typed_tee_explicit_commit_publishes_pending_checkpoint(
         assert not checkpoint.exists()
         tee.commit()
         assert Keyframe.from_binary(checkpoint.read_bytes()).through_seq == records[-1].seq
+
+
+def usage_journal(rows: list[tuple[int, int]]) -> list[bytes]:
+    """A retained journal of one turn whose usage lines are (source sequence, input tokens)."""
+    at = "2026-01-01T00:00:00Z"
+    span = {
+        "id": "op:turn-a",
+        "parent": None,
+        "type": "operation",
+        "name": "ask",
+        "status": "running",
+        "started_at": 0,
+        "label": {
+            "kind": "agent_turn",
+            "attrs_json": json.dumps({"agent": "turn-a", "role": "implementer"}),
+        },
+    }
+    head = [
+        {
+            "sequence": 1,
+            "type": "run_started",
+            "data": {"kind": "run_started", "outer_loop": "test", "input": "input"},
+        },
+        {"sequence": 2, "type": "span_started", "data": {"kind": "span_started", "span": span}},
+    ]
+    usage = [
+        {
+            "sequence": sequence,
+            "type": "turn_usage_recorded",
+            "data": {"kind": "turn_usage_recorded", "span_id": "op:turn-a", "input_tokens": tokens},
+        }
+        for sequence, tokens in rows
+    ]
+    end = {"sequence": 1000, "type": "run_finished", "data": None}
+    return [
+        json.dumps({"run_id": "run-1", "timestamp": at, **row}).encode() + b"\n"
+        for row in [*head, *usage, end]
+    ]
+
+
+def converted_input_tokens(project: Project) -> int | None:
+    latest: dict[str, AgentTurnAttrs] = {}
+    with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
+        for record in RunLogReader(stream):
+            if record.body is None or record.body.field != "span":
+                continue
+            span = record.body.value.span
+            if span is not None and span.label is not None and span.label.attrs is not None:
+                latest[span.id] = AgentTurnAttrs.from_binary(span.label.attrs.value)
+    usage = latest["op:turn-a"].usage
+    return None if usage is None else usage.input
+
+
+@given(
+    sources=st.dictionaries(st.integers(3, 900), st.integers(1, 10_000), min_size=1, max_size=5),
+    deliveries=st.lists(st.integers(0, 4), min_size=1, max_size=12),
+)
+@example(sources={3: 100}, deliveries=[0, 0])
+def test_conversion_counts_a_repeated_source_usage_line_once(
+    sources: dict[int, int], deliveries: list[int]
+) -> None:
+    """Whatever lines repeat or arrive late, each source sequence adds its tokens once."""
+    order = list(sources.items())
+    rows = [order[index % len(order)] for index in deliveries] + order
+    expected = sum(sources.values())
+    with TemporaryDirectory() as directory:
+        task = Path(directory)
+        root = task / "project"
+        root.mkdir()
+        with pytest.MonkeyPatch.context() as env:
+            env.setenv("VIBESYS_STATE_HOME", str(task / "home"))
+            project = Project.open(root)
+            journal = Project.event_journal_path_for(root, "run-1")
+            journal.parent.mkdir(parents=True)
+            journal.write_bytes(b"".join(usage_journal(rows)))
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+            assert converted_input_tokens(project) == expected
