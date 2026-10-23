@@ -592,7 +592,9 @@ export function rehydrateCoreState(state: CoreState): CoreState {
  * a new status in the protocol is a compile error here rather than a silent
  * `false`.
  */
-export function hasRunEnded(state: CoreState): boolean {
+export function hasRunEnded(
+  state: CoreState,
+): state is CoreState & {readonly status: EndedRunStatus} {
   return endedRunStatus(state.status) !== null;
 }
 

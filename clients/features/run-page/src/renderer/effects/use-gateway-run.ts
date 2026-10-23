@@ -90,6 +90,7 @@ export function useGatewayRun(options: {
     snapshot,
     load: loadView(snapshot.context),
     retry: () => actor?.send({type: 'retry'}),
+    refreshWriter: () => actor?.send({type: 'refresh-writer'}),
     projectionError,
     route,
     zoom,

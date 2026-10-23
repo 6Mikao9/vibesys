@@ -1006,3 +1006,33 @@ describe('the header’s token figure', () => {
     );
   });
 });
+
+test('terminal session events supersede a stale live listing for every control', () => {
+  for (const status of ['completed', 'failed', 'stopped'] as const) {
+    const listed = fold(initial(), [
+      {type: 'record', record: {kind: 'live', run: server('running')}},
+    ]).state;
+    const core = reduceEvent(initialCoreState(), {
+      protocol_version: 1,
+      run_id: RUN.runId,
+      sequence: 1,
+      timestamp: '2026-10-21T00:00:00Z',
+      type: 'run_status_changed',
+      data: {kind: 'run_status_changed', status},
+    } as RunEvent);
+    if (listed.link.kind !== 'attaching') throw new Error('expected attach');
+    const attached = fold(listed, [
+      {type: 'attached', token: listed.link.token, error: null},
+    ]).state;
+    const ended = fold(attached, [{type: 'run-core', core}]).state;
+    expect(headerView(ended).pause.shown).toBe(false);
+    expect(headerView(ended).pauseNow.shown).toBe(false);
+    expect(endedView(ended)?.resume).toBe('Resume');
+    expect(
+      fold(ended, [{type: 'pause'}, {type: 'ask-pause-now'}, {type: 'confirm-pause-now'}]).requests,
+    ).toEqual([]);
+    expect(fold(ended, [{type: 'resume-ended'}]).requests).toEqual([
+      {kind: 'resume-ended', fromRound: null},
+    ]);
+  }
+});

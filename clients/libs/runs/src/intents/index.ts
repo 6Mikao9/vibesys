@@ -5,7 +5,10 @@ import {
   HostCallRequestSchema,
   HostCallResponseSchema,
   HostService,
+  IntentAction,
   type IntentState,
+  IntentStateSchema,
+  IntentStep,
   type PostIntentRequest,
   PostIntentRequestSchema,
   type PostIntentResponse,
@@ -13,12 +16,15 @@ import {
   RecordSchema,
   SteerMode,
   SteerTargetKind,
+  TailRequestSchema,
+  TailResponseSchema,
   TerminateRunOutcome,
 } from '@vibesys/proto';
+import type {RunIntentAction} from './controls.js';
 import {refusalMessage} from './refusal.js';
 
 export type {IntentState, PostIntentRequest, PostIntentResponse} from '@vibesys/proto';
-export {IntentStep} from '@vibesys/proto';
+export {IntentAction, IntentStep} from '@vibesys/proto';
 
 export const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
 export const INTENT_TAIL_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;
@@ -56,7 +62,7 @@ export function addressedIntent(
 /** The visible controls' defaults. The host surface accepts every typed intent. */
 export function runIntent(
   identity: RunReference & Pick<PostIntentRequest, 'requestId' | 'expectedEpoch'>,
-  action: 'pause' | 'pauseNow' | 'steer',
+  action: RunIntentAction,
   text = '',
 ): PostIntentRequest {
   switch (action) {
@@ -73,8 +79,6 @@ export function runIntent(
       });
   }
 }
-
-export type RunIntentAction = Parameters<typeof runIntent>[1];
 
 /** Take ownership before a mutable generated request enters control state. */
 export function copyIntent(request: PostIntentRequest): PostIntentRequest {
@@ -170,14 +174,51 @@ export function intentAdmissionWarning(response: PostIntentResponse): string | n
   return [order, observation].filter(value => value !== null).join(' ');
 }
 
+export function intentTailRequest(runId: string): Uint8Array {
+  return toBinary(TailRequestSchema, create(TailRequestSchema, {runId}));
+}
+
+/** Writer position accompanies outcomes so earlier epochs remain history after a relaunch. */
+export type IntentOutcome = IntentState & {
+  readonly epoch?: bigint;
+  readonly sequence?: bigint;
+  readonly source?: 'epoch-started';
+};
+
+export function intentTailResponse(bytes: Uint8Array): readonly IntentOutcome[] {
+  return intentOutcomes(fromBinary(TailResponseSchema, bytes).records);
+}
+
 /** Intent outcomes among records the run's one reader already delivered. */
-export function intentOutcomes(records: readonly Uint8Array[]): readonly IntentState[] {
+export function intentOutcomes(records: readonly Uint8Array[]): readonly IntentOutcome[] {
   return records.flatMap(bytes => {
     const record = fromBinary(RecordSchema, bytes);
-    return record.body.case === 'intent' ? [record.body.value] : [];
+    const position = {epoch: BigInt(record.epoch), sequence: record.seq};
+    if (record.body.case === 'intent') return [{...record.body.value, ...position}];
+    // A committed successor epoch confirms a relaunch even without an IntentState row.
+    if (record.body.case === 'epochStarted' && record.epoch > 1)
+      return [
+        {
+          ...create(IntentStateSchema, {
+            controlId: String(record.epoch),
+            action: IntentAction.RESUME,
+            step: IntentStep.APPLIED,
+          }),
+          ...position,
+          source: 'epoch-started' as const,
+        },
+      ];
+    return [];
   });
 }
 
+export {
+  type RunIntentAction,
+  relaunchTarget,
+  type WriterControls,
+  type WriterFacts,
+  writerControls,
+} from './controls.js';
 export {
   copyRelaunch,
   copyRelaunchObservation,
@@ -195,5 +236,5 @@ export {
   RunLiveness,
   relaunchLabel,
   relaunchRequest,
-  relaunchTarget,
+  sameRelaunchObservation,
 } from './relaunch.js';

@@ -20,8 +20,19 @@ const request = create(PostIntentRequestSchema, {
   intent: {case: 'pause', value: {}},
 });
 
+test('off starts neither reads nor writes, even when asked to send', () => {
+  const off = getNextSnapshot(
+    runIntentsMachine,
+    getInitialSnapshot(runIntentsMachine, {enabled: false}),
+    {type: 'send', request},
+  );
+  expect(off.value).toBe('disabled');
+  expect(off.children).toEqual({});
+  expect(off.context.entries).toEqual([]);
+});
+
 test('outcome before admission is never downgraded to pending', () => {
-  const initial = getInitialSnapshot(runIntentsMachine, {});
+  const initial = getInitialSnapshot(runIntentsMachine, {enabled: true});
   const sending = getNextSnapshot(runIntentsMachine, initial, {type: 'send', request});
   const applied = getNextSnapshot(runIntentsMachine, sending, {
     type: 'outcomes',
@@ -41,10 +52,11 @@ test('outcome before admission is never downgraded to pending', () => {
 });
 
 test('deadline retains the original request for an idempotent retry', () => {
-  const sending = getNextSnapshot(runIntentsMachine, getInitialSnapshot(runIntentsMachine, {}), {
-    type: 'send',
-    request,
-  });
+  const sending = getNextSnapshot(
+    runIntentsMachine,
+    getInitialSnapshot(runIntentsMachine, {enabled: true}),
+    {type: 'send', request},
+  );
   const timedOut = getNextSnapshot(runIntentsMachine, sending, {
     type: 'xstate.after.deadline.runIntents.active.sending',
   } as never);
@@ -57,11 +69,12 @@ test('deadline retains the original request for an idempotent retry', () => {
 test('model: requests are unique and operations and deadlines are owned', () => {
   checkMachine({
     machine: runIntentsMachine,
-    input: {},
+    input: {enabled: true},
     event: (random, live) =>
       random.pick([
         {type: 'send', request},
         {type: 'retry', requestId: 'r-1'},
+        {type: 'watchFailed', error: 'disconnected'},
         {type: 'outcomes', outcomes: []},
         ...live.operations
           .filter(operation => operation === 'post')
@@ -80,10 +93,11 @@ test('model: requests are unique and operations and deadlines are owned', () => 
 });
 
 test('an outcome stream failure does not change an in-flight admission', () => {
-  const sending = getNextSnapshot(runIntentsMachine, getInitialSnapshot(runIntentsMachine, {}), {
-    type: 'send',
-    request,
-  });
+  const sending = getNextSnapshot(
+    runIntentsMachine,
+    getInitialSnapshot(runIntentsMachine, {enabled: true}),
+    {type: 'send', request},
+  );
   const disconnected = getNextSnapshot(runIntentsMachine, sending, {
     type: 'xstate.error.actor.watch',
     error: new Error('stream failed'),
@@ -104,10 +118,11 @@ test('retry owns the original payload even if its caller edits the generated mes
     expectedEpoch: 1n,
     intent: {case: 'steer', value: {text: 'original guidance'}},
   });
-  const sending = getNextSnapshot(runIntentsMachine, getInitialSnapshot(runIntentsMachine, {}), {
-    type: 'send',
-    request: mutable,
-  });
+  const sending = getNextSnapshot(
+    runIntentsMachine,
+    getInitialSnapshot(runIntentsMachine, {enabled: true}),
+    {type: 'send', request: mutable},
+  );
   mutable.requestId = 'changed';
   if (mutable.intent.case === 'steer') mutable.intent.value.text = 'changed guidance';
   const timedOut = getNextSnapshot(runIntentsMachine, sending, {
@@ -122,10 +137,11 @@ test('retry owns the original payload even if its caller edits the generated mes
 });
 
 test('an undeclared ordered reader is visible without claiming application', () => {
-  const sending = getNextSnapshot(runIntentsMachine, getInitialSnapshot(runIntentsMachine, {}), {
-    type: 'send',
-    request,
-  });
+  const sending = getNextSnapshot(
+    runIntentsMachine,
+    getInitialSnapshot(runIntentsMachine, {enabled: true}),
+    {type: 'send', request},
+  );
   const admitted = getNextSnapshot(runIntentsMachine, sending, {
     type: 'xstate.done.actor.post',
     output: create(PostIntentResponseSchema, {requestId: 'r-1', orderedReader: false}),
@@ -143,10 +159,11 @@ test('process observations stay pending until a canonical control outcome arrive
     TerminateRunOutcome.OBSERVATION_UNKNOWN,
     TerminateRunOutcome.PROCESS_ABSENT,
   ]) {
-    const sending = getNextSnapshot(runIntentsMachine, getInitialSnapshot(runIntentsMachine, {}), {
-      type: 'send',
-      request,
-    });
+    const sending = getNextSnapshot(
+      runIntentsMachine,
+      getInitialSnapshot(runIntentsMachine, {enabled: true}),
+      {type: 'send', request},
+    );
     const output = create(PostIntentResponseSchema, {
       requestId: 'r-1',
       orderedReader: true,
@@ -186,4 +203,31 @@ test('process observations stay pending until a canonical control outcome arrive
     } as never);
     expect(late.context.warning).toBeNull();
   }
+});
+
+test('replaying writer outcomes includes Resume and requests posted in another window exactly once', () => {
+  let state = getInitialSnapshot(runIntentsMachine, {enabled: true});
+  const outcomes = [
+    create(IntentStateSchema, {
+      controlId: 'elsewhere-pause',
+      action: IntentAction.PAUSE,
+      step: IntentStep.APPLIED,
+    }),
+    create(IntentStateSchema, {
+      controlId: 'elsewhere-resume',
+      action: IntentAction.RESUME,
+      step: IntentStep.APPLIED,
+    }),
+  ];
+  for (const batch of [outcomes.slice(0, 1), outcomes, outcomes.slice(1)]) {
+    state = getNextSnapshot(runIntentsMachine, state, {type: 'outcomes', outcomes: batch});
+  }
+  expect(state.context.outcomes.map(row => [row.id, row.action, row.status])).toEqual([
+    ['elsewhere-pause', IntentAction.PAUSE, 'applied'],
+    ['elsewhere-resume', IntentAction.RESUME, 'applied'],
+  ]);
+  const resume = outcomes[1];
+  if (!resume) throw new Error('missing resume outcome');
+  resume.controlId = 'mutated';
+  expect(state.context.outcomes[1]?.id).toBe('elsewhere-resume');
 });

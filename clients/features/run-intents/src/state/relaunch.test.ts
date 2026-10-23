@@ -3,8 +3,47 @@ import {create} from '@bufbuild/protobuf';
 import {checkMachine} from '@vibesys/machine/testing';
 import {LifecycleSchema, RelaunchResponseSchema, RunLiveness} from '@vibesys/proto';
 import {relaunchRequest} from '@vibesys/runs/intents';
+import fc from 'fast-check';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
 import {relaunchMachine} from './index.js';
+
+test('property: equivalent writer observations are no-ops and old liveness cannot reopen an epoch', () => {
+  fc.assert(
+    fc.property(fc.integer({min: 1, max: 100}), fc.boolean(), (epoch, parked) => {
+      const lifecycle = create(LifecycleSchema, {
+        state: {case: parked ? 'parked' : 'running', value: {}},
+      });
+      const input = {
+        request: relaunchRequest('/project', 'run-1', BigInt(epoch)),
+        observation: {epoch: BigInt(epoch), lifecycle},
+      };
+      const initial = getInitialSnapshot(relaunchMachine, input);
+      const repeated = getNextSnapshot(relaunchMachine, initial, {
+        type: 'observe',
+        observation: input.observation,
+      });
+      expect(repeated.context).toBe(initial.context);
+      const newer = getNextSnapshot(relaunchMachine, repeated, {
+        type: 'liveness',
+        value: {epoch: BigInt(epoch + 1), value: RunLiveness.ALIVE},
+      });
+      const missing = getNextSnapshot(relaunchMachine, newer, {
+        type: 'liveness',
+        value: {epoch: 0n, value: RunLiveness.UNSPECIFIED},
+      });
+      expect(missing.context.liveness).toEqual({
+        epoch: BigInt(epoch + 1),
+        value: RunLiveness.UNSPECIFIED,
+      });
+      const late = getNextSnapshot(relaunchMachine, missing, {
+        type: 'liveness',
+        value: {epoch: BigInt(epoch), value: RunLiveness.ENDED},
+      });
+      expect(late.context.liveness).toEqual(missing.context.liveness);
+    }),
+    {numRuns: 80, seed: 253},
+  );
+});
 
 test('relaunch owns its request and cannot repeat an uncertain launch', () => {
   const request = relaunchRequest('/project', 'run-1', 1n);

@@ -9,7 +9,6 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {RunIntents} from './index.js';
 
-const noRecords = () => () => {};
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
 beforeAll(() => {
@@ -56,13 +55,13 @@ class FakeTransport implements GatewayBridge {
   }
 }
 
-test('Relaunch starts when observation becomes available and cancels when unmounted', async () => {
+test('Relaunch starts when observation becomes available and cancels when disabled', async () => {
   const bridge = new FakeTransport();
   const clock = new FakeClock();
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const render = (observed: boolean) =>
+  const render = (enabled: boolean, observed: boolean) =>
     act(async () =>
       root.render(
         <RunIntents
@@ -70,7 +69,7 @@ test('Relaunch starts when observation becomes available and cancels when unmoun
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
-          records={noRecords}
+          enabled={enabled}
           schedule={clock.schedule}
           {...(observed
             ? {
@@ -84,17 +83,19 @@ test('Relaunch starts when observation becomes available and cancels when unmoun
       ),
     );
   try {
-    await render(false);
+    await render(false, false);
     expect(bridge.streams).toBe(0);
-    await render(true);
+    await render(true, false);
+    expect(bridge.streams).toBe(1);
+    await render(true, true);
     const relaunch = [...container.querySelectorAll('button')].find(
       button => button.textContent === 'Resume',
     );
     expect(relaunch).toBeDefined();
-    expect(bridge.streams).toBe(1);
+    expect(bridge.streams).toBe(2);
     await act(async () => relaunch?.click());
     expect(bridge.launches).toBe(1);
-    await act(async () => root.unmount());
+    await render(false, true);
     expect(container.textContent).toBe('');
     expect(bridge.streams).toBe(0);
     expect(bridge.cancelled).toBe(true);

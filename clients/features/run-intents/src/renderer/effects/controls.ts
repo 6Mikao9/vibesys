@@ -5,20 +5,19 @@ import {
   HOST_CALL_METHOD,
   hostIntentRequest,
   hostIntentResponse,
-  intentOutcomes,
+  INTENT_TAIL_METHOD,
+  intentTailRequest,
+  intentTailResponse,
 } from '@vibesys/runs/intents';
 import {createActor, fromCallback, fromPromise} from 'xstate';
-import {type RunIntentsEvent, runIntentsMachine} from '../../state/index.js';
-
-/** Subscribes to the records the run's one reader delivers; returns the unsubscribe. */
-export type RunRecords = (listener: (records: readonly Uint8Array[]) => void) => () => void;
+import {intentWatchMachine, type RunIntentsEvent, runIntentsMachine} from '../../state/index.js';
 
 /** All I/O belongs to invoked actors, which cancel their bridge calls on exit. */
 export function intentsActor(input: {
   readonly bridge: GatewayBridge;
   readonly host: HostKey;
   readonly runId: string;
-  readonly records: RunRecords;
+  readonly enabled: boolean;
   readonly schedule: ScheduleTimeout;
 }) {
   return createActor(
@@ -36,14 +35,41 @@ export function intentsActor(input: {
             call.cancel();
           }
         }),
-        watch: fromCallback<RunIntentsEvent>(({sendBack}) =>
-          input.records(records => {
-            const outcomes = intentOutcomes(records);
-            if (outcomes.length > 0) sendBack({type: 'outcomes', outcomes});
-          }),
-        ),
+        watch: fromCallback<RunIntentsEvent>(({sendBack}) => {
+          const watcher = createActor(
+            intentWatchMachine.provide({
+              actors: {
+                read: fromCallback(({sendBack: ended}) => {
+                  const call = input.bridge.stream(
+                    input.host,
+                    INTENT_TAIL_METHOD,
+                    intentTailRequest(input.runId),
+                    bytes => {
+                      try {
+                        const outcomes = intentTailResponse(bytes);
+                        sendBack({type: 'outcomes', outcomes});
+                      } catch (error) {
+                        sendBack({type: 'watchFailed', error: String(error)});
+                      }
+                    },
+                    error => {
+                      sendBack({
+                        type: 'watchFailed',
+                        error: error ?? 'Intent outcome stream ended',
+                      });
+                      ended({type: 'ended'});
+                    },
+                  );
+                  return () => call.cancel();
+                }),
+              },
+            }),
+            {clock: clockFrom(input.schedule)},
+          ).start();
+          return () => watcher.stop();
+        }),
       },
     }),
-    {clock: clockFrom(input.schedule)},
+    {input: {enabled: input.enabled}, clock: clockFrom(input.schedule)},
   );
 }

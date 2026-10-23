@@ -12,6 +12,7 @@ import {
   RecordSchema,
   RelaunchRefusal,
   RunLiveness,
+  TailResponseSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {relaunchRequest} from '@vibesys/runs/intents';
@@ -19,32 +20,18 @@ import {FakeClock} from '@vibesys/transport/testing';
 import {waitFor} from 'xstate';
 import {intentsActor, relaunchActor} from './index.js';
 
-/** The run's one reader, as the page delivers it: subscribers see each batch of records. */
-class FakeRecords {
-  readonly listeners = new Set<(records: readonly Uint8Array[]) => void>();
-  readonly subscribe = (listener: (records: readonly Uint8Array[]) => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  };
-  deliver(...records: Parameters<typeof toBinary<typeof RecordSchema>>[1][]) {
-    for (const listener of [...this.listeners])
-      listener(records.map(record => toBinary(RecordSchema, record)));
-  }
-}
-
-function fixture() {
+function fixture(enabled = true) {
   const bridge = new FakeGatewayBridge();
   const clock = new FakeClock();
-  const records = new FakeRecords();
   const actor = intentsActor({
     bridge,
     host: 'local' as HostKey,
     runId: 'run-1',
-    records: records.subscribe,
+    enabled,
     schedule: clock.schedule,
   });
   actor.start();
-  return {bridge, actor, clock, records};
+  return {bridge, actor, clock};
 }
 const request = create(PostIntentRequestSchema, {
   projectRoot: '/project',
@@ -64,7 +51,7 @@ function admission(requestId = 'r-1') {
 
 test('a successful unary HostCall means pending until Tail says applied or refused', async () => {
   for (const step of [IntentStep.APPLIED, IntentStep.REFUSED]) {
-    const {bridge, actor, records} = fixture();
+    const {bridge, actor} = fixture();
     try {
       actor.send({type: 'send', request});
       const call = bridge.calls[0];
@@ -87,7 +74,12 @@ test('a successful unary HostCall means pending until Tail says applied or refus
           },
         },
       });
-      records.deliver(record);
+      bridge.streams[0]?.receive(
+        toBinary(
+          TailResponseSchema,
+          create(TailResponseSchema, {records: [toBinary(RecordSchema, record)]}),
+        ),
+      );
       expect(actor.getSnapshot().context.entries[0]?.status).toBe(
         step === IntentStep.APPLIED ? 'applied' : 'refused',
       );
@@ -95,8 +87,16 @@ test('a successful unary HostCall means pending until Tail says applied or refus
       actor.stop();
     }
     expect(bridge.calls.every(call => call.cancelled)).toBe(true);
-    expect(records.listeners.size).toBe(0);
+    expect(bridge.streams.every(stream => stream.cancelled)).toBe(true);
   }
+});
+
+test('switch off makes no transport call', () => {
+  const {actor, bridge} = fixture(false);
+  actor.send({type: 'send', request});
+  expect(bridge.calls).toHaveLength(0);
+  expect(bridge.streams).toHaveLength(0);
+  actor.stop();
 });
 
 test('timeout cancels the unary and a late reply cannot settle its retry', async () => {
@@ -154,15 +154,73 @@ test('typed refusals are final; malformed replies and wrong ids stay unconfirmed
   }
 });
 
-test('outcome delivery opens no stream of its own', () => {
-  const {actor, bridge, records} = fixture();
+test('a typed refusal preserves an outcome-stream failure for earlier pending requests', async () => {
+  const {actor, bridge} = fixture();
   try {
     actor.send({type: 'send', request});
-    expect(bridge.streams).toHaveLength(0);
-    expect(records.listeners.size).toBe(1);
+    bridge.streams[0]?.ended('disconnected');
+    bridge.calls[0]?.resolve(
+      toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {
+            case: 'configurationFailed',
+            value: {
+              code: 'invalid_input',
+              stage: 'post_intent',
+              message: 'Request refused',
+              exitCode: 2,
+            },
+          },
+        }),
+      ),
+    );
+    await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
+    expect(actor.getSnapshot().context.entries[0]?.status).toBe('refused');
+    expect(actor.getSnapshot().context.error).toBe('disconnected');
   } finally {
     actor.stop();
   }
+});
+
+test('an ended outcome stream retries independently of an in-flight admission', async () => {
+  const {actor, bridge, clock} = fixture();
+  try {
+    actor.send({type: 'send', request});
+    bridge.streams[0]?.ended('connection lost');
+    expect(bridge.streams[0]?.cancelled).toBe(true);
+    expect(bridge.calls[0]?.cancelled).toBe(false);
+    clock.advanceBy(1000);
+    expect(bridge.streams).toHaveLength(2);
+    bridge.streams[1]?.receive(
+      toBinary(
+        TailResponseSchema,
+        create(TailResponseSchema, {
+          records: [
+            toBinary(
+              RecordSchema,
+              create(RecordSchema, {
+                seq: 1n,
+                body: {
+                  case: 'intent',
+                  value: {controlId: 'r-1', action: IntentAction.PAUSE, step: IntentStep.APPLIED},
+                },
+              }),
+            ),
+          ],
+        }),
+      ),
+    );
+    expect(actor.getSnapshot().context.entries[0]?.status).toBe('applied');
+    expect(actor.getSnapshot().context.error).toBeNull();
+    bridge.calls[0]?.resolve(admission('r-1'));
+    await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
+    expect(actor.getSnapshot().context.entries[0]?.status).toBe('applied');
+  } finally {
+    actor.stop();
+  }
+  expect(bridge.streams[1]?.cancelled).toBe(true);
+  expect(clock.pending).toBe(0);
 });
 
 test('relaunch confirms an epoch or a typed refusal and owns every transport call', async () => {
@@ -368,16 +426,16 @@ test('an interrupted WatchRuns hint enables relaunch only for the current run an
   try {
     const watch = bridge.streams[0];
     expect(watch?.method).toBe('/vibesys.api.v1.HostService/WatchRuns');
-    const hint = (runId: string, epoch: number, processEpoch = 9) =>
+    const hint = (runId: string, epoch: number) =>
       toBinary(
         WatchRunsResponseSchema,
         create(WatchRunsResponseSchema, {
           runId,
           liveness: RunLiveness.INTERRUPTED,
-          head: {epoch, process: {epoch: processEpoch}},
+          head: {epoch, process: {epoch}},
         }),
       );
-    for (const bytes of [hint('other', 2), hint('run-1', 1), hint('run-1', 0, 2)]) {
+    for (const bytes of [hint('other', 2), hint('run-1', 1)]) {
       watch?.receive(bytes);
       actor.send({type: 'relaunch'});
       expect(bridge.calls).toHaveLength(0);

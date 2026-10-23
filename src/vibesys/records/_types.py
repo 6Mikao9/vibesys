@@ -1,8 +1,14 @@
 """Values crossing the pure projection boundary."""
 
-from dataclasses import dataclass
+from __future__ import annotations
 
-from vs_proto.api import Record
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from rpds import HashTrieSet
+
+if TYPE_CHECKING:
+    from vs_proto.api import Record
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,11 @@ class MappingState:
     input_measurement: bytes | None = None
     input_inherited: bool = False
     metric_values: tuple[tuple[tuple[str, str | None], tuple[float, float]], ...] = ()
+    # Journal sequences are immutable identities across all event kinds. Ordered input compacts
+    # to one frontier; only deliveries ahead of a hole need retained identities. Thus memory is
+    # bounded by the outstanding source-sequence gap, not by the history or delivery count.
+    source_through: int = 0
+    source_pending: HashTrieSet[int] = field(default_factory=HashTrieSet)
     ending: bytes | None = None
     pending: tuple[bytes, ...] = ()
 

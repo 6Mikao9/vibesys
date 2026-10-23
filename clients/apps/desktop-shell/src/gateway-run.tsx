@@ -26,13 +26,15 @@ import {type JSX, useMemo} from 'react';
 import {useGatewayChat} from './gateway-chat.js';
 import {gatewayTransport} from './gateway-transport.js';
 
-export function GatewayRun(props: {
+interface GatewayRunProps {
   readonly seed: RunPageSeed;
   readonly bridge: GatewayBridge;
   readonly schedule: ScheduleTimeout;
   readonly address: RunPageAddress;
   readonly navigation: RunPageNavigation;
-}): JSX.Element {
+}
+
+export function GatewayRun(props: GatewayRunProps): JSX.Element {
   const {bridge, seed, schedule, address} = props;
   const {fanout, ports} = useMemo(
     () => gatewayPorts({bridge, host: seed.identity.host, schedule}),
@@ -46,8 +48,9 @@ export function GatewayRun(props: {
     bridge,
     host: seed.identity.host,
     runId: seed.identity.runId,
-    records: fanout.subscribe,
     projectRoot,
+    enabled: true,
+    refreshWriter: page.refreshWriter,
     ...(observation ? {relaunch: observation} : {}),
     schedule,
   });

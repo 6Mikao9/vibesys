@@ -9,12 +9,13 @@ shell's new Run screen composition, beside the Run screen rather than inside
   In the current shell, `page.state.record.run.projectRoot` is available when
   the record is `live` or `ended`. Pass that host path without expanding it on
   the laptop.
+- `enabled`: the host's `runTransportV2` setting.
 - `schedule`: the shell's injected timeout scheduler.
 
-Electron main
+The component makes no calls and renders nothing while disabled. Electron main
 fills HostCall's checkout from the host's current saved configuration. The
 feature never chooses an executable. Its actor cancels every owned call when
-unmounted.
+unmounted or disabled. The legacy controls stay on the legacy path.
 
 Pause, Pause now, Resume and Guidance are the visible run controls. The typed host
 surface also accepts withdraw, cancel-attempt, cancel-item, and set-parallelism.

@@ -102,7 +102,7 @@ function LevelBody(props: {
  * a step opens and the breadcrumb appears.
  */
 const BREADCRUMB_ROW: readonly Crumb[] = [
-  {id: 'back', label: 'Run', press: () => undefined},
+  {id: 'back', label: 'Run'},
   {id: 'here', label: 'Here'},
 ];
 
@@ -185,7 +185,7 @@ function Header(props: {
   ];
   return (
     <Stack gap="space-2">
-      <Row justify="between" align="start">
+      <Row justify="between" align="start" wrap>
         {/* Grown from no width: the actions keep the title's row and the title's lines wrap instead. */}
         <Stack gap="space-2" grow>
           <Text as="h1" variant="heading">
@@ -193,7 +193,7 @@ function Header(props: {
           </Text>
           <RunFacts header={header} />
         </Stack>
-        <Row gap="space-2">
+        <Row gap="space-2" wrap align="start">
           {chat === undefined ? null : (
             <Button
               variant={chat.open ? 'primary' : 'secondary'}
@@ -271,45 +271,37 @@ function EndedBanner(props: {
 }): JSX.Element | null {
   const {state, dispatch} = props;
   const ended = endedView(state);
-  // The header already says Finished. Logs and Run again remain in the run controls.
-  if (ended === null || ended.title === 'Finished') return null;
+  if (ended === null) return null;
   if (state.readOnly === true) {
     const reason = state.record.kind === 'ended' ? state.record.run.reason : null;
     return reason ? (
       <Banner tone={ended.tone} title={state.lifecycleWord ?? ended.title} body={reason} />
     ) : null;
   }
-  return (
-    <Banner
-      tone={ended.tone}
-      title={ended.title}
-      body={ended.reason}
-      actions={
-        <>
-          {ended.resume === null ? null : (
-            <Button
-              variant="primary"
-              text={ended.resume}
-              press={() => dispatch({type: 'resume-ended'})}
-            />
-          )}
-          <Button
-            variant="secondary"
-            text="View logs"
-            press={() => {
-              dispatch({type: 'view-logs'});
-              props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
-            }}
-          />
-          <Button
-            variant="secondary"
-            text="Run again"
-            press={() => dispatch({type: 'run-again'})}
-          />
-        </>
-      }
-    />
+  const actions = (
+    <>
+      {ended.resume === null ? null : (
+        <Button
+          variant="primary"
+          text={ended.resume}
+          quietReason
+          {...(state.resumeStatus?.pending ? {disabledReason: 'Waiting for the run to start'} : {})}
+          press={() => dispatch({type: 'resume-ended'})}
+        />
+      )}
+      <Button
+        variant="secondary"
+        text="View logs"
+        press={() => {
+          dispatch({type: 'view-logs'});
+          props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
+        }}
+      />
+      <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
+    </>
   );
+  if (ended.title === 'Finished') return <Row gap="space-2">{actions}</Row>;
+  return <Banner tone={ended.tone} title={ended.title} body={ended.reason} actions={actions} />;
 }
 
 function Startup(props: {readonly state: RunPageState}): JSX.Element | null {
@@ -509,6 +501,19 @@ function RunHeader(
   );
 }
 
+function CommandStatus({state}: {readonly state: RunPageState}): JSX.Element {
+  return (
+    <>
+      {state.resumeStatus === null ? null : (
+        <Banner tone="neutral" title="Resume" body={state.resumeStatus.message} />
+      )}
+      {state.notice === null ? null : (
+        <Banner tone="err" title="The run did not take the command" body={state.notice} />
+      )}
+    </>
+  );
+}
+
 function RunScreenBody(props: {
   readonly state: RunPageState;
   readonly model: RunModel;
@@ -580,15 +585,13 @@ function RunScreenBody(props: {
           names={names}
           dispatch={dispatch}
           chat={props.chat}
-          toolbar={props.toolbar}
           scrubber={traceArrival(state) === 'arrived' && before === null}
         />
       }
     >
+      {props.toolbar}
       <PauseNowBanner state={state} dispatch={dispatch} />
-      {state.notice === null ? null : (
-        <Banner tone="err" title="The run did not take the command" body={state.notice} />
-      )}
+      <CommandStatus state={state} />
       <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
       {problem === null ? null : (
         <Banner tone="warn" title="The run’s history is not available" body={problem} />

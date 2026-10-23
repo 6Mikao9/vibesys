@@ -15,6 +15,7 @@ import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
 import {FakeClock} from '@vibesys/transport/testing';
+import fc from 'fast-check';
 import type {SnapshotFrom} from 'xstate';
 import {
   gatewayRunMachine,
@@ -154,7 +155,7 @@ test('live records append while scrubbed and switching streams cancels the prior
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await reached(actor, snapshot => snapshot.context.ui.views['build-log'] !== undefined);
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'missing'}});
-  await reached(actor, snapshot => snapshot.context.error === 'Log unavailable');
+  await reached(actor, snapshot => snapshot.context.ui.logProblem?.message === 'Log unavailable');
   actor.stop();
 });
 
@@ -247,10 +248,11 @@ test('content and first-log deadlines use the injected clock', async () => {
   await transport.called(`${SERVICE}GetBlobs`);
   await transport.called(`${SERVICE}TailStream`);
   clock.advanceBy(30000);
-  expect(actor.getSnapshot().context.error).toBe('Log timeout');
+  expect(actor.getSnapshot().context.error).toBe('Content timeout');
+  expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
   expect(transport.calls.find(call => call.method.endsWith('GetBlobs'))?.signal.aborted).toBe(true);
   expect(transport.calls.find(call => call.method.endsWith('TailStream'))?.signal.aborted).toBe(
-    true,
+    false,
   );
   actor.stop();
 });
@@ -540,4 +542,63 @@ test('reply attachments load through the same verified content owner as objectiv
       .filter(call => !call.method.endsWith('Skeleton') && !call.method.endsWith('GetBlobs'))
       .every(call => call.signal.aborted),
   ).toBe(true);
+});
+
+test('property: quiet logs and peer failures stay scoped to their stream for any idle interval', async () => {
+  const fixture = storeRunFixture('live');
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({min: 30000, max: 3600000}),
+      fc.constantFrom('Not found', 'Unsupported by an older host', 'Connection closed'),
+      async (idle, error) => {
+        const transport = new FakeRunTransport({
+          ...fixture,
+          streams: {...fixture.streams, quiet: new Uint8Array()},
+        });
+        const clock = new FakeClock();
+        const actor = startGatewayRun(
+          {
+            reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+          },
+          clock.schedule,
+          {seed: SEED},
+        );
+        try {
+          await reached(
+            actor,
+            snapshot =>
+              snapshot.context.load?.complete === true &&
+              Object.keys(snapshot.context.text).length > 0,
+          );
+          transport.observe(
+            create(WatchRunsResponseSchema, {
+              runId: SEED.identity.runId,
+              liveness: RunLiveness.ALIVE,
+              head: {epoch: 1},
+            }),
+          );
+          actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'quiet'}});
+          await transport.called(`${SERVICE}TailStream`);
+          clock.advanceBy(idle);
+          expect(actor.getSnapshot().context.error).toBeNull();
+          expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
+          expect(actor.getSnapshot().matches({active: {logs: 'following'}})).toBe(true);
+          transport.fail(`${SERVICE}TailStream`, new Error(error));
+          await reached(actor, snapshot => snapshot.context.ui.logProblem !== undefined);
+          expect(actor.getSnapshot().context.error).toBeNull();
+          transport.recover(`${SERVICE}TailStream`);
+          actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'quiet'}});
+          expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
+          clock.advanceBy(idle);
+          expect(actor.getSnapshot().context.error).toBeNull();
+          actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
+          await reached(actor, snapshot => snapshot.context.ui.views['build-log'] !== undefined);
+          expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
+        } finally {
+          actor.stop();
+        }
+      },
+    ),
+    {numRuns: 16, seed: 253},
+  );
 });

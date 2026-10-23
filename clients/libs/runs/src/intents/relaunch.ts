@@ -1,5 +1,5 @@
 /** Relaunch uses HostCall; the epoch is confirmed by the host writer. */
-import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {clone, create, equals, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   HostCallRequestSchema,
   HostCallResponseSchema,
@@ -88,20 +88,13 @@ export interface RelaunchObservation {
   readonly lifecycle?: Lifecycle;
 }
 
-/** Use the latest writer facts, never the scrubbed timeline position. */
-export function relaunchTarget(
-  observation: RelaunchObservation,
-  liveness: RelaunchLiveness,
-): RelaunchTarget | null {
-  const live = liveness.epoch === observation.epoch ? liveness.value : RunLiveness.UNSPECIFIED;
-  if (observation.epoch < 1n || liveness.epoch > observation.epoch || live === RunLiveness.ALIVE)
-    return null;
-  const state = observation.lifecycle?.state;
-  if (state?.case === 'parked') return {epoch: observation.epoch, state: 'parked'};
-  if (state?.case === 'ended') {
-    return {epoch: observation.epoch, state: 'ended'};
-  }
-  return live === RunLiveness.INTERRUPTED ? {epoch: observation.epoch, state: 'interrupted'} : null;
+export function sameRelaunchObservation(a: RelaunchObservation, b: RelaunchObservation): boolean {
+  return (
+    a.epoch === b.epoch &&
+    (a.lifecycle === undefined || b.lifecycle === undefined
+      ? a.lifecycle === b.lifecycle
+      : equals(LifecycleSchema, a.lifecycle, b.lifecycle))
+  );
 }
 
 export const RUN_LIVENESS_METHOD = `/${HostService.typeName}/${HostService.method.watchRuns.name}`;

@@ -275,6 +275,17 @@ class Projection:
         self.emit("span", p.SpanRecord(change=change, span=span))
 
     def result(self) -> MappedEvent:
+        through = self.state.source_through
+        pending = self.state.source_pending
+        sequence = self.event.sequence
+        if sequence > through:
+            if sequence == through + 1:
+                through = sequence
+                while through + 1 in pending:
+                    through += 1
+                    pending = pending.discard(through)
+            else:
+                pending = pending.insert(sequence)
         state = replace(
             self.state,
             sequence=self.state.sequence + len(self.records),
@@ -295,6 +306,8 @@ class Projection:
             input_inherited=self.input_inherited,
             objective_inferred=self.objective_inferred,
             metric_values=tuple(self.metric_values.items()),
+            source_through=through,
+            source_pending=pending,
             ending=self.ending,
             pending=tuple(self.pending),
         )

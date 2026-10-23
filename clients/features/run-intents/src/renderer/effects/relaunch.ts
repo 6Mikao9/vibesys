@@ -13,7 +13,7 @@ import {
   RunLiveness,
 } from '@vibesys/runs/intents';
 import {createActor, fromCallback, fromPromise} from 'xstate';
-import {type RelaunchEvent, relaunchMachine} from '../../state/index.js';
+import {livenessWatchMachine, type RelaunchEvent, relaunchMachine} from '../../state/index.js';
 
 export function relaunchActor(input: {
   readonly bridge: GatewayBridge;
@@ -26,21 +26,39 @@ export function relaunchActor(input: {
     relaunchMachine.provide({
       actors: {
         liveness: fromCallback<RelaunchEvent>(({sendBack}) => {
-          const call = input.bridge.stream(
-            input.host,
-            RUN_LIVENESS_METHOD,
-            livenessRequest(),
-            bytes => {
-              try {
-                const value = livenessResponse(bytes, input.request.runId);
-                if (value !== null) sendBack({type: 'liveness', value});
-              } catch {
-                sendBack({type: 'liveness', value: {epoch: 0n, value: RunLiveness.UNSPECIFIED}});
-              }
-            },
-            () => sendBack({type: 'liveness', value: {epoch: 0n, value: RunLiveness.UNSPECIFIED}}),
-          );
-          return () => call.cancel();
+          const unknown = () =>
+            sendBack({type: 'liveness', value: {epoch: 0n, value: RunLiveness.UNSPECIFIED}});
+          const watcher = createActor(
+            livenessWatchMachine.provide({
+              actions: {
+                unknown,
+                observed: ({event}) => {
+                  if (event.type === 'liveness') sendBack(event);
+                },
+              },
+              actors: {
+                read: fromCallback(({sendBack: ended}) => {
+                  const call = input.bridge.stream(
+                    input.host,
+                    RUN_LIVENESS_METHOD,
+                    livenessRequest(),
+                    bytes => {
+                      try {
+                        const value = livenessResponse(bytes, input.request.runId);
+                        if (value !== null) ended({type: 'liveness', value});
+                      } catch {
+                        ended({type: 'ended'});
+                      }
+                    },
+                    () => ended({type: 'ended'}),
+                  );
+                  return () => call.cancel();
+                }),
+              },
+            }),
+            {clock: clockFrom(input.schedule)},
+          ).start();
+          return () => watcher.stop();
         }),
         launch: fromPromise(async ({input: request, signal}) => {
           const call = input.bridge.unary(

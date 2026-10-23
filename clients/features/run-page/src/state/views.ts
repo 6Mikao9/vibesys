@@ -146,7 +146,9 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
       commandReason(state),
     ),
     pauseNow: offer(
-      state.readOnly !== true && state.record.kind === 'live',
+      state.readOnly !== true &&
+        state.record.kind === 'live' &&
+        !['ended', 'historical', 'unlisted'].includes(phase.kind),
       state.pauseNow.kind === 'idle'
         ? commandReason(state)
         : state.pauseNow.kind === 'confirming'

@@ -60,6 +60,8 @@
     "@vibesys/proto": "workspace:*",
     "@bufbuild/protobuf": "2.16.0",
     "esbuild": "0.25.12",
-    "happy-dom": "20.14.5"
+    "fast-check": "4.10.2",
+    "happy-dom": "20.14.5",
+    "fake-indexeddb": "6.2.6"
   }
 }

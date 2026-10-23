@@ -184,7 +184,7 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
       await newEpoch(page, world.fixture);
       await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
       world.release();
-      await expect(page.getByText('Epoch 2', {exact: true})).toBeVisible();
+      await expect(page.getByText('Resume · Applied', {exact: true})).toBeVisible();
       await capture(page, `${state}-${width}-epoch`);
       await page.close();
     }
@@ -200,7 +200,9 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
     const world = await openRelaunch(page, 'interrupted', result);
     await page.getByRole('button', {name: 'Resume', exact: true}).click();
     world.release();
-    await expect(page.getByText(label, {exact: true})).toBeVisible();
+    await expect(
+      page.getByText(result === 'uncertain' ? label : `Resume · ${label}`, {exact: true}),
+    ).toBeVisible();
     await capture(page, result);
     await page.close();
   }
