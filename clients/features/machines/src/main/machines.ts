@@ -52,7 +52,7 @@ export interface MachinesMainDeps {
   readonly checkout: (id: HostId) => Promise<string | null>;
   /** Required when using the gateway. Missing it throws; it does not fall back. */
   readonly registry?: RegistryCatalog;
-  /** Login status reads over the gateway when transport v2 is enabled. */
+  /** Login status reads over the gateway. */
   readonly catalog?: Pick<RegistryRunCatalog, 'logins'>;
   /** Setup reads. Required when using the gateway for inspect. */
   readonly setup?: RegistrySetup;

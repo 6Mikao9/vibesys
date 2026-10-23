@@ -65,7 +65,7 @@ export interface NewRunMainDeps {
   readonly registryProjects?: RegistryProjects;
   readonly registryCatalog?: RegistryRunCatalog;
   readonly registryReads?: RegistryCatalog;
-  /** WatchRuns for the host a v2 start just launched on. */
+  /** WatchRuns for the host a start just launched on. */
   readonly watchRuns?: Pick<RunWatch, 'start'>;
 }
 
