@@ -29,6 +29,27 @@ const SERVICE = `/${HostService.typeName}/`;
 /** The gateway's reply budget; a Tail message is bounded by the same figure. */
 export const GATEWAY_REPLY_BYTES = 1 << 20;
 
+/**
+ * How many checkpoints, newest first, a Skeleton reply tries before it falls back to replay. The
+ * service's constant, pinned by `proto/testdata/skeleton-contract/cases.json`, which the service's
+ * own tests and this simulation both run.
+ */
+export const GATEWAY_KEYFRAME_CANDIDATES = 4;
+/** What the service keeps back of the reply budget beside a keyframe, and beside the records. */
+const KEYFRAME_RESERVE = 32;
+const RECORDS_RESERVE = 24;
+
+/** The checkpoint a reply carries: the newest of the first few that fit, or none. */
+export function chooseKeyframe(
+  through: readonly number[],
+  fits: (through: number) => boolean,
+): number | undefined {
+  return [...through]
+    .sort((a, b) => b - a)
+    .slice(0, GATEWAY_KEYFRAME_CANDIDATES)
+    .find(fits);
+}
+
 export interface LinkModel {
   readonly rttMs: number;
   readonly bytesPerMs: number;
@@ -39,8 +60,12 @@ export interface SimRun {
   readonly records: readonly StoreRecord[];
   /** Writer checkpoints: each is the number of leading records a keyframe covers. */
   readonly keyframes?: readonly number[];
-  /** False models a run with no run.log: every read is NotFound. */
-  readonly logPresent?: boolean;
+  /**
+   * What the host holds of the log: `present` (default); `pending`, a run directory whose run.log
+   * its writer has not created yet (Skeleton answers an empty complete prefix, Tail waits for the
+   * file); `unindexed`, a run the index does not know (every read is NotFound).
+   */
+  readonly log?: 'present' | 'pending' | 'unindexed';
   /** Reply budget; the gateway's 1 MiB by default. */
   readonly replyBytes?: number;
 }
@@ -67,6 +92,12 @@ export interface SimDelivery {
 interface WireKeyframe {
   readonly bytes: Uint8Array;
   readonly sets: ReadonlyMap<string, Uint8Array>;
+}
+
+function varintLength(value: number): number {
+  let length = 1;
+  for (let rest = value; rest >= 128; rest = Math.floor(rest / 128)) length += 1;
+  return length;
 }
 
 class Refused extends Error {
@@ -101,7 +132,7 @@ export class SimGateway implements RunTransport {
     private readonly fault: (method: string, ordinal: number) => SimFault | undefined = () =>
       undefined,
   ) {
-    this.#published = [...run.records];
+    this.#published = run.log === 'pending' ? [] : [...run.records];
   }
 
   get replyBytes(): number {
@@ -183,7 +214,7 @@ export class SimGateway implements RunTransport {
   }
 
   private requireLog(): void {
-    if (this.run.logPresent === false) throw new Refused('run.log is missing', 5);
+    if (this.run.log === 'unindexed') throw new Refused('run.log is missing', 5);
   }
 
   /** The reply reaches the client after the shared pipe has carried it; `lost` never arrives. */
@@ -234,40 +265,45 @@ export class SimGateway implements RunTransport {
     throw new Error(`Unknown unary method ${method}`);
   }
 
-  /** The latest checkpoint that fits the budget, then records until the budget is spent. */
+  /** As the service answers: a checkpoint that fits, then records until the budget is spent. */
   private skeleton(known: ReadonlySet<string>) {
-    const records = this.run.records;
-    const budget = this.replyBytes - 32;
-    let covered = 0;
-    let keyframe: Uint8Array | undefined;
-    let sets: [string, Uint8Array][] = [];
-    for (const candidate of [...(this.run.keyframes ?? [])].sort((a, b) => b - a)) {
-      const wire = this.keyframe(candidate);
-      const unknown = [...wire.sets].filter(([hash]) => !known.has(hash));
-      const cost = wire.bytes.length + unknown.reduce((sum, [, data]) => sum + data.length + 80, 0);
-      if (cost <= budget) {
-        keyframe = wire.bytes;
-        sets = unknown;
-        covered = candidate;
-        break;
-      }
-    }
-    let size = (keyframe?.length ?? 0) + sets.reduce((sum, [, data]) => sum + data.length + 80, 0);
+    // A run directory with no run.log yet has nothing committed and nothing to replay.
+    const records = this.run.log === 'pending' ? [] : this.run.records;
+    const budget = this.replyBytes;
+    const size = (keyframe?: Uint8Array, sets: readonly [string, Uint8Array][] = []): number =>
+      toBinary(
+        SkeletonResponseSchema,
+        create(SkeletonResponseSchema, {
+          ...(keyframe ? {keyframe} : {}),
+          descriptorSets: sets.map(([hash, data]) => ({sha256: hash, data})),
+        }),
+      ).length;
+    const unknownSets = (covered: number) =>
+      [...this.keyframe(covered).sets].filter(([hash]) => !known.has(hash));
+    const covered =
+      chooseKeyframe(this.run.keyframes ?? [], through =>
+        through <= records.length
+          ? size(this.keyframe(through).bytes, unknownSets(through)) + KEYFRAME_RESERVE <= budget
+          : false,
+      ) ?? 0;
+    const keyframe = covered > 0 ? this.keyframe(covered).bytes : undefined;
+    const sets = covered > 0 ? unknownSets(covered) : [];
+    let used = size(keyframe, sets) + RECORDS_RESERVE;
     const included: Uint8Array[] = [];
     for (const record of records.slice(covered)) {
       const bytes = toBinary(RecordSchema, record);
-      if (size + bytes.length + 8 > budget) break;
+      const cost = 1 + varintLength(bytes.length) + bytes.length;
+      if (used + cost > budget) break;
       included.push(bytes);
-      size += bytes.length + 8;
+      used += cost;
     }
     const last = records[covered + included.length - 1];
-    const committed = records.at(-1)?.seq ?? 0n;
     return create(SkeletonResponseSchema, {
       ...(keyframe ? {keyframe} : {}),
       descriptorSets: sets.map(([hash, data]) => ({sha256: hash, data})),
       records: included,
-      committedSeq: committed,
-      nextSeq: last ? last.seq + 1n : (records[0]?.seq ?? 1n),
+      committedSeq: records.at(-1)?.seq ?? 0n,
+      nextSeq: last ? last.seq + 1n : (records[0]?.seq ?? 0n),
       complete: covered + included.length === records.length,
     });
   }

@@ -121,7 +121,8 @@ export type LoadProgress =
   | {readonly phase: 'complete'};
 
 export function loadProgress(load: SkeletonLoad | undefined): LoadProgress {
-  if (load === undefined) return {phase: 'skeleton'};
+  // Nothing to show is still the first phase, however complete the empty prefix is.
+  if (load === undefined || load.skeleton.epochs.length === 0) return {phase: 'skeleton'};
   if (load.complete) return {phase: 'complete'};
   return {phase: 'history', through: load.skeleton.throughSeq ?? 0n, committed: load.committedSeq};
 }

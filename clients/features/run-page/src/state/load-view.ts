@@ -31,6 +31,8 @@ function failureWord(failure: SkeletonLoadFailure): string {
       return 'Invalid records';
     case 'deadline':
       return 'Timed out';
+    case 'empty':
+      return 'No records';
     case 'transport':
     case 'stream-ended':
       return 'Unreachable';

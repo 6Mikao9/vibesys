@@ -29,6 +29,21 @@ const batch = (seq: bigint) =>
     ],
   });
 
+/** The first record of a run: its epoch, the first thing a screen can show. */
+const opening = (seq: bigint) =>
+  create(TailResponseSchema, {
+    throughSeq: seq,
+    records: [
+      toBinary(
+        RecordSchema,
+        create(RecordSchema, {
+          seq,
+          body: {case: 'epochStarted', value: {runId: 'run-a', epoch: 1}},
+        }),
+      ),
+    ],
+  });
+
 test('model: requests and deadlines belong to active states, errors always release work', () => {
   checkMachine({
     machine: skeletonLoaderMachine,
@@ -137,7 +152,7 @@ test('live byte bridge starts at next_seq, catches up, folds live batches and cl
   transport.finishSkeleton(toBinary(SkeletonResponseSchema, initial()));
   await reached(actor, snapshot => snapshot.matches({following: 'catchingUp'}));
   expect(transport.fromSeq).toBe(1n);
-  transport.push(toBinary(TailResponseSchema, batch(1n)));
+  transport.push(toBinary(TailResponseSchema, opening(1n)));
   await reached(actor, snapshot => snapshot.context.load?.nextSeq === 2n);
   expect(actor.getSnapshot().matches({following: 'catchingUp'})).toBe(true);
   transport.push(toBinary(TailResponseSchema, batch(2n)));

@@ -24,7 +24,9 @@ export type SkeletonLoadFailure =
   | {readonly kind: 'transport'; readonly cause: unknown}
   | {readonly kind: 'refused'; readonly reason: LoadRefusal; readonly cause: unknown}
   | {readonly kind: 'data'; readonly cause: unknown}
-  | {readonly kind: 'stream-ended'};
+  | {readonly kind: 'stream-ended'}
+  /** The whole committed prefix is empty and nothing arrived within the deadline. */
+  | {readonly kind: 'empty'};
 
 interface Context extends SkeletonLoaderInput {
   load: SkeletonLoad | undefined;
@@ -69,6 +71,9 @@ export const skeletonLoaderMachine = setup({
     // A complete terminal prefix loses nothing by waiting: a relaunch may still extend it.
     exhausted: ({context}) => context.attempts >= MAX_ATTEMPTS && !isFinalLoad(context.load),
     hasLoad: ({context}) => context.load !== undefined,
+    // Complete is not content: a run directory whose log is not created yet has an empty prefix.
+    unpainted: ({context}) => (context.load?.skeleton.epochs.length ?? 0) === 0,
+    painted: ({context}) => (context.load?.skeleton.epochs.length ?? 0) > 0,
     refused: ({event}) => refusalOf(errorOf(event)) !== undefined,
   },
 }).createMachine({
@@ -149,7 +154,23 @@ export const skeletonLoaderMachine = setup({
             },
           },
         },
-        live: {},
+        /** Caught up. With nothing to show yet, the wait for the first record is bounded. */
+        live: {
+          initial: 'routing',
+          states: {
+            routing: {always: [{guard: 'unpainted', target: 'waiting'}, {target: 'populated'}]},
+            waiting: {
+              always: {guard: 'painted', target: 'populated'},
+              after: {
+                deadline: {
+                  target: '#skeletonLoader.failed',
+                  actions: assign({error: (): SkeletonLoadFailure => ({kind: 'empty'})}),
+                },
+              },
+            },
+            populated: {},
+          },
+        },
       },
     },
     /** A cut stream resumes from the cursor; only a run with no prefix asks for a Skeleton. */

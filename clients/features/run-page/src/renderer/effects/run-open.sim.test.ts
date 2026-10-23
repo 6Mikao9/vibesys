@@ -10,8 +10,8 @@
 import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
-import {fromBinary, toBinary} from '@bufbuild/protobuf';
-import {RecordSchema, TailRequestSchema} from '@vibesys/proto';
+import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {RecordSchema, SkeletonResponseSchema, TailRequestSchema} from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {MAX_ATTEMPTS, RECORD_WINDOW, RETRY_CAP_MS} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
@@ -163,7 +163,7 @@ test('the history converges on the full replay with one Tail that never re-reads
 test('a run with no run.log is refused once, in words, and nothing retries it', async () => {
   for (let seed = 1; seed <= CASES; seed += 1) {
     const {run, link} = generate(seed);
-    const {clock, gateway, actor} = open({...run, logPresent: false}, link);
+    const {clock, gateway, actor} = open({...run, log: 'unindexed'}, link);
     const refused = await until(
       clock,
       () => loadView(actor.getSnapshot().context).kind === 'failed',
@@ -264,4 +264,88 @@ test('a converted run (the retained conversion corpus) paints from its first rep
       gateway.skeletons[0]?.nextSeq ?? 0n,
     );
   actor.stop();
+});
+
+/** What the gateway sent first, as bytes of Skeleton reply for a run offering only `keyframes`. */
+async function firstReply(
+  records: SimRun['records'],
+  keyframes: readonly number[],
+  replyBytes: number,
+) {
+  const {clock, gateway, actor} = open(
+    {records, keyframes, replyBytes},
+    {rttMs: 1, bytesPerMs: 1e9},
+  );
+  await until(clock, () => gateway.skeletons.length > 0);
+  actor.stop();
+  const reply = gateway.skeletons[0];
+  if (!reply) throw new Error('no Skeleton reply');
+  return reply;
+}
+
+test('a checkpoint past the service’s four newest is never used, even when it is the only one that fits', async () => {
+  const records = storeRunFixture('short', 120, 1).records;
+  const at = [5, 150, 250, 350, 450];
+  // Each checkpoint alone, with room for all: how much of the reply it costs.
+  const costs: number[] = [];
+  for (const through of at) {
+    const reply = await firstReply(records, [through], GATEWAY_REPLY_BYTES);
+    costs.push(
+      toBinary(
+        SkeletonResponseSchema,
+        create(SkeletonResponseSchema, {
+          keyframe: reply.keyframe,
+          descriptorSets: reply.descriptorSets,
+        }),
+      ).length,
+    );
+  }
+  const budget = Math.floor(((costs[0] ?? 0) + (costs[1] ?? 0)) / 2) + 32 + 8 * 1024;
+  const room = await firstReply(records, at.slice(0, 2), budget);
+  expect(room.keyframe, 'the oldest of two fits').toBeDefined();
+  const reply = await firstReply(records, at, budget);
+  expect(reply.keyframe, 'the fifth-newest checkpoint is out of reach').toBeUndefined();
+  expect(reply.records.length).toBeGreaterThan(0);
+});
+
+test('a run whose log is not created yet gives no content, and a deadline or a retry ends the wait', async () => {
+  const records = storeRunFixture('short', 3, 1).records;
+  const {clock, gateway, actor} = open({records, log: 'pending'}, {rttMs: 20, bytesPerMs: 1400});
+  await until(clock, () => false, MINUTE);
+  expect(gateway.skeletons[0]?.complete).toBe(true);
+  expect(gateway.skeletons[0]?.records).toHaveLength(0);
+  expect(loadView(actor.getSnapshot().context)).toEqual({kind: 'failed', word: 'No records'});
+  actor.stop();
+});
+
+test('every load ends in content or a final state, whatever the replies are', async () => {
+  const faults: readonly ((method: string, ordinal: number) => SimFault | undefined)[] = [
+    () => undefined,
+    method => (method === `${SERVICE}Skeleton` ? {kind: 'status', status: 14} : undefined),
+    method => (method === `${SERVICE}Skeleton` ? {kind: 'down'} : undefined),
+    (method, ordinal) =>
+      method === `${SERVICE}Tail` && ordinal === 0
+        ? {kind: 'cut', afterMessages: 1, clean: ordinal % 2 === 0}
+        : undefined,
+    () => ({kind: 'status', status: 14}),
+  ];
+  for (let seed = 1; seed <= CASES; seed += 1) {
+    const random = new Seeded(1000 + seed);
+    const {run, link} = generate(seed);
+    const log = random.pick(['present', 'pending', 'unindexed'] as const);
+    const fault = random.pick(faults);
+    // A log its writer has not created yet appears after `appears` ms, or never.
+    const appears = random.pick([0, 5000, 29_000, 31_000, undefined]);
+    const {clock, gateway, actor} = open({...run, log}, link, fault);
+    if (log === 'pending' && appears !== undefined)
+      clock.schedule(() => gateway.publish(run.records), appears);
+    await until(clock, () => false, 10 * MINUTE);
+    const view = loadView(actor.getSnapshot().context);
+    const painted = paintedSkeleton(actor.getSnapshot().context.load) !== undefined;
+    const label = `seed ${seed}: log ${log}, fault ${faults.indexOf(fault)}, appears ${appears}`;
+    // Content, or a final state with its Retry: never a blank screen, a bar or a retry in flight.
+    expect(['ready', 'failed'], label).toContain(view.kind);
+    if (view.kind === 'ready') expect(painted, label).toBe(true);
+    actor.stop();
+  }
 });
