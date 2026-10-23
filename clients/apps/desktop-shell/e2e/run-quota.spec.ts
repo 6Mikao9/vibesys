@@ -96,5 +96,6 @@ test('a quota hold stays internal while the operator can cancel the epoch', asyn
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shoot(page, 'ink-quota-held');
   expect((await commands(page)).filter(command => command.startsWith('command.'))).toEqual([]);
-  expect(controls.posted).toEqual([]); // The confirmation must precede admission (#3436).
+  // The warning stands beside the controls and Pause now is admitted at once: no dialog precedes it.
+  expect(controls.posted.map(request => request.intent.case)).toEqual(['pauseNow']);
 });

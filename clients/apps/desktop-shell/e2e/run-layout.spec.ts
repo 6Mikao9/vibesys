@@ -168,22 +168,21 @@ test('an idea is named in the monospace face in its pane title, its Steps title 
   expect(crumb.idea).not.toBe(crumb.row);
 });
 
-test('a Pause the run does not take is shown as a notice, never thrown, and Pause now keeps its button while it asks', async ({
+test('a Pause the run does not take is shown as not confirmed, never thrown, and Pause now keeps its button', async ({
   page,
 }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await open(page, 'queue-rs-live', 1440, ['pause']);
   await page.getByRole('button', {name: 'Pause', exact: true}).click();
-  const notice = page.getByText('The run did not take the command').first();
-  await expect(notice).toBeVisible();
+  await expect(page.getByText('Pause · Not confirmed', {exact: true})).toBeVisible();
   expect(errors).toEqual([]);
-  await page.getByRole('button', {name: 'Pause now', exact: true}).click();
-  await expect(page.getByText('Pause now?')).toBeVisible();
-  const stop = page.getByRole('button', {name: 'Pause now', exact: true}).first();
+  const stop = page.getByRole('button', {name: 'Pause now', exact: true});
   await expect(stop).toBeVisible();
-  await expect(stop).toHaveAttribute('aria-disabled', 'true');
-  await page.getByRole('button', {name: 'Keep running'}).click();
+  await expect(stop).not.toHaveAttribute('aria-disabled', 'true');
+  await stop.click();
+  await expect(page.getByText('Pause now · Not confirmed', {exact: true})).toBeVisible();
+  expect(errors).toEqual([]);
   await expect(stop).not.toHaveAttribute('aria-disabled', 'true');
 });
 
