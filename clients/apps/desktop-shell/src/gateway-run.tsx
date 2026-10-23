@@ -8,7 +8,8 @@ import {
   RunScreen,
   useGatewayRun,
 } from '@vibesys/feature-run-page/renderer';
-import {type RunPageSeed, recordedRunRoot} from '@vibesys/feature-run-page/state';
+import type {RunPageSeed} from '@vibesys/feature-run-page/state';
+import type {RecordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import {
@@ -28,6 +29,7 @@ import {gatewayTransport} from './gateway-transport.js';
 
 interface GatewayRunProps {
   readonly seed: RunPageSeed;
+  readonly projectRoot: RecordedProjectRoot | undefined;
   readonly bridge: GatewayBridge;
   readonly schedule: ScheduleTimeout;
   readonly address: RunPageAddress;
@@ -43,7 +45,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
   const page = useGatewayRun({seed, ports, schedule, address});
   const {snapshot} = page;
   const observation = observationOf(snapshot.context.load?.skeleton);
-  const projectRoot = recordedRunRoot(snapshot.context.load?.skeleton);
+  const projectRoot = props.projectRoot;
   const intents = useRunIntents({
     bridge,
     host: seed.identity.host,

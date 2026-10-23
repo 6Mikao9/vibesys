@@ -21,6 +21,7 @@ export {
   type RowProblem,
   type RunRow,
   recentRows,
+  runProjectRoot,
   type Screen,
   type ShellActions,
   SIDEBAR_EMPTY,

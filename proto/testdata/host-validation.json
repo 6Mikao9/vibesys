@@ -710,5 +710,30 @@
       "committedSeq": "9223372036854775807"
     },
     "field": "committed_seq"
+  },
+  {
+    "name": "WatchRuns heartbeat marker",
+    "message": "WatchRunsResponse",
+    "value": {
+      "heartbeat": true
+    }
+  },
+  {
+    "name": "WatchRuns heartbeat cannot carry an entry",
+    "message": "WatchRunsResponse",
+    "value": {
+      "heartbeat": true,
+      "runId": "run-1"
+    },
+    "field": "watch_runs.shape"
+  },
+  {
+    "name": "WatchRuns marker kinds are exclusive",
+    "message": "WatchRunsResponse",
+    "value": {
+      "heartbeat": true,
+      "initialComplete": true
+    },
+    "field": "watch_runs.shape"
   }
 ]

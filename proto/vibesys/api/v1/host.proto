@@ -142,8 +142,8 @@ message WatchRunsRequest {}
 message WatchRunsResponse {
   option (buf.validate.message).cel = {
     id: "watch_runs.shape"
-    message: "run_id, head, liveness, removed and initial_complete must form an entry, tombstone or initial marker"
-    expression: "this.initial_complete ? (this.run_id == '' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != '' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))"
+    message: "run_id, head, liveness, removed and initial_complete must form an entry, tombstone, initial marker or heartbeat"
+    expression: "(this.initial_complete || this.heartbeat) ? (!(this.initial_complete && this.heartbeat) && this.run_id == '' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != '' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))"
   };
   // head is absent for phase 1 runs, tombstones and the initial marker.
   // UNSPECIFIED represents unknown phase 1 liveness and marker/tombstone absence.
@@ -152,6 +152,9 @@ message WatchRunsResponse {
   RunLiveness liveness = 3 [(buf.validate.field).enum.defined_only = true];
   bool removed = 4;
   bool initial_complete = 5;
+  // Emitted at least every five seconds, after all preceding run observations.
+  // A receiver expires its facts after thirty seconds without a frame.
+  bool heartbeat = 6;
 }
 
 enum RunLiveness {

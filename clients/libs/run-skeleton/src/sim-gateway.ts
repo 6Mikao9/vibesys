@@ -128,6 +128,9 @@ export interface SimClock {
   readonly schedule: ScheduleTimeout;
 }
 
+/** The service's WatchRuns heartbeat interval. */
+const HEARTBEAT_MS = 5000;
+
 export class SimGateway implements RunTransport {
   readonly calls: SimCall[] = [];
   readonly deliveries: SimDelivery[] = [];
@@ -197,10 +200,15 @@ export class SimGateway implements RunTransport {
       );
       await this.arrive(method, hello.length, signal);
       yield hello;
-      await new Promise<void>(resolve => {
-        const registration = registerAbort(signal, resolve);
-        if (registration.aborted) resolve();
-      });
+      // As the service does: a heartbeat every few seconds for as long as the stream is open.
+      const beat = toBinary(
+        WatchRunsResponseSchema,
+        create(WatchRunsResponseSchema, {heartbeat: true}),
+      );
+      while (await this.sleep(HEARTBEAT_MS, signal)) {
+        await this.arrive(method, beat.length, signal);
+        yield beat;
+      }
       return;
     }
     if (method !== `${SERVICE}Tail`) throw new Error(`Unknown stream method ${method}`);
@@ -213,6 +221,24 @@ export class SimGateway implements RunTransport {
       sent += 1;
       yield message;
     }
+  }
+
+  /** Wait `ms` of virtual time: true when it passed, false when the stream was cancelled first. */
+  private sleep(ms: number, signal: AbortSignalLike): Promise<boolean> {
+    return new Promise<boolean>(resolve => {
+      const cancel = this.clock.schedule(() => {
+        registration.detach();
+        resolve(true);
+      }, ms);
+      const registration = registerAbort(signal, () => {
+        cancel();
+        resolve(false);
+      });
+      if (registration.aborted) {
+        cancel();
+        resolve(false);
+      }
+    });
   }
 
   private begin(method: string, request: Uint8Array, signal: AbortSignalLike) {

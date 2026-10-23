@@ -550,8 +550,11 @@ type WatchRunsResponse struct {
 	Liveness        RunLiveness `protobuf:"varint,3,opt,name=liveness,proto3,enum=vibesys.api.v1.RunLiveness" json:"liveness,omitempty"`
 	Removed         bool        `protobuf:"varint,4,opt,name=removed,proto3" json:"removed,omitempty"`
 	InitialComplete bool        `protobuf:"varint,5,opt,name=initial_complete,json=initialComplete,proto3" json:"initial_complete,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Emitted at least every five seconds, after all preceding run observations.
+	// A receiver expires its facts after thirty seconds without a frame.
+	Heartbeat     bool `protobuf:"varint,6,opt,name=heartbeat,proto3" json:"heartbeat,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WatchRunsResponse) Reset() {
@@ -615,6 +618,13 @@ func (x *WatchRunsResponse) GetRemoved() bool {
 func (x *WatchRunsResponse) GetInitialComplete() bool {
 	if x != nil {
 		return x.InitialComplete
+	}
+	return false
+}
+
+func (x *WatchRunsResponse) GetHeartbeat() bool {
+	if x != nil {
+		return x.Heartbeat
 	}
 	return false
 }
@@ -1037,14 +1047,15 @@ const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\bsessions\x18\x06 \x03(\tB3\xbaH0\x92\x01-\x10\x80\x80@\x18\x01\"%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\bsessions\x12P\n" +
 	"\x0fdescriptor_sets\x18\a \x03(\v2\x1d.vibesys.api.v1.DescriptorSetB\b\xbaH\x05\x92\x01\x02\x10@R\x0edescriptorSetsB\v\n" +
 	"\t_keyframe\"\x12\n" +
-	"\x10WatchRunsRequest\"\xf4\x04\n" +
+	"\x10WatchRunsRequest\"\xdf\x05\n" +
 	"\x11WatchRunsResponse\x12B\n" +
 	"\x06run_id\x18\x01 \x01(\tB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$R\x05runId\x12-\n" +
 	"\x04head\x18\x02 \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x12A\n" +
 	"\bliveness\x18\x03 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessB\b\xbaH\x05\x82\x01\x02\x10\x01R\bliveness\x12\x18\n" +
 	"\aremoved\x18\x04 \x01(\bR\aremoved\x12)\n" +
-	"\x10initial_complete\x18\x05 \x01(\bR\x0finitialComplete:\xe3\x02\xbaH\xdf\x02\x1a\xdc\x02\n" +
-	"\x10watch_runs.shape\x12drun_id, head, liveness, removed and initial_complete must form an entry, tombstone or initial marker\x1a\xe1\x01this.initial_complete ? (this.run_id == '' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != '' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))\"\xd5\x01\n" +
+	"\x10initial_complete\x18\x05 \x01(\bR\x0finitialComplete\x12\x1c\n" +
+	"\theartbeat\x18\x06 \x01(\bR\theartbeat:\xb0\x03\xbaH\xac\x03\x1a\xa9\x03\n" +
+	"\x10watch_runs.shape\x12orun_id, head, liveness, removed and initial_complete must form an entry, tombstone, initial marker or heartbeat\x1a\xa3\x02(this.initial_complete || this.heartbeat) ? (!(this.initial_complete && this.heartbeat) && this.run_id == '' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != '' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))\"\xd5\x01\n" +
 	"\x0fGetBlobsRequest\x12?\n" +
 	"\x06run_id\x18\x01 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\x125\n" +
 	"\x06sha256\x18\x02 \x03(\tB\x1d\xbaH\x1a\x92\x01\x17\x10\x80\x02\"\x12r\x102\x0e^[0-9a-f]{64}$R\x06sha256\x12J\n" +

@@ -1,8 +1,8 @@
 import {afterAll, beforeAll, expect, test} from 'bun:test';
-import {create} from '@bufbuild/protobuf';
+import {create, toBinary} from '@bufbuild/protobuf';
 import {type HostKey, recordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge, GatewayCall} from '@vibesys/ipc';
-import {LifecycleSchema} from '@vibesys/proto';
+import {LifecycleSchema, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
@@ -42,7 +42,18 @@ class FakeTransport implements GatewayBridge {
       },
     };
   }
-  stream() {
+  stream(_host: HostKey, method: string, _bytes: Uint8Array, receive: (bytes: Uint8Array) => void) {
+    if (method.endsWith('/WatchRuns'))
+      receive(
+        toBinary(
+          WatchRunsResponseSchema,
+          create(WatchRunsResponseSchema, {
+            runId: 'run-1',
+            liveness: RunLiveness.ENDED,
+            head: {epoch: 1},
+          }),
+        ),
+      );
     this.streams += 1;
     let active = true;
     return {
@@ -55,7 +66,7 @@ class FakeTransport implements GatewayBridge {
   }
 }
 
-test('Relaunch starts when observation becomes available and cancels when disabled', async () => {
+test('liveness starts independently of lifecycle and all owned work cancels when disabled', async () => {
   const bridge = new FakeTransport();
   const clock = new FakeClock();
   const container = document.createElement('div');
@@ -86,7 +97,7 @@ test('Relaunch starts when observation becomes available and cancels when disabl
     await render(false, false);
     expect(bridge.streams).toBe(0);
     await render(true, false);
-    expect(bridge.streams).toBe(1);
+    expect(bridge.streams).toBe(2);
     await render(true, true);
     const relaunch = [...container.querySelectorAll('button')].find(
       button => button.textContent === 'Resume',

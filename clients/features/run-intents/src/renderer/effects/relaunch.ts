@@ -10,7 +10,6 @@ import {
   type RelaunchObservation,
   type RelaunchRequest,
   RUN_LIVENESS_METHOD,
-  RunLiveness,
 } from '@vibesys/runs/intents';
 import {createActor, fromCallback, fromPromise} from 'xstate';
 import {livenessWatchMachine, type RelaunchEvent, relaunchMachine} from '../../state/index.js';
@@ -26,14 +25,14 @@ export function relaunchActor(input: {
     relaunchMachine.provide({
       actors: {
         liveness: fromCallback<RelaunchEvent>(({sendBack}) => {
-          const unknown = () =>
-            sendBack({type: 'liveness', value: {epoch: 0n, value: RunLiveness.UNSPECIFIED}});
+          const unknown = () => sendBack({type: 'stale'});
           const watcher = createActor(
             livenessWatchMachine.provide({
               actions: {
                 unknown,
                 observed: ({event}) => {
                   if (event.type === 'liveness') sendBack(event);
+                  sendBack({type: 'heartbeat'});
                 },
               },
               actors: {
@@ -45,7 +44,7 @@ export function relaunchActor(input: {
                     bytes => {
                       try {
                         const value = livenessResponse(bytes, input.request.runId);
-                        if (value !== null) ended({type: 'liveness', value});
+                        ended(value === null ? {type: 'heartbeat'} : {type: 'liveness', value});
                       } catch {
                         ended({type: 'ended'});
                       }

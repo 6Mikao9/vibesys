@@ -116,3 +116,14 @@ export function copyRelaunchObservation(value: RelaunchObservation): RelaunchObs
     ...(value.lifecycle ? {lifecycle: clone(LifecycleSchema, value.lifecycle)} : {}),
   };
 }
+
+/** A successor epoch is durable confirmation, even when the request reply was lost. */
+export function confirmedRelaunchEpoch(
+  request: RelaunchRequest,
+  observation: RelaunchObservation,
+  liveness: RelaunchLiveness,
+  historyEpoch: bigint,
+): bigint | null {
+  const epoch = [observation.epoch, liveness.epoch, historyEpoch].reduce((a, b) => (a > b ? a : b));
+  return epoch > request.expectedEpoch ? epoch : null;
+}

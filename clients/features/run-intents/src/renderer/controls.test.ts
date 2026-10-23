@@ -358,7 +358,7 @@ test('relaunch rejects malformed, missing, stale and unknown outcomes as uncerta
   }
 });
 
-test('Tail may observe a new epoch before HostCall acknowledges it without cancelling the launch', async () => {
+test('a confirming epoch supersedes HostCall and cancels the obsolete wait', async () => {
   const bridge = new FakeGatewayBridge();
   const clock = new FakeClock();
   const actor = relaunchActor({
@@ -381,7 +381,7 @@ test('Tail may observe a new epoch before HostCall acknowledges it without cance
         lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
       },
     });
-    expect(bridge.calls[0]?.cancelled).toBe(false);
+    expect(bridge.calls[0]?.cancelled).toBe(true);
     bridge.calls[0]?.resolve(
       toBinary(
         HostCallResponseSchema,
@@ -391,7 +391,8 @@ test('Tail may observe a new epoch before HostCall acknowledges it without cance
       ),
     );
     await waitFor(actor, snapshot => snapshot.matches('settled'), {timeout: 1000});
-    expect(actor.getSnapshot().context.result?.outcome).toEqual({case: 'epoch', value: 2n});
+    expect(actor.getSnapshot().context.result).toBeNull();
+    expect(actor.getSnapshot().context.observation.epoch).toBe(2n);
     actor.send({
       type: 'observe',
       observation: {

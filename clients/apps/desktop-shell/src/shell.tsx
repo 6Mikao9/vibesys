@@ -13,6 +13,7 @@ import {
   projectRunGaps,
   recentNotice,
   runLabels,
+  runProjectRoot,
   runsKnown,
   type Screen,
   type SidebarState,
@@ -37,7 +38,7 @@ import {
   type NewRunSnapshot,
 } from '@vibesys/feature-new-run/renderer';
 import type {RunPageNavigation, RunPagePage} from '@vibesys/feature-run-page/renderer';
-import {RUN_ROUTE, routeQuery, runRecord} from '@vibesys/feature-run-page/state';
+import {RUN_ROUTE, routeQuery} from '@vibesys/feature-run-page/state';
 import {
   createGroupingStore,
   type GroupingStore,
@@ -53,13 +54,7 @@ import {
 } from '@vibesys/feature-settings/renderer';
 import {shownTheme} from '@vibesys/feature-settings/state';
 import {createUsageStore, type SpendRunRef, UsageScreen} from '@vibesys/feature-usage/renderer';
-import {
-  type HostKey,
-  hostFromKey,
-  hostLabel,
-  problemWord,
-  recordedProjectRoot,
-} from '@vibesys/hosts';
+import {type HostKey, hostFromKey, hostLabel, problemWord} from '@vibesys/hosts';
 import {gatewayBridge, settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
@@ -275,14 +270,8 @@ function RunRoute(props: {
 }): JSX.Element {
   const {run, sidebar, stores, place} = props;
   const recent = sidebar.recent.find(each => sameRun(each, run));
-  const record = useMemo(
-    () => runRecord(sidebar.listings, run, recent),
-    [sidebar.listings, run, recent],
-  );
-  const project =
-    record.kind === 'live' || record.kind === 'ended'
-      ? (recordedProjectRoot(record.run.projectRoot) ?? '')
-      : '';
+  const projectRoot = runProjectRoot(sidebar, run);
+  const project = projectRoot ?? '';
   const unavailableWindow = place.unavailable['open-window'];
   const seed = useMemo(
     () => ({
@@ -305,6 +294,7 @@ function RunRoute(props: {
     <GatewayRun
       key={`${run.host}/${run.runId}`}
       seed={seed}
+      projectRoot={projectRoot}
       bridge={gateway}
       schedule={stores.schedule}
       address={stores.page.address}

@@ -74,7 +74,10 @@ export const runObservationMachine = setup({
   },
   initial: 'watching',
   states: {
+    // The host refused the run: there is nothing to watch, and a new observation is the only retry.
+    stopped: {},
     watching: {
+      always: {guard: ({context}) => context.failure?.kind === 'refused', target: 'stopped'},
       initial: 'waiting',
       invoke: {
         id: 'watch',
@@ -88,11 +91,25 @@ export const runObservationMachine = setup({
           after: {deadline: '#runObservation.retrying'},
           on: {ready: {target: 'live', actions: assign({watchFailed: false, watchAttempts: 0})}},
         },
-        live: {},
+        live: {
+          after: {deadline: '#runObservation.retrying'},
+          on: {
+            ready: {
+              target: 'live',
+              reenter: true,
+              actions: assign({watchFailed: false, watchAttempts: 0}),
+            },
+          },
+        },
       },
     },
     retrying: {
-      entry: assign({watchFailed: true, watchAttempts: ({context}) => context.watchAttempts + 1}),
+      always: {guard: ({context}) => context.failure?.kind === 'refused', target: 'stopped'},
+      entry: assign({
+        watchFailed: true,
+        hint: undefined,
+        watchAttempts: ({context}) => context.watchAttempts + 1,
+      }),
       after: {retry: 'watching'},
     },
   },

@@ -2,6 +2,7 @@ import type {HostKey} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {
+  confirmedRelaunchEpoch,
   type RelaunchLiveness,
   type RelaunchObservation,
   RunLiveness,
@@ -24,17 +25,22 @@ export function useRelaunch(props: {
   readonly projectRoot: string;
   readonly runId: string;
   readonly observation: RelaunchObservation | undefined;
+  readonly enabled: boolean;
+  readonly historyEpoch: bigint;
   readonly schedule: ScheduleTimeout;
-}): {readonly view: RelaunchView | undefined; readonly liveness: RelaunchLiveness} {
+}): {
+  readonly view: RelaunchView | undefined;
+  readonly liveness: RelaunchLiveness;
+  readonly fresh: boolean;
+} {
   const [snapshot, setSnapshot] = useState<SnapshotFrom<typeof relaunchMachine> | null>(null);
   const current = useRef<ReturnType<typeof relaunchActor> | null>(null);
   const observation = useRef(props.observation);
   observation.current = props.observation;
-  const enabled = props.observation !== undefined;
+  const enabled = props.enabled;
   useEffect(() => {
     if (!enabled) return;
-    const initial = observation.current;
-    if (!initial) return;
+    const initial = observation.current ?? {epoch: 0n};
     const actor = relaunchActor({
       bridge: props.bridge,
       host: props.host,
@@ -54,29 +60,43 @@ export function useRelaunch(props: {
   useEffect(() => {
     if (props.observation) current.current?.send({type: 'observe', observation: props.observation});
   }, [props.observation]);
-  if (!enabled || !snapshot) return {view: undefined, liveness: UNKNOWN};
-  const liveness = snapshot.context.liveness;
-  if (
-    snapshot.matches('ready') &&
-    relaunchTarget(snapshot.context.observation, snapshot.context.liveness) === null &&
-    snapshot.context.result === null
-  )
-    return {view: undefined, liveness};
+  useEffect(() => {
+    current.current?.send({type: 'epoch', epoch: props.historyEpoch});
+  }, [props.historyEpoch]);
+  if (!enabled || !snapshot) return {view: undefined, liveness: UNKNOWN, fresh: false};
+  const owned =
+    current.current?.getSnapshot() === snapshot &&
+    snapshot.context.request.projectRoot === props.projectRoot;
+  const liveness = owned ? snapshot.context.liveness : UNKNOWN;
+  const confirmed = snapshot.context.attempted
+    ? confirmedRelaunchEpoch(
+        snapshot.context.request,
+        snapshot.context.observation,
+        liveness,
+        snapshot.context.historyEpoch,
+      )
+    : null;
+  const appliedEpoch =
+    confirmed ??
+    (snapshot.context.result?.outcome.case === 'epoch'
+      ? snapshot.context.result.outcome.value
+      : null);
   const view: RelaunchView = {
-    state:
-      snapshot.matches('ready') &&
-      relaunchTarget(snapshot.context.observation, snapshot.context.liveness) === null
-        ? 'unavailable'
-        : snapshot.value,
-    result: relaunchLabel(snapshot.context.result),
-    appliedEpoch:
-      snapshot.context.result?.outcome.case === 'epoch'
-        ? snapshot.context.result.outcome.value
-        : null,
-    available: relaunchTarget(snapshot.context.observation, snapshot.context.liveness) !== null,
-    launch: () => current.current?.send({type: 'relaunch'}),
+    state: snapshot.value,
+    result:
+      appliedEpoch === null
+        ? relaunchLabel(snapshot.context.result)
+        : `Epoch ${appliedEpoch.toString()}`,
+    appliedEpoch,
+    available:
+      props.observation !== undefined && relaunchTarget(props.observation, liveness) !== null,
+    launch: () => {
+      if (props.observation)
+        current.current?.send({type: 'observe', observation: props.observation});
+      current.current?.send({type: 'relaunch'});
+    },
   };
-  return {view, liveness};
+  return {view, liveness, fresh: owned && snapshot.context.fresh};
 }
 
 /** The page owns the lifecycle reader; this hook only translates the machine's refresh request. */
