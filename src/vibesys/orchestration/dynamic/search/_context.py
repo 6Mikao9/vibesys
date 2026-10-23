@@ -58,8 +58,7 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkPlan,
     fact_coverage,
 )
-from vs_core.api import ComparisonVerdict
-from vs_core.api.search import EvidenceKind, InvocationRef, RevisionRef
+from vs_core.api.search import ComparisonVerdict, EvidenceKind, InvocationRef, RevisionRef
 
 
 class RunningWork(Protocol):

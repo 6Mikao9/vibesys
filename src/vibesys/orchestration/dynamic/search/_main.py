@@ -40,8 +40,7 @@ from vibesys.orchestration.dynamic.search._values import (
     MergeSource,
     ViolationCode,
 )
-from vs_core.api import ComparisonVerdict
-from vs_core.api.search import EvidenceKind, RevisionRef, TaskTerms, Value
+from vs_core.api.search import ComparisonVerdict, EvidenceKind, RevisionRef, TaskTerms, Value
 
 
 @dataclass(frozen=True)
