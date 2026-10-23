@@ -12,7 +12,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import {arch, platform} from 'node:os';
+import {arch, platform, tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Transform} from 'node:stream';
 import {fileURLToPath} from 'node:url';
@@ -159,8 +159,10 @@ for (const mode of ['socket', 'connect pipe'] as const) {
   });
 }
 
-// The identical contract runs over the scheduled Fake in ipc/src/gateway-port.test.ts.
-test('MessageChannelMain preserves FIFO, copies bytes and truncates on close', async () => {
+// The identical steps run over the scheduled Fake in ipc/src/gateway-port.test.ts: the receiver
+// closes first or not, the sender posts every message and closes at once, and the receiver reports
+// what arrived once its port is closed. The receiver is another process, as the page is.
+test('MessageChannelMain across processes preserves FIFO, copies bytes and stops at a closed peer', async () => {
   const cases: Array<{
     name: string;
     messages: number[][];
@@ -168,6 +170,22 @@ test('MessageChannelMain preserves FIFO, copies bytes and truncates on close', a
     expected: number[][];
   }> = JSON.parse(
     await readFile(join(repository, 'proto/testdata/gateway_port/contract.json'), 'utf8'),
+  );
+  const directory = await mkdtemp(join(tmpdir(), 'vibesys-port-peer-'));
+  const peer = join(directory, 'peer.cjs');
+  await writeFile(
+    peer,
+    `process.parentPort.once('message', event => {
+  const [port] = event.ports;
+  const received = [];
+  port.on('message', message => received.push([...message.data]));
+  port.on('close', () => process.parentPort.postMessage({received}));
+  port.start();
+  process.parentPort.on('message', command => {
+    if (command.data === 'close-receiver') port.close();
+  });
+});
+`,
   );
   const app = await electron.launch({
     args: [fileURLToPath(new URL('./gateway-app.mjs', import.meta.url)), ...electronRuntimeArgs()],
@@ -180,43 +198,37 @@ test('MessageChannelMain preserves FIFO, copies bytes and truncates on close', a
   });
   try {
     for (const row of cases) {
-      const received = await app.evaluate(async ({MessageChannelMain}, row) => {
-        const {port1, port2} = new MessageChannelMain();
-        const received: number[][] = [];
-        const ended = new Promise<void>(resolve => {
-          port1.on('close', resolve);
-          port2.on('close', resolve);
-        });
-        let arrived = (): void => {};
-        const allArrived = new Promise<void>(resolve => {
-          arrived = resolve;
-        });
-        port2.on('message', event => {
-          received.push([...event.data]);
-          if (received.length === row.expected.length) arrived();
-        });
-        port1.start();
-        port2.start();
-        if (row.receiverClosed) {
-          port2.close();
-          await ended;
-        }
-        for (const values of row.messages) {
-          const bytes = new Uint8Array(values);
-          port1.postMessage(bytes);
-          bytes.fill(99);
-        }
-        // Ports in one process may drop what is still in flight on close, so the delivered
-        // cases wait for arrival first; the page ends a call with a reply and then closes.
-        if (row.expected.length > 0) await allArrived;
-        port1.close();
-        await ended;
-        return received;
-      }, row);
+      const received = await app.evaluate(
+        async ({MessageChannelMain, utilityProcess}, {row, peer}) => {
+          const child = utilityProcess.fork(peer);
+          const report = new Promise<number[][]>(resolve => {
+            child.on('message', (message: {received: number[][]}) => resolve(message.received));
+          });
+          const {port1, port2} = new MessageChannelMain();
+          const senderSawClose = new Promise<void>(resolve => port1.on('close', resolve));
+          child.postMessage(null, [port2]);
+          port1.start();
+          if (row.receiverClosed) {
+            child.postMessage('close-receiver');
+            await senderSawClose;
+          }
+          for (const values of row.messages) {
+            const bytes = new Uint8Array(values);
+            port1.postMessage(bytes);
+            bytes.fill(99);
+          }
+          port1.close();
+          const delivered = await report;
+          child.kill();
+          return delivered;
+        },
+        {row, peer},
+      );
       expect(received, row.name).toEqual(row.expected);
     }
   } finally {
     await app.close();
+    await rm(directory, {recursive: true, force: true});
   }
 });
 

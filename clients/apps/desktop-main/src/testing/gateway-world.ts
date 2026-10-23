@@ -24,7 +24,7 @@ const createPreload = createRequire(import.meta.url)(
 export function gatewayWorld(seed: number, request: (call: GatewayWireCall) => void) {
   const clock = new FakeClock();
   const schedule = new Schedule(seed, clock);
-  const session: GatewaySessionFactory = duplex =>
+  const session: GatewaySessionFactory = (duplex, _timers, lost) =>
     new FakeGatewaySession(
       duplex,
       schedule,
@@ -43,6 +43,7 @@ export function gatewayWorld(seed: number, request: (call: GatewayWireCall) => v
         } else request(call);
       },
       clock.schedule,
+      lost,
     );
   const calls = new GatewayCalls(
     async () => true,

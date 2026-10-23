@@ -89,3 +89,45 @@ for (const row of rows)
       stream.close();
     }
   });
+
+test('a closed session tells its owner once, fails calls in flight, and refuses new ones', async () => {
+  const hang = createServer();
+  hang.on('stream', (stream: ServerHttp2Stream) => {
+    stream.on('error', () => {});
+    stream.on('data', () => {});
+  });
+  const incoming = new PassThrough();
+  const outgoing = new PassThrough();
+  const client = Duplex.from({readable: incoming, writable: outgoing});
+  const remote = Duplex.from({readable: outgoing, writable: incoming});
+  client.on('error', () => {});
+  remote.on('error', () => {});
+  hang.emit('connection', remote);
+  let lost = 0;
+  let told = (): void => {};
+  const toldOnce = new Promise<void>(resolve => {
+    told = resolve;
+  });
+  const session = new Http2GatewaySession(client, new FakeClock().schedule, () => {
+    lost += 1;
+    told();
+  });
+  const failure = session.unary('/a.B/Read', new Uint8Array(), new AbortController().signal).then(
+    () => 'answered',
+    error => String(error),
+  );
+  await new Promise(resolve => setImmediate(resolve));
+  session.close();
+  session.close();
+  // Destroying ends the stream with or without a clean end, so either failure is the contract.
+  expect(['Error: gRPC connection closed', 'GrpcError: missing gRPC status']).toContain(
+    await failure,
+  );
+  expect(lost).toBe(0);
+  await toldOnce;
+  await new Promise(resolve => setImmediate(resolve));
+  expect(lost).toBe(1);
+  await expect(
+    session.unary('/a.B/Read', new Uint8Array(), new AbortController().signal),
+  ).rejects.toThrow('The session has been destroyed');
+});

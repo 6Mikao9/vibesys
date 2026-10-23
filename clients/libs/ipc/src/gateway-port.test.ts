@@ -1,4 +1,8 @@
-/** Same cases run over Electron's MessageChannelMain in desktop-main/e2e/gateway.spec.ts. */
+/**
+ * The same steps run over Electron's MessageChannelMain between two processes in
+ * desktop-main/e2e/gateway.spec.ts: the receiver closes first or not, the sender posts every message
+ * and closes at once, and what the receiver got is compared.
+ */
 import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {FakeGatewayPort} from './testing/index.js';
@@ -17,24 +21,33 @@ const cases: Array<{
 for (const row of cases)
   test(`Fake gateway port contract: ${row.name}`, () => {
     const tasks: Array<() => void> = [];
+    const flush = (): void => {
+      while (tasks.length) tasks.shift()?.();
+    };
     const {main, page} = FakeGatewayPort.pair((_lane, task) => tasks.push(task), structuredClone);
     const received: number[][] = [];
-    let closed = 0;
+    const sawClose = {sender: 0, receiver: 0};
+    // The sender is the main process; the receiver is the page, another process.
     page.listen(value => received.push([...(value as Uint8Array)]));
     page.on('close', () => {
-      closed += 1;
+      sawClose.receiver += 1;
     });
     main.on('close', () => {
-      closed += 1;
+      sawClose.sender += 1;
     });
-    if (row.receiverClosed) page.close();
+    if (row.receiverClosed) {
+      page.close();
+      flush();
+    }
     for (const value of row.messages) {
       const bytes = new Uint8Array(value);
       main.postMessage(bytes);
       bytes.fill(99);
     }
     main.close();
-    while (tasks.length) tasks.shift()?.();
+    flush();
     expect(received).toEqual(row.expected);
-    expect(closed).toBe(row.receiverClosed ? 0 : 1);
+    expect(sawClose).toEqual(
+      row.receiverClosed ? {sender: 1, receiver: 0} : {sender: 0, receiver: 1},
+    );
   });

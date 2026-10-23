@@ -79,3 +79,32 @@ test('a method outside the gateway grammar and an aborted signal fail before any
     'caller left',
   );
 });
+
+test('a closed session tells its owner once, fails calls in flight, and refuses new ones', async () => {
+  const clock = new FakeClock();
+  const schedule = new Schedule(5, clock);
+  let lost = 0;
+  const silent = new FakeGatewaySession(
+    new PassThrough(),
+    schedule,
+    () => {},
+    clock.schedule,
+    () => {
+      lost += 1;
+    },
+  );
+  const inFlight = silent.unary('/a.B/Read', new Uint8Array(), new AbortController().signal);
+  const failure = inFlight.then(
+    () => 'answered',
+    error => String(error),
+  );
+  silent.drop();
+  silent.close();
+  expect(await schedule.run(failure)).toBe('Error: gRPC connection closed');
+  expect(lost).toBe(0);
+  await schedule.quiesce();
+  expect(lost).toBe(1);
+  await expect(
+    silent.unary('/a.B/Read', new Uint8Array(), new AbortController().signal),
+  ).rejects.toThrow('The session has been destroyed');
+});

@@ -16,16 +16,28 @@ export interface GatewayWireCall {
 
 export class FakeGatewaySession implements GatewaySession {
   readonly #calls = new Set<() => void>();
+  #closed = false;
   constructor(
     private readonly duplex: Duplex,
     private readonly schedule: Schedule,
     private readonly request: (call: GatewayWireCall) => void,
     private readonly timers: ScheduleTimeout,
+    private readonly lost: () => void = () => {},
   ) {}
 
+  /** Destroy the session as the real one does: calls fail, the duplex goes, `lost` is told. */
   close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
     for (const close of [...this.#calls]) close();
     this.duplex.destroy();
+    // The real session reports its close on a later turn, never inside close().
+    this.schedule.post(this, this.lost);
+  }
+
+  /** The link drops under the session: the same as a close nobody asked for. */
+  drop(): void {
+    this.close();
   }
 
   async unary(method: string, bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array> {
@@ -54,6 +66,7 @@ export class FakeGatewaySession implements GatewaySession {
   ): Promise<void> {
     if (!/^\/[A-Za-z][\w.]*\/[A-Za-z]\w*$/.test(method))
       return Promise.reject(new Error(`invalid gRPC method: ${method}`));
+    if (this.#closed) return Promise.reject(new Error('The session has been destroyed'));
     if (signal.aborted) return Promise.reject(signal.reason);
     try {
       grpcFrame(bytes);
