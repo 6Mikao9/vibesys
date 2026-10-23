@@ -39,7 +39,9 @@ if TYPE_CHECKING:
     from vs_runtime.api.testing import Run
 
 
-def resume_after_wedged_stop(at: int, grace: int, boundary: Point) -> tuple[CoreState, Run]:
+def resume_after_wedged_stop(
+    at: int, delay: int, grace: int, boundary: Point
+) -> tuple[CoreState, Run]:
     """The core state the stopped host left, and the run the resumed host made of it."""
     with TemporaryDirectory() as directory, pytest.MonkeyPatch.context() as environment:
         environment.setenv("VIBESYS_STATE_HOME", str(Path(directory) / "state"))
@@ -49,6 +51,7 @@ def resume_after_wedged_stop(at: int, grace: int, boundary: Point) -> tuple[Core
             fault=Fault.WEDGED_STOP,
             at=at,
             boundary=boundary,
+            delay=delay,
             grace=grace,
         )
         with world.open(resume=False) as resources:
@@ -64,9 +67,9 @@ def resume_after_wedged_stop(at: int, grace: int, boundary: Point) -> tuple[Core
             return before, world.host(resume=True, now=first.clock.now() + 1000).run()
 
 
-def assert_resumes_to_ready(at: int, grace: int, boundary: Point) -> None:
+def assert_resumes_to_ready(at: int, delay: int, grace: int, boundary: Point) -> None:
     """The class property: whatever the stopped host left in flight, the resume is ready."""
-    before, run = resume_after_wedged_stop(at, grace, boundary)
+    before, run = resume_after_wedged_stop(at, delay, grace, boundary)
     core = run.core
     assert run.halted is None, run.halted
     assert core.records.recovery.phase is RecoveryPhase.READY
@@ -94,15 +97,21 @@ def assert_resumes_to_ready(at: int, grace: int, boundary: Point) -> None:
 @settings(
     max_examples=examples(pr=6, nightly=80), phases=(Phase.explicit, Phase.generate), database=None
 )
-@example(at=13, grace=0, boundary=Point.COMMIT)
-@example(at=13, grace=3, boundary=Point.COMMIT)
-@example(at=20, grace=5, boundary=Point.COMMIT)
-@given(at=st.integers(1, 90), grace=st.integers(0, 12), boundary=st.sampled_from(tuple(Point)))
+@example(at=13, delay=6, grace=3, boundary=Point.COMMIT)
+@given(
+    at=st.integers(1, 90),
+    delay=st.integers(1, 30),
+    grace=st.integers(0, 12),
+    boundary=st.sampled_from(tuple(Point)),
+)
 def test_a_run_stopped_with_its_agents_wedged_resumes_to_ready(
-    at: int, grace: int, boundary: Point
+    at: int, delay: int, grace: int, boundary: Point
 ) -> None:
     try:
-        assert_resumes_to_ready(at, grace, boundary)
+        assert_resumes_to_ready(at, delay, grace, boundary)
     except AssertionError as error:
-        error.add_note(f"wedged stop after {boundary} {at}, killed {grace} durable points later")
+        error.add_note(
+            f"provider wedged after {boundary} {at}; stopped {delay} points later; "
+            f"killed {grace} points after that"
+        )
         raise

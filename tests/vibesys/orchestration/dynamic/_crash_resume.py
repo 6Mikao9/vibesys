@@ -86,9 +86,9 @@ class Fault(StrEnum):
     PROVIDER = "provider"
     """The agent provider errors: the next turns never answer and the first cancel of one hangs."""
     WEDGED_STOP = "wedged-stop"
-    """The agent provider wedges and the host is stopped: every turn, cancel and close stays
-    unanswered until the host is killed ``grace`` durable points later, so its stop leaves them
-    begun and never sealed."""
+    """The agent provider wedges: every turn, cancel and close stays unanswered. The operator
+    stops the host ``delay`` durable points later, after the turns outlasted their limits, and
+    kills it ``grace`` points after that, so what it left in flight is begun and never sealed."""
 
 
 PROVIDER_OUTAGE = 2
@@ -103,9 +103,10 @@ class Point(StrEnum):
 class DurableStore(FakeStateStore):
     """Commit faults use the common FaultPlan; stalls advance only virtual time."""
 
-    def __init__(self, fault: Fault, at: int, boundary: Point, grace: int) -> None:
+    def __init__(self, fault: Fault, at: int, boundary: Point, delay: int, grace: int) -> None:
         super().__init__()
         self.at = at
+        self.delay = delay
         self.boundary = boundary
         self.receipts = 0
         self.fault = fault
@@ -126,7 +127,7 @@ class DurableStore(FakeStateStore):
                         target=boundary.value,
                         # A stopped host that the provider wedged is killed ``grace`` durable
                         # points after its stop, as an operator kills one that outlasts its grace.
-                        at=at + grace if fault is Fault.WEDGED_STOP else at,
+                        at=at + delay + grace if fault is Fault.WEDGED_STOP else at,
                         fault=HostFault.CRASH_AFTER,
                     ),
                 )
@@ -154,7 +155,12 @@ class DurableStore(FakeStateStore):
 
     def crossing(self, boundary: Point, ordinal: int) -> None:
         """Fault decisions use durable ordinals, never scheduler timing."""
-        if boundary is not self.boundary or ordinal != self.at:
+        if boundary is not self.boundary:
+            return
+        if self.fault is Fault.WEDGED_STOP:
+            self.wedge(ordinal)
+            return
+        if ordinal != self.at:
             return
         if self.fault is Fault.STALL:
             assert self.clock is not None
@@ -165,8 +171,13 @@ class DurableStore(FakeStateStore):
             self.refusing = True
         elif self.fault is Fault.PROVIDER:
             self.outage, self.hung_cancels = PROVIDER_OUTAGE, 1
-        elif self.fault is Fault.WEDGED_STOP:
-            self.stopping = self.wedged = True
+
+    def wedge(self, ordinal: int) -> None:
+        """The provider wedges, and the operator stops the host once the turns outlasted it."""
+        if ordinal == self.at:
+            self.wedged = True
+        elif ordinal == self.at + self.delay:
+            self.stopping = True
 
     def provider_silence(self, request: Request) -> Unknown | None:
         """Silence for an agent call the outage swallows: no reply ever arrives.
@@ -231,12 +242,13 @@ class ResumeWorld:
         fault: Fault,
         at: int,
         boundary: Point = Point.COMMIT,
+        delay: int = 0,
         grace: int = 0,
     ) -> None:
         root.mkdir()
         (root / "candidate.py").write_text("VALUE = 1\n")
         self.git = FakeGitRepositories()
-        self.store = DurableStore(fault, at, boundary, grace)
+        self.store = DurableStore(fault, at, boundary, delay, grace)
         self.effects = Effects()
         self.delivery = FakePublicationDelivery()
         self.rounds = 1
