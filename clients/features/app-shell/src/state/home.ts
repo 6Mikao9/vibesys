@@ -15,6 +15,13 @@ export type RunsKnown = 'unknown' | 'none' | 'some';
  * `machines` is null while the saved machines are not read yet.
  */
 export function runsKnown(state: SidebarState, machines: readonly HostKey[] | null): RunsKnown {
+  const known = listedRunsKnown(state, machines);
+  // Runs that were shown are not undone by a question reopening (a machine that stopped answering,
+  // a listing asked again): only a settled answer of none sends the shell to New run.
+  return known === 'unknown' && state.runsSeen ? 'some' : known;
+}
+
+function listedRunsKnown(state: SidebarState, machines: readonly HostKey[] | null): RunsKnown {
   if (dashboardRefs(state).length > 0 || liveRows(state).length > 0) return 'some';
   if (!state.overviewHeard || machines === null) return 'unknown';
   if (machines.some(host => !state.listings.some(listing => listing.host === host))) {

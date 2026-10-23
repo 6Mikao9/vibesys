@@ -30,6 +30,7 @@ import {
   type AllRunsState,
   askProjectRuns,
   type ListProjectRuns,
+  projectRunGaps,
   projectRunsListed,
   refreshed,
   reportedRunRefs,
@@ -138,6 +139,8 @@ export interface ShellActions {
 export interface SidebarState {
   /** Whether the overview (the first listings and Recent) has been heard. */
   readonly overviewHeard: boolean;
+  /** Whether any run has been shown: a machine that stops answering later has runs, not none. */
+  readonly runsSeen: boolean;
   /** The latest listing of each host, one per host. */
   readonly listings: readonly HostListing[];
   readonly recent: readonly RecentRun[];
@@ -201,6 +204,7 @@ export type SidebarStep = Step<SidebarState, SidebarRequest>;
 
 export const SIDEBAR_EMPTY: SidebarState = {
   overviewHeard: false,
+  runsSeen: false,
   listings: [],
   recent: [],
   skippedRecent: [],
@@ -258,8 +262,14 @@ export function sidebarStep(state: SidebarState, action: SidebarAction): Sidebar
   const listed = askAllRuns(step.state, retry);
   const asked = askDigests(listed.state, retry);
   const live = askLiveDigests(asked.state, action.type === 'refresh-live-digests');
+  // A project whose listing failed is a project with runs this app cannot list yet, not none.
+  const runsSeen =
+    live.state.runsSeen ||
+    dashboardRefs(live.state).length > 0 ||
+    liveRows(live.state).length > 0 ||
+    projectRunGaps(live.state.allRuns).some(gap => gap.refusal !== null);
   return {
-    state: live.state,
+    state: runsSeen === live.state.runsSeen ? live.state : {...live.state, runsSeen},
     requests: [...step.requests, ...listed.requests, ...asked.requests, ...live.requests],
   };
 }

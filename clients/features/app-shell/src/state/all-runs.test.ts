@@ -8,6 +8,7 @@ import {
   dashboardRows,
   projectRunGaps,
   runLabels,
+  runsKnown,
   SIDEBAR_EMPTY,
   type SidebarAction,
   type SidebarRequest,
@@ -593,7 +594,15 @@ test('property: a link dropped at any point while reading converges to the host 
       ]),
     );
     const world = new FlakyHost(hostRuns, 'ssh:host-a');
-    for (let step = 0; step < 40; step++) world.randomly(random);
+    let hadRuns = false;
+    for (let step = 0; step < 40; step++) {
+      world.randomly(random);
+      // Once runs have been shown, no drop or return of the link makes the home anything but Runs
+      // (the shell would leave for New run on `none`, or on `unknown` after its wait).
+      const known = runsKnown(world.step.state, ['ssh:host-a']);
+      if (hadRuns) expect(known).toBe('some');
+      hadRuns ||= known === 'some';
+    }
     world.returnForGood();
     const state = world.step.state;
     expect(projectRunGaps(state.allRuns)).toEqual([]);
