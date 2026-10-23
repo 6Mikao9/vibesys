@@ -13,7 +13,7 @@ from vs_core.api.search import (
     MeasurementRecipe,
     SpanId,
     Workspace,
-    trusted_keys,
+    judged_keys,
 )
 
 
@@ -41,7 +41,7 @@ async def gate(ctx: Flow, ws: Workspace, closing: Closing) -> Closing:
     gate_span = ctx.operation_span
     if isinstance(found, Failed):
         return closing.ended_by(Failure(kind=FailureKind.UNMEASURED, ended=found.reason))
-    keys = trusted_keys(found, scope=found.scope, candidate=revision, purpose="official")
+    keys = judged_keys(found, scope=found.scope, candidate=revision, purpose="official")
     if not keys:
         none = Failure(
             kind=FailureKind.UNMEASURED, status=found.status.value, detail=found.diagnostic

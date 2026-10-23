@@ -44,11 +44,17 @@ class EvidenceFailureKind(StrEnum):
     to the submission bound. An ambiguous failure (a process killed with no outcome
     record, for example) may be the candidate's or the machinery's: it is measured once
     more, and a second one is final and counts against the candidate.
+
+    An environment refusal is a failure of neither: the task's own evaluator declared that
+    its host refuses to take the measurement now (no free disk, a device or a lock it admits
+    work under), before anything of the candidate was judged. The measurement waits for the
+    host and runs again, without spending a try, until the host takes it or the run ends.
     """
 
     WORKLOAD = "workload"
     INFRASTRUCTURE = "infrastructure"
     AMBIGUOUS = "ambiguous"
+    ENVIRONMENT_REFUSED = "environment_refused"
 
 
 class ContentDigest(BaseModel):

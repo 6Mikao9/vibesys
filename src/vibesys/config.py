@@ -363,6 +363,27 @@ class EvaluationCfg(_Strict):
             "evidence cannot say whose fault it is. At most infrastructure_attempts."
         ),
     )
+    environment_backoff_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        allow_inf_nan=False,
+        description=(
+            "Wait before a measurement is run again after the task's evaluator declared that "
+            "its host refused it (exit status 75: no free disk, a device or a lock it admits "
+            "work under); each further wait doubles. A refusal is no failure and spends no try: "
+            "the measurement waits, reported as queued, for as long as the host refuses."
+        ),
+    )
+    environment_backoff_cap_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        allow_inf_nan=False,
+        description=(
+            "The longest wait between two runs of a measurement its host refused; it bounds how "
+            "long the run takes to notice that the host recovered. At least "
+            "environment_backoff_seconds."
+        ),
+    )
     request_retry_limit: int = Field(
         default=3,
         strict=True,
@@ -387,6 +408,9 @@ class EvaluationCfg(_Strict):
         if self.ambiguous_attempts > self.infrastructure_attempts:
             message = "ambiguous_attempts must be at most infrastructure_attempts"
             raise ValueError(message)
+        if self.environment_backoff_cap_seconds < self.environment_backoff_seconds:
+            message = "environment_backoff_cap_seconds must be at least environment_backoff_seconds"
+            raise ValueError(message)
         if self.request_backoff_cap_seconds < self.request_backoff_seconds:
             message = "request_backoff_cap_seconds must be at least request_backoff_seconds"
             raise ValueError(message)
@@ -405,6 +429,8 @@ class EvaluationCfg(_Strict):
         return EvaluationRetries(
             infrastructure_attempts=self.infrastructure_attempts,
             ambiguous_attempts=self.ambiguous_attempts,
+            environment_backoff=self.environment_backoff_seconds,
+            environment_backoff_cap=self.environment_backoff_cap_seconds,
         )
 
 

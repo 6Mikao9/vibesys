@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from hypothesis import given, settings
+import pytest
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_core.api import (
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
+    MeasurementFailure,
     MeasurementResult,
     ObservationStatus,
     RequestId,
@@ -17,6 +19,7 @@ from vs_core.api import (
     RunId,
     Scope,
     initial_state,
+    judged_keys,
     ledger_refs,
     project,
     trusted_keys,
@@ -78,6 +81,48 @@ def test_only_unflawed_records_of_the_measurement_are_kept(
         if flaw is None or (flaw == _FOREIGN and not pinned)
     )
     assert kept == expected
+
+
+@pytest.mark.regression
+@given(
+    statuses=st.lists(
+        st.sampled_from((ObservationStatus.SUCCEEDED, ObservationStatus.FAILED)), max_size=6
+    ),
+    failure=st.none() | st.sampled_from(MeasurementFailure),
+)
+@example(statuses=[ObservationStatus.FAILED], failure=MeasurementFailure.INFRASTRUCTURE)
+@example(
+    statuses=[ObservationStatus.SUCCEEDED, ObservationStatus.FAILED],
+    failure=MeasurementFailure.AMBIGUOUS,
+)
+def test_a_gate_that_failed_in_a_measurement_that_judged_nothing_is_no_verdict_on_the_candidate(
+    statuses: list[ObservationStatus], failure: MeasurementFailure | None
+) -> None:
+    """A host that refused, or a node that was lost, made the gate fail, not the candidate.
+
+    Regression: a trusted accuracy gate refused for want of free disk, its failed evidence was
+    decoded as the candidate failing the gate, and the candidate was rejected and discarded.
+    """
+    refs = tuple(_ref(f"e{i}", status=status) for i, status in enumerate(statuses))
+    result = MeasurementResult(
+        scope=SCOPE,
+        source_request=REQUEST,
+        evidence=refs,
+        status=ObservationStatus.FAILED,
+        failure=failure,
+    )
+
+    kept = judged_keys(result, scope=SCOPE, candidate=CANDIDATE, purpose="official")
+
+    judged = failure is None or failure.charges_candidate
+    # what succeeded is a fact either way; what failed is a verdict only when it judged
+    assert kept == tuple(
+        ref.key for ref in refs if judged or ref.status is ObservationStatus.SUCCEEDED
+    )
+    # the input's measurement carries the blame beside the failed record, so it reads them all
+    assert trusted_keys(result, scope=SCOPE, candidate=CANDIDATE, purpose="official") == tuple(
+        ref.key for ref in refs
+    )
 
 
 @settings(max_examples=examples(pr=4, nightly=100))
