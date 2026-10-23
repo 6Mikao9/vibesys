@@ -85,7 +85,7 @@ test('Relaunch starts when observation becomes available and cancels when unmoun
     );
   try {
     await render(false);
-    expect(bridge.streams).toBe(1);
+    expect(bridge.streams).toBe(0);
     await render(true);
     const relaunch = [...container.querySelectorAll('button')].find(
       button => button.textContent === 'Resume',

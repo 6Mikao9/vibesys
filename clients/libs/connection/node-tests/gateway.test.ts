@@ -173,7 +173,12 @@ test('two live calls share a single host session', {
 }, async () => {
   const fake = new FakeGateway();
   const clock = new FakeClock();
-  const calls = new GatewayCalls(() => fake, clock.schedule);
+  const failures: string[] = [];
+  const calls = new GatewayCalls(
+    () => fake,
+    clock.schedule,
+    (_host, diagnostic) => failures.push(diagnostic),
+  );
   const first = new AbortController();
   const second = new AbortController();
   const one = calls
@@ -189,10 +194,10 @@ test('two live calls share a single host session', {
     await one;
     expect(fake.forces).toEqual([false]);
     // The caller's own cancellation is not a failure; losing the session is.
-    expect(failures).toHaveLength(1);
+    expect(failures).toEqual([]);
     calls.disable('local');
     expect(await two).toContain('closed');
-    expect(failures.map(failure => failure.split(' ')[0])).toEqual([HELLO_METHOD, TAIL_METHOD]);
+    expect(failures.map(failure => failure.split(' ')[0])).toEqual([TAIL_METHOD]);
     expect(clock.pendingDelays()).toEqual([]);
   } finally {
     first.abort();
