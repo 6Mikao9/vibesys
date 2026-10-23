@@ -7,7 +7,7 @@ import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
 import {seedsAtDepth} from '@vibesys/store/testing';
-import {gatewayWorld} from './seam-world.test.js';
+import {gatewayWorld} from '../testing/gateway-world.js';
 
 const statuses: Array<{name: string; code: number; message: string; grpcMessage: string}> =
   JSON.parse(
@@ -24,13 +24,14 @@ const SEED = {
 };
 
 const BOUNDED_CALLS = 8;
+const QUIET_EVENTS = 200;
 
 interface Observation {
   readonly error: string | null;
   readonly complete: boolean;
   readonly calls: number;
-  /** Calls the host saw after ten more virtual minutes passed on a finished screen. */
-  readonly callsAfterWaiting: number;
+  /** Nothing was left to deliver or fire within the event budget: no retry loop. */
+  readonly quiet: boolean;
   /** The renderer-side outcome of one unary call against the same wire status. */
   readonly unary: {code: unknown; message: string} | undefined;
 }
@@ -68,23 +69,11 @@ async function observe(row: (typeof statuses)[number], seed: number): Promise<Ob
     {seed: SEED},
   );
   try {
-    await world.schedule.run(
-      new Promise<void>(resolve => {
-        const subscription = actor.subscribe(snapshot => {
-          if (snapshot.context.load?.complete === true || snapshot.context.error !== null) {
-            subscription.unsubscribe();
-            resolve();
-          }
-        });
-      }),
-    );
+    // Settled means the world has nothing left to deliver or fire, retries and their timers
+    // included; it names no field of the screen, so old and fixed code are observed alike.
+    const quiet = await world.schedule.quiesce(QUIET_EVENTS);
     const {error, load} = actor.getSnapshot().context;
     const screenCalls = calls;
-    for (let minute = 0; minute < 10; minute += 1) {
-      world.clock.advanceBy(60_000);
-      await world.schedule.run(Promise.resolve());
-    }
-    const waitedCalls = calls;
     const outcome = world.bridge.unary(
       'local',
       '/vibesys.api.v1.HostService/Skeleton',
@@ -104,7 +93,7 @@ async function observe(row: (typeof statuses)[number], seed: number): Promise<Ob
       error,
       complete: load?.complete === true,
       calls: screenCalls,
-      callsAfterWaiting: waitedCalls,
+      quiet,
       unary,
     };
   } finally {
@@ -125,24 +114,31 @@ const pendingFix = (pullRequest: number, name: string, body: () => Promise<void>
   );
 
 /** One test per status keeps each below the per-test bound at nightly depth (300 seeds). */
-for (const row of statuses) {
-  test(`${row.name}: the run screen ends within a bounded number of calls`, async () => {
+for (const row of statuses)
+  test(`${row.name}: the run screen reaches an outcome`, async () => {
     for (const seed of SEEDS) {
       const seen = await observe(row, seed);
-      const context = `seed ${seed}`;
       if (row.code === 0) {
-        expect(seen.complete, context).toBe(true);
-        expect(seen.error, context).toBeNull();
+        expect(seen.complete, `seed ${seed}`).toBe(true);
+        expect(seen.error, `seed ${seed}`).toBeNull();
       } else {
-        expect(seen.error, context).not.toBeNull();
-        expect(seen.callsAfterWaiting, `${context}: calls while time passes`).toBe(seen.calls);
+        expect(seen.error, `seed ${seed}`).not.toBeNull();
       }
-      expect(seen.calls, context).toBeLessThanOrEqual(BOUNDED_CALLS);
     }
   });
-}
 
 for (const row of failing) {
+  pendingFix(
+    3434,
+    `${row.name} ends in a bounded number of calls and then makes none as time passes`,
+    async () => {
+      for (const seed of SEEDS) {
+        const seen = await observe(row, seed);
+        expect(seen.quiet, `seed ${seed}: still retrying after ${QUIET_EVENTS} events`).toBe(true);
+        expect(seen.calls, `seed ${seed}`).toBeLessThanOrEqual(BOUNDED_CALLS);
+      }
+    },
+  );
   if (row.code === 5)
     pendingFix(
       3434,

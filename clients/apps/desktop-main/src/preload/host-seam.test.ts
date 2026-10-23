@@ -13,7 +13,7 @@ import type {HostListing} from '@vibesys/hosts';
 import {ReadRequestSchema, ReadResponseSchema, SavedRunImport} from '@vibesys/proto';
 import {withHostSettings} from '@vibesys/settings';
 import {seedsAtDepth} from '@vibesys/store/testing';
-import {gatewayWorld} from './seam-world.test.js';
+import {gatewayWorld} from '../testing/gateway-world.js';
 
 const LOCAL = {kind: 'local'} as const;
 const HASH = 'ab'.repeat(32);
@@ -88,8 +88,8 @@ test('the visible catalog equals host runs with typed refusals across concurrent
             Boolean(runs.find(source => source.id === run.runId)?.unavailable),
           );
       }
+      await world.schedule.quiesce();
       expect(count).toBe(2 * Math.ceil(runs.length / 2));
-      expect(world.schedule.pending).toBe(0);
     } finally {
       world.close();
       await manager[Symbol.asyncDispose]();

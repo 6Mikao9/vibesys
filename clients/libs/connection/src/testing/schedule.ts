@@ -34,69 +34,93 @@ interface Delivery {
   readonly run: () => void;
 }
 
+/** The virtual timers a world owns; `FakeClock` satisfies it. */
+export interface VirtualTimers {
+  /** Fire the earliest due timer, moving virtual time to it; false when none is left. */
+  runNext(): boolean;
+}
+
 /**
- * FIFO in each lane, seeded ordering between lanes. Progress waits on owned operations or new
- * deliveries, never on a guessed number of microtask turns. A bound counts delivered events.
+ * FIFO in each lane, seeded ordering between lanes, and virtual timers fired when no delivery is
+ * left. Every wait is bounded in scheduler events (a delivery or a timer), and a world with
+ * nothing left to deliver or fire fails with its seed instead of waiting for a wall-clock timeout.
  */
 export class Schedule {
   readonly random: Seeded;
   readonly #queue: Delivery[] = [];
-  #wake: (() => void) | undefined;
-  #pending = 0;
   events = 0;
 
-  constructor(readonly seed: number) {
+  constructor(
+    readonly seed: number,
+    private readonly timers: VirtualTimers = {runNext: () => false},
+  ) {
     this.random = new Seeded(seed);
-  }
-
-  get pending(): number {
-    return this.#pending;
-  }
-  get queued(): number {
-    return this.#queue.length;
   }
 
   post(lane: object, run: () => void): void {
     this.#queue.push({lane, run});
-    this.#wake?.();
   }
 
-  track<T>(operation: Promise<T>): Promise<T> {
-    this.#pending += 1;
-    return operation.finally(() => {
-      this.#pending -= 1;
-      this.#wake?.();
-    });
+  /** Explore until `done` holds. A stalled world or an exhausted bound is a failure. */
+  async until(done: () => boolean, bound = 512): Promise<void> {
+    const start = this.events;
+    for (;;) {
+      await settleMicrotasks();
+      if (done()) return;
+      if (this.events - start >= bound)
+        throw new Error(`seed ${this.seed}: exceeded ${bound} scheduler events`);
+      if (!this.#step())
+        throw new Error(
+          `seed ${this.seed}: stalled after ${this.events - start} scheduler events with nothing to deliver or fire`,
+        );
+    }
   }
 
+  /**
+   * Explore until nothing is left to deliver or fire, retries and their timers included. False
+   * means the world was still busy after `bound` events, as a retry loop is.
+   */
+  async quiesce(bound = 512): Promise<boolean> {
+    const start = this.events;
+    for (;;) {
+      await settleMicrotasks();
+      if (this.events - start >= bound) return false;
+      if (!this.#step()) return true;
+    }
+  }
+
+  /** Explore until `operation` settles, and return its outcome. */
   async run<T>(operation: Promise<T>, bound = 512): Promise<T> {
     let settled = false;
-    const result = this.track(operation).finally(() => {
+    const result = operation.finally(() => {
       settled = true;
-      this.#wake?.();
     });
     // Own the rejection immediately, while deliveries are still in flight.
     void result.catch(() => {});
-    const start = this.events;
-    while (!settled || this.#queue.length > 0) {
-      if (this.events - start >= bound)
-        throw new Error(`seed ${this.seed}: exceeded ${bound} scheduler events`);
-      if (this.#queue.length === 0) {
-        await new Promise<void>(resolve => {
-          this.#wake = resolve;
-        });
-        this.#wake = undefined;
-      } else {
-        const lanes = [...new Set(this.#queue.map(delivery => delivery.lane))];
-        const lane = this.random.pick(lanes);
-        const index = this.#queue.findIndex(delivery => delivery.lane === lane);
-        const [delivery] = this.#queue.splice(index, 1);
-        this.events += 1;
-        delivery?.run();
-        // A delivery may start a new owned operation before the next delivery is chosen.
-        await Promise.resolve();
-      }
-    }
+    await this.until(() => settled, bound);
     return result;
   }
+
+  #step(): boolean {
+    if (this.#queue.length > 0) {
+      const lanes = [...new Set(this.#queue.map(delivery => delivery.lane))];
+      const lane = this.random.pick(lanes);
+      const index = this.#queue.findIndex(delivery => delivery.lane === lane);
+      const [delivery] = this.#queue.splice(index, 1);
+      this.events += 1;
+      delivery?.run();
+      return true;
+    }
+    if (!this.timers.runNext()) return false;
+    this.events += 1;
+    return true;
+  }
+}
+
+/**
+ * Let every promise continuation run before the next event is chosen: one event-loop turn flushes
+ * the microtask queue, however long the continuation chain. It reads no clock.
+ */
+function settleMicrotasks(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
 }

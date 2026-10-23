@@ -1,4 +1,7 @@
-/** Cross-process composition with only message delivery and the socket session replaced. */
+/**
+ * Cross-process composition with only message delivery and the socket session replaced. A
+ * helper for tests, not a test file: the test runner collects only `*.test.ts`.
+ */
 import {EventEmitter} from 'node:events';
 import {createRequire} from 'node:module';
 import {PassThrough} from 'node:stream';
@@ -15,12 +18,12 @@ import type {IpcMainEvent} from 'electron';
 import {installGatewayIpc} from '../main/gateway-ipc.js';
 
 const createPreload = createRequire(import.meta.url)(
-  './welcome.cjs',
-) as typeof import('./welcome.cjs');
+  '../preload/welcome.cjs',
+) as typeof import('../preload/welcome.cjs');
 
 export function gatewayWorld(seed: number, request: (call: GatewayWireCall) => void) {
-  const schedule = new Schedule(seed);
   const clock = new FakeClock();
+  const schedule = new Schedule(seed, clock);
   const session: GatewaySessionFactory = duplex =>
     new FakeGatewaySession(
       duplex,
