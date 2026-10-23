@@ -17,6 +17,7 @@ import {
   TailResponseSchema,
   TerminateRunOutcome,
 } from '@vibesys/proto';
+import {refusalMessage} from './refusal.js';
 
 export type {IntentState, PostIntentRequest, PostIntentResponse} from '@vibesys/proto';
 export {IntentStep} from '@vibesys/proto';
@@ -107,9 +108,12 @@ export function configuredRead(bytes: Uint8Array, checkout: string | null): Uint
 
 /** A typed negative HostCall reply, distinct from an uncertain transport failure. */
 export class IntentRefused extends Error {
+  /** The host's stderr, for logs. */
+  readonly diagnostic: string;
   constructor(failure: ConfigurationFailed) {
-    super(`${failure.message}${failure.stderr ? `: ${failure.stderr}` : ''}`);
+    super(refusalMessage(failure));
     this.name = 'IntentRefused';
+    this.diagnostic = failure.stderr;
   }
 }
 

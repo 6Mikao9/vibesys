@@ -172,6 +172,7 @@ function installGateway(manager: ConnectionManager) {
     manager,
     fileURLToPath(new URL('../gateway/', import.meta.url)),
     realTimers,
+    log,
   );
 }
 

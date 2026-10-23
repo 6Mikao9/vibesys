@@ -5,6 +5,7 @@
 import {
   ConnectionError,
   type ConnectionLease,
+  isHostUnsupported,
   type RegistryCatalog,
   type RegistryProjects,
   type RegistryRunCatalog,
@@ -161,6 +162,9 @@ export class NewRunMain {
         value: await this.#catalog().preflight(host, inputs, new AbortController().signal),
       };
     } catch (error) {
+      if (isHostUnsupported(error)) {
+        return {kind: 'unsupported'};
+      }
       throw plain(error, `Could not check the run on ${hostLabel(host)}`);
     }
   }
@@ -176,6 +180,9 @@ export class NewRunMain {
         value: await this.#catalog().examples(host, new AbortController().signal),
       };
     } catch (error) {
+      if (isHostUnsupported(error)) {
+        return {kind: 'unsupported'};
+      }
       throw plain(error, `Could not list the examples on ${hostLabel(host)}`);
     }
   }
@@ -194,6 +201,7 @@ export class NewRunMain {
       );
       return {kind: 'offered', value: found};
     } catch (error) {
+      if (isHostUnsupported(error)) return {kind: 'unsupported'};
       throw plain(error, `Could not check the destination on ${hostLabel(host)}`);
     }
   }

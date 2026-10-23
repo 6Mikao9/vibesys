@@ -9,6 +9,7 @@
 import {
   ConnectionError,
   type InspectedCandidate,
+  isHostUnsupported,
   type RegistryClusters,
   type RegistryRunCatalog,
   type RegistrySetup,
@@ -71,8 +72,13 @@ export interface MachinesMainDeps {
 
 const LOCAL: HostId = {kind: 'local'};
 
-/** What a connection that could not become ready says about its machine. */
+/**
+ * What a failed probe of a machine says about it. A host whose VibeSys lacks what the probe asked
+ * (any registry command, or a helper feature) needs an update; it is not unreachable, and
+ * Reconnect cannot fix it. Every probe of a machine fails into this one verdict.
+ */
 function unreachable(error: unknown): MachineReport {
+  if (isHostUnsupported(error)) return {kind: 'needs-update', facts: null};
   const detail = error instanceof Error ? error.message : String(error);
   if (!(error instanceof ConnectionError)) return {kind: 'unavailable', detail};
   if (error.reason === 'auth') return {kind: 'sign-in', detail};
@@ -156,12 +162,18 @@ export class MachinesMain {
   ): Promise<CheckoutInspection> {
     const current = this.#deps.selectionRevision;
     if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
-    const inspected = await this.#setup().inspectCandidate(
-      id,
-      path,
-      revision ?? 1n,
-      new AbortController().signal,
-    );
+    let inspected: InspectedCandidate;
+    try {
+      inspected = await this.#setup().inspectCandidate(
+        id,
+        path,
+        revision ?? 1n,
+        new AbortController().signal,
+      );
+    } catch (error) {
+      if (isHostUnsupported(error)) return {state: 'unsupported'};
+      throw error;
+    }
     if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
     return inspectionOf(inspected);
   }
@@ -176,6 +188,7 @@ export class MachinesMain {
       const value = await registry.listCompute(id, null, new AbortController().signal);
       return {kind: 'offered', value};
     } catch (error) {
+      if (isHostUnsupported(error)) return {kind: 'unsupported'};
       throw explained(error, 'read the clusters and clouds', id);
     }
   }
