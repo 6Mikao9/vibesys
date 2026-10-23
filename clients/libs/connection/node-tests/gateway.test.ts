@@ -20,13 +20,13 @@ import {
   validateHostPayload,
 } from '@vibesys/proto';
 import {Seeded} from '@vibesys/store/testing';
+import {GrpcError} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import {expect} from 'expect';
 import {
   GatewayCalls,
   GatewayConnection,
   GrpcDecoder,
-  GrpcError,
   grpcFrame,
   HELLO_METHOD,
   MUTATE_METHOD,
@@ -174,14 +174,17 @@ test('generic bridge opt-in gates dialing and two live calls share a single host
   const fake = new FakeGateway();
   const clock = new FakeClock();
   let enabled = false;
+  const failures: string[] = [];
   const calls = new GatewayCalls(
     async () => enabled,
     () => fake,
     clock.schedule,
+    (_host, diagnostic) => failures.push(diagnostic),
   );
   await expect(
     calls.unary('local', HELLO_METHOD, new Uint8Array(), new AbortController().signal),
   ).rejects.toThrow('off');
+  expect(failures).toEqual([`${HELLO_METHOD} (no status): Error: Run transport v2 is off`]);
   expect(fake.forces).toEqual([]);
   enabled = true;
   const first = new AbortController();
@@ -198,8 +201,11 @@ test('generic bridge opt-in gates dialing and two live calls share a single host
     first.abort();
     await one;
     expect(fake.forces).toEqual([false]);
+    // The caller's own cancellation is not a failure; losing the session is.
+    expect(failures).toHaveLength(1);
     calls.disable('local');
     expect(await two).toContain('closed');
+    expect(failures.map(failure => failure.split(' ')[0])).toEqual([HELLO_METHOD, TAIL_METHOD]);
     expect(clock.pendingDelays()).toEqual([]);
   } finally {
     first.abort();
@@ -423,6 +429,7 @@ const deadlineInputs = {
   removeCluster: {name: 'cluster-a'},
   testCluster: {cluster},
   startRun: {project: '/project'},
+  convertSavedRuns: {project: '/project'},
   terminateRun: {
     projectRoot: '/project',
     runId: 'run-a',

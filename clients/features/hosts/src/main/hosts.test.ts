@@ -3015,11 +3015,22 @@ for (const exit of ['retire', 'switch', 'disconnect', 'needs-update'] as const) 
   });
 }
 
-test('property: generated host scopes own conversion and preserve in-flight listings', async () => {
-  for (const seed of SEEDS) {
-    const random = new Seeded(seed);
-    const clock = new FakeClock();
-    const link = new FakeLink();
+type ScopeOperation = 'connect' | 'list' | 'flap' | 'stop' | 'dispose';
+
+/** A host whose listings are held open and whose conversions only record their scope signal. */
+class ScopeWorld {
+  readonly clock = new FakeClock();
+  readonly link = new FakeLink();
+  readonly conversions: AbortSignal[] = [];
+  readonly listings: {signal: AbortSignal; finish: () => void}[] = [];
+  readonly promises: Promise<unknown>[] = [];
+  readonly manager: ConnectionManager;
+  readonly hosts: Hosts;
+  listingStarted = Promise.withResolvers<void>();
+  connected = false;
+  disposed = false;
+
+  constructor() {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
@@ -3027,20 +3038,16 @@ test('property: generated host scopes own conversion and preserve in-flight list
       filesystem: new FakeSettingsFilesystem(),
       log: () => {},
     });
-    const manager = new ConnectionManager({
-      linkFor: () => link,
+    this.manager = new ConnectionManager({
+      linkFor: () => this.link,
       appVersion: 'test',
-      scheduleTimeout: clock.scheduleTimeout,
+      scheduleTimeout: this.clock.scheduleTimeout,
       // A recovery's attempts count until the connection is proven, so every generated flap needs a slot.
       config: {...CONFIG, delaysMs: Array.from({length: 16}, () => 1)},
       log: () => {},
     });
-    const conversions: AbortSignal[] = [];
-    const listings: {signal: AbortSignal; finish: () => void}[] = [];
-    const promises: Promise<unknown>[] = [];
-    let listingStarted = Promise.withResolvers<void>();
-    const hosts = new Hosts({
-      manager,
+    this.hosts = new Hosts({
+      manager: this.manager,
       settings,
       localCheckout: '/src',
       sshConfigPath: '/missing',
@@ -3049,14 +3056,14 @@ test('property: generated host scopes own conversion and preserve in-flight list
       savedRuns: {
         list: async (_host, _project, signal) => {
           const held = Promise.withResolvers<readonly import('@vibesys/hosts').ListedRun[]>();
-          listings.push({signal, finish: () => held.resolve([])});
-          listingStarted.resolve();
+          this.listings.push({signal, finish: () => held.resolve([])});
+          this.listingStarted.resolve();
           return held.promise;
         },
       },
       runConversion: {
         convert: async (_host, _project, signal) => {
-          conversions.push(signal);
+          this.conversions.push(signal);
           return {kind: 'needs-update'};
         },
       },
@@ -3064,48 +3071,73 @@ test('property: generated host scopes own conversion and preserve in-flight list
       push: () => {},
       retire: () => {},
     });
-    let connected = false;
-    let disposed = false;
+  }
+
+  list(project: string): Promise<void> {
+    this.listingStarted = Promise.withResolvers<void>();
+    this.promises.push(this.hosts.projectRuns(LOCAL, project));
+    return this.listingStarted.promise;
+  }
+
+  async perform(operation: ScopeOperation, step: number): Promise<void> {
+    if (this.disposed) return;
+    if (operation === 'connect') {
+      await this.hosts.host(LOCAL, 'owner');
+      await this.manager.existing('local')?.ready();
+      this.connected = true;
+    } else if (operation === 'list') {
+      await this.list(`/project-${step % 3}`);
+    } else if (operation === 'flap') {
+      await this.flap();
+    } else if (operation === 'stop') {
+      await this.hosts.retireOwner('owner');
+      this.connected = false;
+      expect(this.conversions.every(signal => signal.aborted)).toBe(true);
+    } else {
+      await this.manager[Symbol.asyncDispose]();
+      this.disposed = true;
+      expect(this.conversions.every(signal => signal.aborted)).toBe(true);
+    }
+  }
+
+  async flap(): Promise<void> {
+    const connection = this.manager.existing('local');
+    if (!this.connected || !connection) return;
+    const changed = phaseReached(connection, 'reconnecting');
+    this.link.helper.drop();
+    await changed;
+    expect(this.conversions.every(signal => signal.aborted)).toBe(true);
+    this.clock.advanceBy(1);
+    await connection.ready();
+  }
+
+  async close(): Promise<void> {
+    await this.manager[Symbol.asyncDispose]();
+    expect(this.conversions.every(signal => signal.aborted)).toBe(true);
+    for (const listing of this.listings) listing.finish();
+    await Promise.allSettled(this.promises);
+  }
+}
+
+test('property: generated host scopes own conversion and preserve in-flight listings', async () => {
+  for (const seed of SEEDS) {
+    const random = new Seeded(seed);
+    const world = new ScopeWorld();
     try {
       // Every history starts with the reported ownerless path.
-      promises.push(hosts.projectRuns(LOCAL, '/project'));
-      await listingStarted.promise;
-      expect(conversions).toHaveLength(0);
+      await world.list('/project');
+      expect(world.conversions).toHaveLength(0);
       for (let step = 0; step < 12; step++) {
-        const operation = random.pick(['connect', 'list', 'flap', 'stop', 'dispose'] as const);
-        if (operation === 'connect' && !disposed) {
-          await hosts.host(LOCAL, 'owner');
-          await manager.existing('local')?.ready();
-          connected = true;
-        } else if (operation === 'list' && !disposed) {
-          listingStarted = Promise.withResolvers<void>();
-          promises.push(hosts.projectRuns(LOCAL, `/project-${step % 3}`));
-          await listingStarted.promise;
-        } else if (operation === 'flap' && connected && !disposed) {
-          const connection = manager.existing('local');
-          if (!connection) throw new Error('missing connection');
-          const changed = phaseReached(connection, 'reconnecting');
-          link.helper.drop();
-          await changed;
-          expect(conversions.every(signal => signal.aborted)).toBe(true);
-          clock.advanceBy(1);
-          await connection.ready();
-        } else if (operation === 'stop' && !disposed) {
-          await hosts.retireOwner('owner');
-          connected = false;
-          expect(conversions.every(signal => signal.aborted)).toBe(true);
-        } else if (operation === 'dispose' && !disposed) {
-          await manager[Symbol.asyncDispose]();
-          disposed = true;
-          expect(conversions.every(signal => signal.aborted)).toBe(true);
+        await world.perform(
+          random.pick(['connect', 'list', 'flap', 'stop', 'dispose'] as const),
+          step,
+        );
+        if (!world.disposed) {
+          expect(world.listings.every(listing => !listing.signal.aborted)).toBe(true);
         }
-        if (!disposed) expect(listings.every(listing => !listing.signal.aborted)).toBe(true);
       }
     } finally {
-      await manager[Symbol.asyncDispose]();
-      expect(conversions.every(signal => signal.aborted)).toBe(true);
-      for (const listing of listings) listing.finish();
-      await Promise.allSettled(promises);
+      await world.close();
     }
   }
 });

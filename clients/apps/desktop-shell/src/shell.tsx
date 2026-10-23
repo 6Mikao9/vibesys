@@ -10,8 +10,8 @@ import {
   type DashboardRow,
   dashboardRows,
   digestKey,
-  recentNotice,
   projectRunGaps,
+  recentNotice,
   runLabels,
   runsKnown,
   type Screen,
@@ -471,13 +471,12 @@ function RunsRoute(props: {
           ? recentNotice(stores.sidebar.store.getState().skippedRecent)
           : {
               title: 'Run list incomplete',
-              body:
-                gaps
-                  .map(
-                    gap =>
-                      `${hostLabel(hostFromKey(gap.host))}: ${gap.project}: ${gap.refusal?.detail ?? 'Reading runs'}`,
-                  )
-                  .join('; ') + '. Retrying automatically.',
+              body: gaps
+                .map(
+                  gap =>
+                    `${hostLabel(hostFromKey(gap.host))}: ${gap.project}: ${gap.refusal?.detail ?? 'Reading runs'}`,
+                )
+                .join('; '),
             }
       }
     />

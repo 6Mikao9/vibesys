@@ -13,10 +13,10 @@ import {
   SshLink,
 } from '@vibesys/connection';
 import {type HostKey, hostFromKey, hostKey} from '@vibesys/hosts';
-import {GATEWAY_CHANNEL, parseGatewayRequest} from '@vibesys/ipc';
+import {GATEWAY_CHANNEL, type GatewayReply, parseGatewayRequest} from '@vibesys/ipc';
 import {configuredHostCall, HOST_CALL_METHOD} from '@vibesys/runs/intents';
 import {type SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
-import type {ScheduleTimeout} from '@vibesys/transport';
+import {grpcCode, type ScheduleTimeout} from '@vibesys/transport';
 import type {IpcMain} from 'electron';
 import {rendererGeneration, type WelcomeInvokeEvent} from './welcome-ipc.js';
 
@@ -32,9 +32,9 @@ export function createGatewayCalls(
       const {settings: file} = await settings.hosts();
       return settingsFor(file, hostFromKey(key))?.runTransportV2 === true;
     },
-    key => gatewayFor(key, manager, resources, schedule),
+    key => gatewayFor(key, manager, resources, schedule, line => log(`${key}: ${line}`)),
     schedule,
-    (host, diagnostic) => log(`${host} answered a failed call: ${diagnostic}`),
+    (host, diagnostic) => log(`${host} gateway call failed: ${diagnostic}`),
   );
   manager.onDisposing(() => calls.close());
   return calls;
@@ -63,7 +63,7 @@ export function installGatewayIpc(
       abort.abort();
       event.sender.removeListener('destroyed', cancelled);
       event.sender.removeListener('did-start-navigation', navigated);
-      port.postMessage({end: true, ...(error === undefined ? {} : {error: String(error)})});
+      port.postMessage(gatewayEnd(error));
       port.close();
     };
     const cancelled = (): void => finish(new Error('gateway caller closed'));
@@ -101,11 +101,24 @@ export function installGatewayIpc(
   });
 }
 
+/** Serialize one terminal reply without duplicating the renderer's Error name. */
+export function gatewayEnd(error?: unknown): Extract<GatewayReply, {end: true}> {
+  const code = grpcCode(error);
+  return {
+    end: true,
+    ...(error === undefined
+      ? {}
+      : {error: code !== undefined && error instanceof Error ? error.message : String(error)}),
+    ...(code === undefined ? {} : {code}),
+  };
+}
+
 function gatewayFor(
   key: HostKey,
   manager: ConnectionManager,
   resources: string,
   schedule: ScheduleTimeout,
+  log: (line: string) => void,
 ): GatewayDialer {
   const host = hostFromKey(key);
   return {
@@ -127,6 +140,7 @@ function gatewayFor(
         const duplex = gatewayProcess(
           lease.link.spawnCommand(`exec "$HOME/${GATEWAY_DIRECTORY}/vibesysd" connect`),
           schedule,
+          log,
         );
         duplex.once('close', () => {
           void lease.release();

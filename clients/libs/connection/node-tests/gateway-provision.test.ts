@@ -335,7 +335,7 @@ test('the connect process stderr reaches the app log as a bounded tail when it e
     // Pipes end before the exit, as a real child's do; the exit then destroys stdin.
     const child = pipeHeldProcess();
     const lines: string[] = [];
-        let fail: (message: string) => void = () => {};
+    let fail: (message: string) => void = () => {};
     const errored = new Promise<string>(resolve => {
       fail = resolve;
     });

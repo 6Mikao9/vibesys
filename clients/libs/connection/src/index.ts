@@ -24,7 +24,7 @@ export {
   WATCH_METHOD,
   WATCH_RUNS_METHOD,
 } from './shell/gateway.js';
-export {type GatewayCallFailure, GatewayCalls} from './shell/gateway-calls.js';
+export {GatewayCalls} from './shell/gateway-calls.js';
 export {localGateway} from './shell/gateway-local.js';
 export {
   GATEWAY_DIRECTORY,

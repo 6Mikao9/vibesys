@@ -12,6 +12,7 @@ import {
   type SidebarAction,
   type SidebarRequest,
   type SidebarState,
+  type SidebarStep,
   sidebarInvariants,
   sidebarStep,
 } from './index.js';
@@ -408,6 +409,58 @@ test('a native import refusal stays visible on the run row', () => {
   expect(row?.row.detail).toBe('Pause this run before importing its history');
 });
 
+type ProjectRunsRequest = Extract<SidebarRequest, {kind: 'list-project-runs'}>;
+
+function listRequests(step: {readonly requests: readonly SidebarRequest[]}): ProjectRunsRequest[] {
+  return step.requests.filter(
+    (request): request is ProjectRunsRequest => request.kind === 'list-project-runs',
+  );
+}
+
+function visibleRunIds(state: SidebarState): Set<string> {
+  return new Set(dashboardRows(state, CLOCK).map(row => row.row.run.runId));
+}
+
+/** Answer the pending listings in a random order, each failing or not; every gap stays named. */
+function answerShuffled(
+  random: Seeded,
+  start: SidebarStep,
+  hostRuns: ReadonlyMap<string, readonly ListedRun[]>,
+): SidebarStep {
+  let step = start;
+  const pending = listRequests(step);
+  const complete = new Set<string>();
+  while (pending.length > 0) {
+    // Latency is reply ordering, so there is no wall-clock wait or verdict.
+    const request = pending.splice(random.int(pending.length), 1)[0];
+    if (!request) throw new Error('missing request');
+    const fails = random.bool();
+    step = sidebarStep(step.state, {
+      type: 'project-runs-listed',
+      ...request,
+      runs: fails ? null : (hostRuns.get(request.project) ?? []),
+      ...(fails ? {error: `refused ${request.project}`} : {}),
+    });
+    if (!fails) complete.add(request.project);
+    expectListedOrNamed(step.state, hostRuns, complete);
+  }
+  return step;
+}
+
+/** Each project's runs are visible once listed; a project not listed yet is named as a gap. */
+function expectListedOrNamed(
+  state: SidebarState,
+  hostRuns: ReadonlyMap<string, readonly ListedRun[]>,
+  complete: ReadonlySet<string>,
+): void {
+  const gaps = projectRunGaps(state.allRuns);
+  const visible = visibleRunIds(state);
+  for (const [project, rows] of hostRuns) {
+    if (complete.has(project)) expect(rows.every(row => visible.has(row.runId))).toBe(true);
+    else expect(gaps.some(gap => gap.project === project)).toBe(true);
+  }
+}
+
 test('property: reordered project failures remain visible and retry to a complete listing', () => {
   for (const seed of SEEDS) {
     const random = new Seeded(seed);
@@ -418,35 +471,13 @@ test('property: reordered project failures remain visible and retry to a complet
         Array.from({length: 1 + random.int(5)}, (_, id) => run(`${index}-${id}`, id)),
       ]),
     );
-    let step = sidebarStep(SIDEBAR_EMPTY, {
+    const first = sidebarStep(SIDEBAR_EMPTY, {
       type: 'overview',
       listings: [listed('ssh:host-a')],
       recent: projects.map(project => opened('ssh:host-a', project, 'remembered')),
       skippedRecent: [],
     });
-    const pending = [...step.requests.filter(request => request.kind === 'list-project-runs')];
-    const complete = new Set<string>();
-    while (pending.length > 0) {
-      // Latency is reply ordering, so there is no wall-clock wait or verdict.
-      const at = random.int(pending.length);
-      const request = pending.splice(at, 1)[0];
-      if (!request) throw new Error('missing request');
-      const fails = random.bool();
-      step = sidebarStep(step.state, {
-        type: 'project-runs-listed',
-        ...request,
-        runs: fails ? null : (hostRuns.get(request.project) ?? []),
-        ...(fails ? {error: `refused ${request.project}`} : {}),
-      });
-      if (!fails) complete.add(request.project);
-      const gaps = projectRunGaps(step.state.allRuns);
-      const visible = new Set(dashboardRows(step.state, CLOCK).map(row => row.row.run.runId));
-      for (const project of projects) {
-        if (complete.has(project))
-          expect(hostRuns.get(project)?.every(row => visible.has(row.runId))).toBe(true);
-        else expect(gaps.some(gap => gap.project === project)).toBe(true);
-      }
-    }
+    let step = answerShuffled(random, first, hostRuns);
     const refused = projectRunGaps(step.state.allRuns);
     expect(
       refused.every(
@@ -457,7 +488,7 @@ test('property: reordered project failures remain visible and retry to a complet
     expect(projectRunGaps(step.state.allRuns).map(gap => gap.refusal)).toEqual(
       refused.map(gap => gap.refusal),
     );
-    for (const request of step.requests.filter(request => request.kind === 'list-project-runs')) {
+    for (const request of listRequests(step)) {
       step = sidebarStep(step.state, {
         type: 'project-runs-listed',
         ...request,
@@ -465,7 +496,7 @@ test('property: reordered project failures remain visible and retry to a complet
       });
     }
     expect(projectRunGaps(step.state.allRuns)).toEqual([]);
-    expect(new Set(dashboardRows(step.state, CLOCK).map(row => row.row.run.runId))).toEqual(
+    expect(visibleRunIds(step.state)).toEqual(
       new Set([...hostRuns.values()].flat().map(row => row.runId)),
     );
   }
