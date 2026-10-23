@@ -2005,7 +2005,7 @@ depends_on = ["vibesys", "vibesys.api.auxiliary", "vs_project", "vs_proto", "vs_
 
 [[interfaces]]
 from = ["vibesys.chat"]
-expose = ["_lifecycle.SessionAction", "_lifecycle.SessionLifecycle", "_session.ChatRuntime", "_session.ChatSession", "_session.run_head", "_session.create_session"]
+expose = ["_lifecycle.SessionAction", "_lifecycle.SessionLifecycle", "_session.ChatRuntime", "_session.ChatSession", "_session.run_head", "_session.create_session", "_legacy.import_legacy_chat"]
 
 [[modules]]
 path = "vibesys.api.chat"
@@ -2013,7 +2013,7 @@ depends_on = ["vibesys.chat"]
 
 [[interfaces]]
 from = ["vibesys.api.chat"]
-expose = ["ChatRuntime", "ChatSession", "SessionAction", "SessionLifecycle", "create_session", "run_head"]
+expose = ["ChatRuntime", "ChatSession", "SessionAction", "SessionLifecycle", "create_session", "import_legacy_chat", "run_head"]
 
 [[modules]]
 path = "vibesys.api.host_relaunch"

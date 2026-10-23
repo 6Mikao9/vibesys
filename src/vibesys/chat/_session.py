@@ -337,19 +337,7 @@ class ChatSession:
                     self.inbox.settle(event.value.request_id)
 
     def _message(self, request_id: str, role: ChatRole, text: str) -> ChatMessage:
-        content = text.encode()
-        if len(content) <= INLINE_BYTES:
-            return ChatMessage(request_id=request_id, role=role, content=Oneof("text", text))
-        digest = hashlib.sha256(content).hexdigest()
-        self._content.write_blob(digest, content)
-        return ChatMessage(
-            request_id=request_id,
-            role=role,
-            content=Oneof(
-                "blob",
-                BlobRef(sha256=digest, size=len(content), media_type="text/plain; charset=utf-8"),
-            ),
-        )
+        return text_message(self._content, request_id, role, text)
 
     def _text(self, message: ChatMessage) -> str:
         if message.content is None:
@@ -370,6 +358,25 @@ class ChatSession:
                     body=Oneof("chat", event),
                 )
             )
+
+
+def text_message(
+    content_store: FileRunContent, request_id: str, role: ChatRole, text: str
+) -> ChatMessage:
+    """A message carrying its text inline, or as a content-addressed blob once it is large."""
+    content = text.encode()
+    if len(content) <= INLINE_BYTES:
+        return ChatMessage(request_id=request_id, role=role, content=Oneof("text", text))
+    digest = hashlib.sha256(content).hexdigest()
+    content_store.write_blob(digest, content)
+    return ChatMessage(
+        request_id=request_id,
+        role=role,
+        content=Oneof(
+            "blob",
+            BlobRef(sha256=digest, size=len(content), media_type="text/plain; charset=utf-8"),
+        ),
+    )
 
 
 def create_session(
