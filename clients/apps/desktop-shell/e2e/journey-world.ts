@@ -24,6 +24,8 @@ export function journeyFixture(name: Journey): RunFixture {
   const {
     lineage: _lineage,
     nativeLifecycles: _native,
+    nativeStreams: _streams,
+    nativeTransitions: _transitions,
     ...fixture
   } = JSON.parse(readFileSync(new URL(`./scenarios/${name}.json`, import.meta.url), 'utf8'));
   return parseFixture(fixture);
@@ -81,8 +83,13 @@ export async function appendJourney(page: Page, after: number, through: number):
 }
 
 /** The real skeleton builder appends the requested lifecycle after this scenario's prefix. */
-export async function transitionJourney(page: Page, from: Journey, to: Journey): Promise<void> {
-  const read = (name: Journey) =>
+export type NativeJourney = Journey | 'startup-running' | 'startup-draining' | 'startup-ended';
+export async function transitionJourney(
+  page: Page,
+  from: NativeJourney,
+  to: NativeJourney,
+): Promise<void> {
+  const read = (name: NativeJourney) =>
     fromBinary(
       ClientReplaySchema,
       readFileSync(new URL(`./scenarios/${name}.pb`, import.meta.url)),

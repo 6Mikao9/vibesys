@@ -107,6 +107,21 @@ function sequence(seed: number) {
       }),
     });
     expected.set(id, {kind: 'startup_step', stage: word, span_id: null});
+    if (index > 0 && index % 2 === seed % 2) {
+      const previousIndex = index >= STAGES.length ? index - STAGES.length : index - 1;
+      const [previousStage] = STAGES[(previousIndex + seed) % STAGES.length] ?? STAGES[0];
+      emit({
+        case: 'stream',
+        value: create(StreamRefSchema, {
+          id: `startup-${previousIndex}`,
+          kind: StreamKind.LOG,
+          title: 'late close for an older stream',
+          state: StreamState.ENDED,
+          length: 0n,
+          owner: {kind: {case: 'startup', value: previousStage}},
+        }),
+      });
+    }
     save(id);
     const kinds: {
       owner: NonNullable<MessageInitShape<typeof StreamOwnerSchema>['kind']>;
@@ -180,7 +195,17 @@ for (let seed = 1; seed <= 24; seed += 1) {
       const wire = records.map(record => fromBinary(RecordSchema, toBinary(RecordSchema, record)));
       const skeleton = foldSkeleton(seedSkeleton(), wire);
       const cached = seedSkeleton(
-        create(KeyframeSchema, {...skeleton, throughSeq: skeleton.throughSeq ?? 0n, logOffset: 0n}),
+        fromBinary(
+          KeyframeSchema,
+          toBinary(
+            KeyframeSchema,
+            create(KeyframeSchema, {
+              ...skeleton,
+              throughSeq: skeleton.throughSeq ?? 0n,
+              logOffset: 0n,
+            }),
+          ),
+        ),
       );
       for (const source of [skeleton, cached]) {
         const at = source.throughSeq ?? 0n;
