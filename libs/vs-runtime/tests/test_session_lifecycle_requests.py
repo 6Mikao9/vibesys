@@ -83,9 +83,9 @@ class World:
         return ReceiptStore(self._project.state.state_store_namespace("run"), threads=OsThreads())
 
     async def execute(
-        self, request: RequestBase, *, lease: RevocableLease | None = None
+        self, request: RequestBase, *, lease: RevocableLease | None = None, epoch: int = 1
     ) -> ExecutionResult:
-        context = context_for(request, lease=lease)
+        context = context_for(request, lease=lease, epoch=epoch)
         outcome = await lifecycle_executor(self.host, self.store(), self.sessions).execute(
             cast("Any", request), context
         )
@@ -187,6 +187,38 @@ async def test_a_restarted_host_cannot_claim_a_cancelled_turn_it_never_ran() -> 
         finally:
             gate.proceed.set()
         await running
+
+
+@pytest.mark.asyncio
+async def test_a_replaced_hosts_turn_is_released_by_the_cancel_of_the_host_that_replaced_it() -> (
+    None
+):
+    """Regression: the cancel of a lost turn answered Unknown for ever once its host was gone.
+
+    A stop killed the host with the planner's turn in flight and the provider wedged. The turn's
+    journal row stays ``Pending``, and the resumed host (the next epoch, after a resume ended
+    the agents the dead host left) could only answer that it cannot prove the process stopped,
+    so every ask of the lost turn's cancellation failed and the run ended blocked.
+    """
+    gate = TurnGate()
+    async with world(gate) as w:
+        assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
+        w.sessions = FakeAgentSessions(w.host.client, w.host.journal, threads=OsThreads())
+        running = asyncio.create_task(w.execute(dispatch_request()))
+        await wait_until_started(gate.started, running)
+        w.sessions = None  # the next call starts a new host over the same journal
+        try:
+            cancelled = await w.execute(cancel_request(), epoch=2)
+            observed = cancelled.observation.observation
+            assert observed.status is ObservationStatus.CANCELLED
+            assert observed.terminal
+            assert observed.released
+            again = await w.execute(cancel_request(), epoch=2)
+            assert again == cancelled
+        finally:
+            gate.proceed.set()
+        await running
+        assert_core_accepts([cancelled], expect_retry=False)
 
 
 @pytest.mark.asyncio

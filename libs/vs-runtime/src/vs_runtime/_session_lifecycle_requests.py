@@ -14,9 +14,11 @@ Mechanisms:
   It asks ``AgentSessions.cancel`` to stop the turn this instance runs, then reads the
   invocation's journal row. No row: a dispatch still inside the fence on this host may
   journal and call yet (Unknown), and one that left or whose host was replaced never
-  will. A ``Pending`` row means the dispatch call has not returned, here or in an
-  earlier host that a restart replaced: Unknown, because a new host cannot prove the
-  old provider process stopped. A ``Completed`` or ``InvalidResponse`` row shows the
+  will. A ``Pending`` row means the dispatch call has not returned. If an entry of the
+  fence may still be creating it is this host's own, and the answer is Unknown. If every
+  entry is of a host a restart replaced, that host's provider process ended with it (a
+  resume ends the agents a dead host left before it dispatches anything), so the turn is
+  released as interrupted. A ``Completed`` or ``InvalidResponse`` row shows the
   turn ended, as does a launch failure. An ``Unknown`` row was written by a dispatch call that returned, so the
   key is released with ``release_interrupted``, which itself refuses an active
   invocation.
@@ -459,11 +461,23 @@ class SessionLifecycleRequests:
             if record is None:
                 return self._never_journaled(closure, binding)
             if isinstance(record.outcome, Pending):
-                # Pending: the dispatch call has not returned, here or in an earlier
-                # host. Only this instance can reach a turn it runs, so a restarted
-                # host cannot prove the provider process stopped.
-                return _unknown(
-                    "the turn is not proven stopped: its dispatch has not returned", binding
+                if closure.live:
+                    # Pending: the dispatch call has not returned. Only this instance can
+                    # reach a turn it runs, and an entry of the fence that may still be
+                    # creating is one of this host's own.
+                    return _unknown(
+                        "the turn is not proven stopped: its dispatch has not returned", binding
+                    )
+                # Every entry of the fence is of a host a restart replaced, and a resume ends
+                # the agents the replaced host left before the new host dispatches anything
+                # (`RunEnvironment.reap_orphans`), so that call never returns and its provider
+                # process is gone. Answering Unknown for ever would hold the cancellation of
+                # a lost turn open until its asks ran out.
+                self._sessions.release_interrupted(key, invocation_id)
+                return _released(
+                    ObservationStatus.CANCELLED,
+                    binding,
+                    "the host that ran the turn was replaced, and its provider process ended with it",
                 )
             if invocation_settled(record.outcome):
                 return _released(
