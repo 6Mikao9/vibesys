@@ -870,7 +870,11 @@ def propagate(
             if not isinstance(origin, Proven) or origin.value.decision is None:
                 raise ContractError(("admission",), "signal requires accepted canonical admission")
         key = (event_area(signal), digest(signal))
-        if key in seen:
+        # ``RunDrained`` is no cycle when it comes twice: handling it sends nothing on, and two
+        # areas can each find the run drained in one step (an inspection that answers the
+        # close of the last closing session reports the request and its owner event). The
+        # second finds the state the first left, so it finishes the run or changes nothing.
+        if key in seen and not isinstance(signal, RunDrained):
             raise SignalCycleError(signal.kind)
         seen.add(key)
         if len(seen) > MAX_SIGNALS:
