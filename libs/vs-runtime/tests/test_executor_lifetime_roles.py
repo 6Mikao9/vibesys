@@ -9,8 +9,13 @@ fails here.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 from vs_core.api import ExecuteRegisteredOperation, ExecutorLifetime, executor_lifetime
 from vs_runtime.api.core import REQUEST_DISPATCH, ExecutorRole
+
+if TYPE_CHECKING:
+    from vs_core.api import Request
 
 
 def test_the_session_role_is_exactly_the_requests_whose_executor_is_the_host_instance() -> None:
@@ -19,6 +24,6 @@ def test_the_session_role_is_exactly_the_requests_whose_executor_is_the_host_ins
     instance_bound = {
         kind
         for kind in kinds
-        if executor_lifetime(kind.model_construct()) is ExecutorLifetime.INSTANCE
+        if executor_lifetime(cast("Request", kind.model_construct())) is ExecutorLifetime.INSTANCE
     }
     assert session_role == instance_bound

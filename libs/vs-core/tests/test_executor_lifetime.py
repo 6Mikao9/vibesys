@@ -8,14 +8,13 @@ tests keep it total: a request kind added without a row fails here before it can
 
 from __future__ import annotations
 
-from typing import Annotated, get_args, get_origin
+from typing import Annotated, cast, get_args, get_origin
 
 import pytest
 
 import vs_core.api as core
-from vs_core.types.records import Request
 
-INSTANCE = {
+INSTANCE: set[type[core.RequestBase]] = {
     core.EnsureSession,
     core.DispatchTurn,
     core.ResumeSessionTurn,
@@ -25,7 +24,7 @@ INSTANCE = {
 }
 """The agent session requests: the executor is the host instance."""
 
-DURABLE = {
+DURABLE: set[type[core.RequestBase]] = {
     core.EnsureWorkspace,
     core.RestoreRevision,
     core.SnapshotAndRetain,
@@ -59,9 +58,14 @@ def _classes(declared: object) -> set[type]:
     return {kind for member in get_args(declared) for kind in _classes(member)}
 
 
+def _unvalidated(kind: type[core.RequestBase]) -> core.Request:
+    """An instance of the request class, built without its fields: its kind is all that is read."""
+    return cast("core.Request", kind.model_construct())
+
+
 def _kinds() -> set[type]:
     """Every concrete request class of the `Request` union, found from the union itself."""
-    return _classes(Request)
+    return _classes(core.Request)
 
 
 def _registered(lifecycle: core.LifecycleClass) -> core.ExecuteRegisteredOperation:
@@ -78,13 +82,15 @@ def test_the_table_covers_every_request_kind_once() -> None:
 
 
 @pytest.mark.parametrize("kind", sorted(INSTANCE, key=lambda value: value.__name__))
-def test_an_agent_session_request_has_the_host_instance_as_its_executor(kind: type) -> None:
-    assert core.executor_lifetime(kind.model_construct()) is core.ExecutorLifetime.INSTANCE
+def test_an_agent_session_request_has_the_host_instance_as_its_executor(
+    kind: type[core.RequestBase],
+) -> None:
+    assert core.executor_lifetime(_unvalidated(kind)) is core.ExecutorLifetime.INSTANCE
 
 
 @pytest.mark.parametrize("kind", sorted(DURABLE, key=lambda value: value.__name__))
-def test_every_other_request_has_a_durable_executor(kind: type) -> None:
-    assert core.executor_lifetime(kind.model_construct()) is core.ExecutorLifetime.DURABLE
+def test_every_other_request_has_a_durable_executor(kind: type[core.RequestBase]) -> None:
+    assert core.executor_lifetime(_unvalidated(kind)) is core.ExecutorLifetime.DURABLE
 
 
 @pytest.mark.parametrize("lifecycle", list(core.LifecycleClass))
