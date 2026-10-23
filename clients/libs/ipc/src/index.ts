@@ -26,6 +26,7 @@ export {
   type GatewayRequest,
   parseGatewayRequest,
 } from './gateway.js';
+export {gatewayTransport} from './gateway-transport.js';
 export {openPortSocket, type PagePort} from './port-socket.js';
 export {
   parseRunLogsRequest,

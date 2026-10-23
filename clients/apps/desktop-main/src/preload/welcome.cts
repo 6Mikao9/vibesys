@@ -82,6 +82,12 @@ const OPEN_SETTINGS_CHANNEL: typeof import('@vibesys/ipc').OPEN_SETTINGS_CHANNEL
   'vibesys:open-settings';
 const RUN_PORT_MESSAGE: typeof import('@vibesys/ipc').RUN_PORT_MESSAGE = 'vibesys:run-port';
 
+interface PagePort {
+  listen(listener: (data: unknown) => void): void;
+  postMessage(value: unknown): void;
+  close(): void;
+}
+
 /** Effects the sandbox grants this preload, injectable so the exposed bridge has a public Fake. */
 interface WelcomePreloadCapabilities {
   readonly platform: string;
@@ -94,17 +100,19 @@ interface WelcomePreloadCapabilities {
    * the page, as a window message named `id`.
    */
   connectRun(id: string): void;
+  /** Transfer one call's peer to main and retain the page end. */
+  openGatewayPort(request: import('@vibesys/ipc').GatewayRequest): PagePort;
 }
 
 /** Build the page capability from its Electron boundary effects. */
-function createWelcomePreload(capabilities: WelcomePreloadCapabilities): WelcomeBridge {
+function createWelcomePreload(capabilities: WelcomePreloadCapabilities) {
   function call<T>(channel: string, ...args: unknown[]): Promise<WelcomeResult<T>> {
     return capabilities.invoke(channel, ...args) as Promise<WelcomeResult<T>>;
   }
   function on<T>(channel: string): (listener: (event: WelcomeEvent<T>) => void) => void {
     return listener => capabilities.on(channel, value => listener(value as WelcomeEvent<T>));
   }
-  return {
+  const welcome: WelcomeBridge = {
     platform: capabilities.platform,
     onHostSettingsChanged: listener => capabilities.on(EVENTS.hostSettings, listener),
     runTransportV2: (host, enabled) => call(CHANNELS.runTransportV2, host, enabled),
@@ -168,43 +176,20 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     onListing: on(EVENTS.listing),
     onPreferences: on(EVENTS.preferences),
   };
+  return {welcome, gateway: createGatewayPreload(capabilities)};
 }
 
-// Electron's sandboxed CommonJS preload cannot import local runtime modules, so production wiring
-// remains in this file. Bun tests have no Electron renderer process and exercise the factory above.
-if (process.type === 'renderer') {
-  const electron: typeof import('electron') = require('electron');
-  electron.contextBridge.exposeInMainWorld(
-    'vibesysWelcome',
-    createWelcomePreload({
-      platform: process.platform,
-      invoke: (channel, ...args) => electron.ipcRenderer.invoke(channel, ...args),
-      on: (channel, listener) => {
-        const receive = (_event: Electron.IpcRendererEvent, value: unknown): void =>
-          listener(value);
-        electron.ipcRenderer.on(channel, receive);
-        return () => {
-          electron.ipcRenderer.removeListener(channel, receive);
-        };
-      },
-      connectRun: id => {
-        const {port1: port, port2: remote} = new MessageChannel();
-        electron.ipcRenderer.postMessage(CONNECT_CHANNEL, null, [remote]);
-        // A port cannot cross the context bridge as a value; it can as this window's message.
-        window.postMessage({type: RUN_PORT_MESSAGE, id}, '*', [port]);
-      },
-    }),
-  );
-  electron.contextBridge.exposeInMainWorld('vibesysGateway', {
+function createGatewayPreload(
+  capabilities: WelcomePreloadCapabilities,
+): import('@vibesys/ipc').GatewayBridge {
+  return {
     unary: (host, method, bytes) => {
       let cancel = (): void => {};
       const result = new Promise<Uint8Array>((resolve, reject) => {
         let response: Uint8Array | undefined;
         cancel = openGateway(
-          'unary',
-          host,
-          method,
-          bytes,
+          capabilities,
+          {kind: 'unary', host, method, bytes},
           value => {
             response = value;
           },
@@ -218,9 +203,45 @@ if (process.type === 'renderer') {
       return {result, cancel: () => cancel()};
     },
     stream: (host, method, bytes, receive, ended) => ({
-      cancel: openGateway('stream', host, method, bytes, receive, ended),
+      cancel: openGateway(capabilities, {kind: 'stream', host, method, bytes}, receive, ended),
     }),
-  } satisfies import('@vibesys/ipc').GatewayBridge);
+  };
+}
+
+// Electron's sandboxed CommonJS preload cannot import local runtime modules, so production wiring
+// remains in this file. Bun tests have no Electron renderer process and exercise the factory above.
+if (process.type === 'renderer') {
+  const electron: typeof import('electron') = require('electron');
+  const bridges = createWelcomePreload({
+    platform: process.platform,
+    invoke: (channel, ...args) => electron.ipcRenderer.invoke(channel, ...args),
+    on: (channel, listener) => {
+      const receive = (_event: Electron.IpcRendererEvent, value: unknown): void => listener(value);
+      electron.ipcRenderer.on(channel, receive);
+      return () => {
+        electron.ipcRenderer.removeListener(channel, receive);
+      };
+    },
+    connectRun: id => {
+      const {port1: port, port2: remote} = new MessageChannel();
+      electron.ipcRenderer.postMessage(CONNECT_CHANNEL, null, [remote]);
+      // A port cannot cross the context bridge as a value; it can as this window's message.
+      window.postMessage({type: RUN_PORT_MESSAGE, id}, '*', [port]);
+    },
+    openGatewayPort: request => {
+      const {port1, port2} = new MessageChannel();
+      electron.ipcRenderer.postMessage('vibesys:gateway', request, [port2]);
+      return {
+        listen: listener => {
+          port1.onmessage = event => listener(event.data);
+        },
+        postMessage: value => port1.postMessage(value),
+        close: () => port1.close(),
+      };
+    },
+  });
+  electron.contextBridge.exposeInMainWorld('vibesysWelcome', bridges.welcome);
+  electron.contextBridge.exposeInMainWorld('vibesysGateway', bridges.gateway);
   prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));
 }
 
@@ -252,15 +273,12 @@ export = createWelcomePreload;
 
 /** Ports are owned in the preload; renderer callbacks receive only structured protobuf bytes. */
 function openGateway(
-  kind: 'unary' | 'stream',
-  host: string,
-  method: string,
-  bytes: Uint8Array,
+  capabilities: WelcomePreloadCapabilities,
+  request: import('@vibesys/ipc').GatewayRequest,
   receive: (bytes: Uint8Array) => void,
   ended: (error?: string) => void,
 ): () => void {
-  const electron: typeof import('electron') = require('electron');
-  const {port1, port2} = new MessageChannel();
+  const port1 = capabilities.openGatewayPort(request);
   let closed = false;
   const finish = (error?: string): void => {
     if (closed) return;
@@ -269,11 +287,10 @@ function openGateway(
     port1.close();
     ended(error);
   };
-  port1.onmessage = event => {
-    const reply = event.data as import('@vibesys/ipc').GatewayReply;
+  port1.listen(data => {
+    const reply = data as import('@vibesys/ipc').GatewayReply;
     if ('bytes' in reply) receive(reply.bytes);
     else finish(reply.error);
-  };
-  electron.ipcRenderer.postMessage('vibesys:gateway', {kind, host, method, bytes}, [port2]);
+  });
   return () => finish('cancelled');
 }

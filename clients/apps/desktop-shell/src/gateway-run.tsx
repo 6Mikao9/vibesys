@@ -7,6 +7,7 @@ import {type GatewayRunPorts, RunScreen, useGatewayRun} from '@vibesys/feature-r
 import {type RunPageSeed, recordedRunRoot} from '@vibesys/feature-run-page/state';
 import {useRunSessions} from '@vibesys/feature-run-sessions/renderer';
 import type {GatewayBridge, WelcomeBridge} from '@vibesys/ipc';
+import {gatewayTransport} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import {observeRun, type Skeleton} from '@vibesys/run-skeleton';
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
@@ -15,7 +16,6 @@ import {proposalIntent} from '@vibesys/runs/chat';
 import {type RelaunchObservation, runReference} from '@vibesys/runs/intents';
 import {Card, EmptyState, Page, Stack, Switch, Text} from '@vibesys/ui';
 import {type JSX, type ReactNode, useMemo} from 'react';
-import {gatewayTransport} from './gateway-transport.js';
 
 export function GatewayRun(props: {
   readonly seed: RunPageSeed;

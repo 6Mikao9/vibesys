@@ -39,6 +39,9 @@ class ParsingMain {
         return {ok: false, error: (error as Error).message, authNeeded: false};
       }
     },
+    openGatewayPort: () => {
+      throw new Error('no gateway call in the welcome contract');
+    },
     connectRun: id => {
       this.connected.push(id);
     },
@@ -48,7 +51,7 @@ class ParsingMain {
         this.subscribed.delete(channel);
       };
     },
-  });
+  }).welcome;
 }
 
 async function parsed(reply: Promise<WelcomeResult<unknown>>): Promise<WelcomeRequest> {

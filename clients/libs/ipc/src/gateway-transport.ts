@@ -1,8 +1,8 @@
-/** App-owned adapter between the Electron callback bridge and the neutral skeleton transport. */
+/** Adapter between the Electron callback bridge and the neutral skeleton transport. */
 import type {HostKey} from '@vibesys/hosts';
-import type {GatewayBridge} from '@vibesys/ipc';
 import type {RunTransport} from '@vibesys/run-skeleton';
 import {registerAbort} from '@vibesys/transport';
+import type {GatewayBridge} from './gateway.js';
 
 class ByteQueue {
   readonly #queue: Uint8Array[] = [];
