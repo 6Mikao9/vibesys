@@ -5,6 +5,7 @@ import {
   GATEWAY_DIRECTORY,
   GatewayCalls,
   type GatewayDialer,
+  GrpcError,
   gatewayArtifact,
   gatewayProcess,
   gatewayTarget,
@@ -63,7 +64,11 @@ export function installGatewayIpc(
       abort.abort();
       event.sender.removeListener('destroyed', cancelled);
       event.sender.removeListener('did-start-navigation', navigated);
-      port.postMessage({end: true, ...(error === undefined ? {} : {error: String(error)})});
+      port.postMessage({
+        end: true,
+        ...(error === undefined ? {} : {error: String(error)}),
+        ...(error instanceof GrpcError ? {status: error.code} : {}),
+      });
       port.close();
     };
     const cancelled = (): void => finish(new Error('gateway caller closed'));

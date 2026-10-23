@@ -2,6 +2,8 @@
 import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {startGatewayRun} from '@vibesys/feature-run-page/renderer';
+import {type LoadView, loadView} from '@vibesys/feature-run-page/state';
+import type {GatewayError} from '@vibesys/ipc';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
@@ -23,12 +25,13 @@ const SEED = {
   unavailable: {},
 };
 
+const RUN_METHODS = ['/Skeleton', '/GetBlobs', '/Tail'];
 const BOUNDED_CALLS = 8;
 const QUIET_EVENTS = 200;
 
 interface Observation {
-  readonly error: string | null;
-  readonly complete: boolean;
+  /** What the run screen shows once the world is quiet. */
+  readonly screen: LoadView;
   readonly calls: number;
   /** Nothing was left to deliver or fire within the event budget: no retry loop. */
   readonly quiet: boolean;
@@ -42,7 +45,8 @@ async function observe(row: (typeof statuses)[number], seed: number): Promise<Ob
   const remote = new FakeRunTransport(storeRunFixture());
   const world = gatewayWorld(seed, call => {
     calls += 1;
-    if (row.code !== 0) {
+    // The host refuses the calls about this run; its other streams (liveness) keep working.
+    if (row.code !== 0 && RUN_METHODS.some(name => call.method.endsWith(name))) {
       call.trailers(String(row.code), row.grpcMessage);
       return;
     }
@@ -72,7 +76,7 @@ async function observe(row: (typeof statuses)[number], seed: number): Promise<Ob
     // Settled means the world has nothing left to deliver or fire, retries and their timers
     // included; it names no field of the screen, so old and fixed code are observed alike.
     const quiet = await world.schedule.quiesce(QUIET_EVENTS);
-    const {error, load} = actor.getSnapshot().context;
+    const screen = loadView(actor.getSnapshot().context);
     const screenCalls = calls;
     const outcome = world.bridge.unary(
       'local',
@@ -82,16 +86,11 @@ async function observe(row: (typeof statuses)[number], seed: number): Promise<Ob
     const unary = await world.schedule.run(
       outcome.result.then(
         () => undefined,
-        (error: {code?: number; status?: number; message: string}) => ({
-          // The refusal's status is `code` on a GrpcError and `status` on the bridge's error.
-          code: error.code ?? error.status,
-          message: error.message,
-        }),
+        (error: GatewayError) => ({code: error.status, message: error.message}),
       ),
     );
     return {
-      error,
-      complete: load?.complete === true,
+      screen,
       calls: screenCalls,
       quiet,
       unary,
@@ -104,59 +103,40 @@ async function observe(row: (typeof statuses)[number], seed: number): Promise<Ob
 
 const SEEDS = seedsAtDepth([1, 7, 23]);
 const failing = statuses.filter(row => row.code !== 0);
+/** gRPC says retrying the same request cannot change these, so the screen must not call them a dead link. */
+const FINAL_CODES = new Set([3, 5, 7, 8, 9, 11, 12, 15, 16]);
 
-/** A property whose fix is an unmerged pull request fails now; it must flip when that PR lands. */
-const pendingFix = (pullRequest: number, name: string, body: () => Promise<void>): void =>
-  // The replay script runs these as plain tests on historical commits (scripts/replay_seam.py).
-  (process.env['SEAM_REPLAY'] === '1' ? test : test.failing)(
-    `[#${pullRequest} unmerged] ${name}`,
-    body,
-  );
-
-/** One test per status keeps each below the per-test bound at nightly depth (300 seeds). */
+// One test per status keeps each below the per-test bound at nightly depth (300 seeds).
 for (const row of statuses)
-  test(`${row.name}: the run screen reaches an outcome`, async () => {
+  test(`${row.name}: the run screen settles within a bounded number of calls`, async () => {
     for (const seed of SEEDS) {
       const seen = await observe(row, seed);
-      if (row.code === 0) {
-        expect(seen.complete, `seed ${seed}`).toBe(true);
-        expect(seen.error, `seed ${seed}`).toBeNull();
-      } else {
-        expect(seen.error, `seed ${seed}`).not.toBeNull();
-      }
+      const context = `seed ${seed}`;
+      expect(seen.quiet, `${context}: still busy after ${QUIET_EVENTS} events`).toBe(true);
+      expect(seen.calls, context).toBeLessThanOrEqual(BOUNDED_CALLS);
+      expect(seen.screen.kind, context).toBe(row.code === 0 ? 'ready' : 'failed');
     }
   });
 
 for (const row of failing) {
-  pendingFix(
-    3434,
-    `${row.name} ends in a bounded number of calls and then makes none as time passes`,
-    async () => {
-      for (const seed of SEEDS) {
-        const seen = await observe(row, seed);
-        expect(seen.quiet, `seed ${seed}: still retrying after ${QUIET_EVENTS} events`).toBe(true);
-        expect(seen.calls, `seed ${seed}`).toBeLessThanOrEqual(BOUNDED_CALLS);
-      }
-    },
-  );
-  if (row.code === 5)
-    pendingFix(
-      3434,
-      `${row.name} ends the screen as "Not on this host", never "Disconnected"`,
-      async () => {
-        for (const seed of SEEDS)
-          expect((await observe(row, seed)).error, `seed ${seed}`).toBe('Not on this host');
-      },
-    );
-  pendingFix(
-    3434,
-    `${row.name} keeps its gRPC code and decoded diagnostic across the preload`,
-    async () => {
-      for (const seed of SEEDS)
-        expect((await observe(row, seed)).unary, `seed ${seed}`).toEqual({
-          code: row.code,
-          message: row.message,
-        });
-    },
-  );
+  test(`${row.name}: a final refusal is shown as a refusal, a transient one as unreachable`, async () => {
+    for (const seed of SEEDS) {
+      const {screen} = await observe(row, seed);
+      if (screen.kind !== 'failed') throw new Error(`seed ${seed}: the screen is ${screen.kind}`);
+      if (FINAL_CODES.has(row.code)) expect(screen.word, `seed ${seed}`).not.toBe('Unreachable');
+      else expect(screen.word, `seed ${seed}`).toBe('Unreachable');
+      if (row.code === 5) expect(screen.word, `seed ${seed}`).toBe('No run log');
+    }
+  });
+
+  test(`${row.name}: the unary refusal keeps its gRPC status and decoded diagnostic across the preload`, async () => {
+    for (const seed of SEEDS) {
+      const refusal = (await observe(row, seed)).unary;
+      // The main process names the error class before the gateway's diagnostic.
+      expect(refusal?.code, `seed ${seed}`).toBe(row.code);
+      expect(refusal?.message.endsWith(row.message), `seed ${seed}: ${refusal?.message}`).toBe(
+        true,
+      );
+    }
+  });
 }

@@ -28,7 +28,7 @@ for (const row of cases)
     const received: number[][] = [];
     const sawClose = {sender: 0, receiver: 0};
     // The sender is the main process; the receiver is the page, another process.
-    page.listen(value => received.push([...(value as Uint8Array)]));
+    page.onmessage = event => received.push([...(event.data as Uint8Array)]);
     page.on('close', () => {
       sawClose.receiver += 1;
     });

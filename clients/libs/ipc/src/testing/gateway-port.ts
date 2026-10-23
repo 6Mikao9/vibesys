@@ -27,9 +27,10 @@ export class FakeGatewayPort {
     return this;
   }
 
-  listen(listener: (data: unknown) => void): void {
-    this.#pageListener = listener;
-    this.start();
+  /** Like a web `MessagePort`: assigning a handler starts the port. */
+  set onmessage(handler: ((event: {data: unknown}) => void) | null) {
+    this.#pageListener = handler === null ? undefined : data => handler({data});
+    if (handler !== null) this.start();
   }
 
   start(): void {

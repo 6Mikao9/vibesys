@@ -37,6 +37,7 @@ import {
   HelloRequestSchema,
   HelloResponseSchema,
   RecordSchema,
+  SkeletonRequestSchema,
   TailRequestSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
@@ -108,13 +109,13 @@ for (const mode of ['socket', 'connect pipe'] as const) {
       const hello = await page.evaluate(
         async request => {
           const bridge = (window as unknown as GatewayRenderer).vibesysGateway;
-          return [
-            ...(await bridge.unary(
-              'local',
-              '/vibesys.api.v1.HostService/Hello',
-              new Uint8Array(request),
-            ).result),
-          ];
+          const reply = await bridge.unary(
+            'local',
+            '/vibesys.api.v1.HostService/Hello',
+            new Uint8Array(request),
+          ).result;
+          if (!('bytes' in reply)) throw new Error(reply.error);
+          return [...reply.bytes];
         },
         [
           ...toBinary(
@@ -126,6 +127,8 @@ for (const mode of ['socket', 'connect pipe'] as const) {
       expect(fromBinary(HelloResponseSchema, new Uint8Array(hello)).apiSchemaHash).toBe(
         API_SCHEMA_HASH,
       );
+      // A refusal reaches the renderer with its gRPC status, so a missing run is not a dead link.
+      expect(await missingRunStatus(page)).toBe(5);
       await startTail(page);
       const initial = await page.evaluate(() =>
         (window as unknown as GatewayRenderer).gatewayRead(),
@@ -231,6 +234,25 @@ test('MessageChannelMain across processes preserves FIFO, copies bytes and stops
     await rm(directory, {recursive: true, force: true});
   }
 });
+
+async function missingRunStatus(page: Page): Promise<number | null> {
+  const request = toBinary(
+    SkeletonRequestSchema,
+    create(SkeletonRequestSchema, {runId: 'run-missing'}),
+  );
+  return page.evaluate(
+    async bytes => {
+      const bridge = (window as unknown as GatewayRenderer).vibesysGateway;
+      const reply = await bridge.unary(
+        'local',
+        '/vibesys.api.v1.HostService/Skeleton',
+        new Uint8Array(bytes),
+      ).result;
+      return 'status' in reply ? (reply.status ?? null) : null;
+    },
+    [...request],
+  );
+}
 
 function deferred<T>() {
   let resolve = (_value: T): void => {};
@@ -359,7 +381,7 @@ for (const damage of ['truncated', 'corrupt'] as const) {
 }
 
 interface GatewayRenderer {
-  vibesysGateway: import('@vibesys/ipc').GatewayBridge;
+  vibesysGateway: import('@vibesys/ipc').GatewayPreload;
   gatewayRead(): Promise<number[]>;
   gatewayCancel(): void;
 }

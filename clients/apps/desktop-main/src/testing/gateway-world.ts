@@ -8,7 +8,7 @@ import {PassThrough} from 'node:stream';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {GatewayCalls, type GatewaySessionFactory, HELLO_METHOD} from '@vibesys/connection';
 import {FakeGatewaySession, type GatewayWireCall, Schedule} from '@vibesys/connection/testing';
-import {type GatewayRequest, gatewayTransport} from '@vibesys/ipc';
+import {type GatewayRequest, gatewayBridge, gatewayTransport} from '@vibesys/ipc';
 import {FakeGatewayPort} from '@vibesys/ipc/testing';
 import {API_SCHEMA_HASH, HelloResponseSchema} from '@vibesys/proto';
 import {SettingsStore} from '@vibesys/settings';
@@ -73,33 +73,31 @@ export function gatewayWorld(seed: number, request: (call: GatewayWireCall) => v
     mainFrame: {url: 'app://vibesys/index.html', processId: 1, routingId: 1},
   });
   const ports: FakeGatewayPort[] = [];
-  const preload = createPreload({
-    platform: 'test',
-    invoke: async () => ({ok: true, value: true}),
-    on: () => () => {},
-    connectRun: () => {},
-    openGatewayPort: (value: GatewayRequest) => {
+  const preload = createPreload.gateway({
+    newChannel: () => {
       const {page, main} = FakeGatewayPort.pair(
         (lane, run) => schedule.post(lane, run),
         structuredClone,
       );
       ports.push(page);
+      // test-isolation: the Fake ports implement the subset of MessagePort the gateway code uses.
+      return {port1: page, port2: main as unknown as MessagePort};
+    },
+    open: (request: GatewayRequest, port) => {
       // test-isolation: Electron owns a much larger event, but gateway IPC reads only these fields.
       listener(
-        {ports: [main], sender, senderFrame: sender.mainFrame} as unknown as IpcMainEvent,
-        value,
+        {ports: [port], sender, senderFrame: sender.mainFrame} as unknown as IpcMainEvent,
+        request,
       );
-      return page;
     },
   });
-  const bridge = preload.gateway;
+  const bridge = gatewayBridge(preload);
   return {
     schedule,
     clock,
     bridge,
     sender,
     ports,
-    preload,
     settings,
     transport: gatewayTransport(bridge, 'local'),
     close: () => {

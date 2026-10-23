@@ -22,8 +22,12 @@ export {
   GATEWAY_CHANNEL,
   type GatewayBridge,
   type GatewayCall,
+  GatewayError,
+  type GatewayPreload,
   type GatewayReply,
   type GatewayRequest,
+  type GatewayUnaryReply,
+  gatewayBridge,
   parseGatewayRequest,
 } from './gateway.js';
 export {gatewayTransport} from './gateway-transport.js';
