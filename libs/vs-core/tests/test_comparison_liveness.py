@@ -40,7 +40,7 @@ from .test_measurement_comparison import (
     reading,
     started_with,
 )
-from .test_measurement_reuse import record, revision, seen, submissions
+from .test_measurement_reuse import record, seen, submissions
 from .test_measurements import committed, transition
 
 Death = Literal["cancelled", "infrastructure", "refused", "drained"]
@@ -274,7 +274,7 @@ def test_another_attempts_base_run_that_dies_is_replaced_for_the_candidate_waiti
     end(lab, replaced[0], "sample", 100.0)
     (held, *_) = compared(lab, "b", "input-2")
     assert held.base_samples == 1
-    assert held.ratio == 3.0
+    assert held.objectives[0].ratio == 3.0
 
 
 @pytest.mark.regression
@@ -296,7 +296,7 @@ def test_a_claimed_strategy_baseline_that_dies_is_replaced_at_once(death: Death)
     (replaced,) = base_runs(lab)[1:]
     assert replaced.scope == lab.scopes["a"]
     end(lab, replaced, "sample", 100.0)
-    assert compared(lab, "a", "input-1")[0].ratio == 1.3
+    assert compared(lab, "a", "input-1")[0].objectives[0].ratio == 1.3
 
 
 @pytest.mark.regression
@@ -429,7 +429,7 @@ def collected(lab: Lab, run: core.SubmitMeasurement, collect: core.RequestId, va
     status = core.ObservationStatus.SUCCEEDED
     records = (
         record(run, answer, "accuracy", status),
-        record(run, answer, "benchmark", status).model_copy(update={"reading": reading(value)}),
+        record(run, answer, "benchmark", status).model_copy(update={"readings": (reading(value),)}),
     )
     assert answer.resource_id is not None
     lab.state = transition(
@@ -514,10 +514,10 @@ def seeded(label: str) -> random.Random:
 def test_one_evaluation_without_a_floor_reaches_a_verdict_and_the_official_check_reuses_it() -> (
     None
 ):
-    """One commit, evaluated once, noisy runs: core takes the candidate to three runs itself.
+    """One commit, evaluated once, a large effect: one run a side decides, and no run is added.
 
     Before, the candidate held one run (a repeat call is answered with it), the comparison
-    stayed ``inconclusive`` for good, and the official check always ran afresh.
+    stayed ``inconclusive`` until three runs a side, and the official check always ran afresh.
     """
     lab = Lab.of("a", floor=0.0)
     lab.call("a", "c1", "input-1")
@@ -525,14 +525,15 @@ def test_one_evaluation_without_a_floor_reaches_a_verdict_and_the_official_check
     again = repeat(lab, "a", "c1", "input-1")
     assert again.repeat, "unchanged content is the evaluation already made"
     last = compared(lab, "a", "input-1")[-1]
-    assert (last.candidate_samples, last.base_samples) == (3, 3)
+    assert (last.candidate_samples, last.base_samples) == (1, 1)
     assert last.verdict is core.ComparisonVerdict.BETTER
+    assert not core.close_call(last)
     assert final_check(lab, "a", "c1", "input-1").reuses is not None
 
 
 @pytest.mark.regression
 def test_a_deterministic_benchmark_without_a_floor_stops_at_three_runs_a_side() -> None:
-    """Identical readings never give a verdict, so nothing more is run for one.
+    """A gap inside the default noise stays a close call, and nothing more is run past three a side.
 
     Before, the base took its two extra runs, the candidate stayed at one, and the official
     check ran afresh. Now each side stops at three runs, and the official check is answered by
@@ -543,8 +544,7 @@ def test_a_deterministic_benchmark_without_a_floor_stops_at_three_runs_a_side() 
     settle(lab, Bench({"input-1": 100.3, "base": 100.0}, 0.0, seeded("deterministic")))
     last = compared(lab, "a", "input-1")[-1]
     assert (last.candidate_samples, last.base_samples) == (3, 3)
-    assert last.verdict is core.ComparisonVerdict.INCONCLUSIVE
-    assert core.verdict_unreachable(last, core.moment_of(lab.state.run).policy)
+    assert last.verdict is core.ComparisonVerdict.WITHIN_NOISE
     assert len(base_runs(lab)) == core.MIN_SAMPLES_WITHOUT_FLOOR
     assert final_check(lab, "a", "c1", "input-1").reuses is not None
 
@@ -712,6 +712,9 @@ def test_every_candidate_with_a_sample_gets_a_comparison_and_the_runs_stay_bound
 
 
 SIMULATED = 300
+FALSE_VERDICT_RATE = 0.10
+"""The most trials at equal means that may end in a verdict: a 95% two-sided call is wrong one time
+in twenty at each look, and a close call earns a second look (three runs a side) after the first."""
 
 
 @pytest.mark.parametrize("spread", [0.005, 0.02, 0.05])
@@ -722,7 +725,7 @@ def test_at_equal_means_one_evaluation_and_its_official_check_rarely_give_a_verd
 
     Each trial is one commit evaluated once by its agent, everything core takes for its
     comparison, then the official check. Any verdict is false. At most 7% of trials give one
-    (Welch's test at 95%, conservative), every trial takes at most two extra runs of the
+    (Welch's test at 95%, conservative; a large effect decides at once), every trial takes at most two extra runs of the
     candidate and two of the base before the official check, and the official check adds at
     most one run.
     """
@@ -741,10 +744,10 @@ def test_at_equal_means_one_evaluation_and_its_official_check_rarely_give_a_verd
         assert running(lab) == [], trial
         last = compared(lab, "a", "input-1")[-1]
         assert last.candidate_samples <= core.MIN_SAMPLES_WITHOUT_FLOOR + 1
-        assert last.base_samples == core.MIN_SAMPLES_WITHOUT_FLOOR
+        assert last.base_samples <= core.MIN_SAMPLES_WITHOUT_FLOOR
         if last.verdict in (core.ComparisonVerdict.BETTER, core.ComparisonVerdict.WORSE):
             verdicts += 1
-    assert verdicts / SIMULATED <= 0.07, verdicts
+    assert verdicts / SIMULATED <= FALSE_VERDICT_RATE, verdicts
 
 
 @pytest.mark.regression
@@ -761,51 +764,3 @@ def test_a_real_difference_without_a_floor_is_usually_found(gap: float) -> None:
         if compared(lab, "a", "input-1")[-1].verdict is core.ComparisonVerdict.BETTER:
             found += 1
     assert found >= 80, found
-
-
-@settings(max_examples=examples(pr=60, nightly=600))
-@given(
-    mine=st.lists(st.sampled_from((99.0, 100.0, 101.0)), min_size=1, max_size=30),
-    theirs=st.lists(st.sampled_from((99.0, 100.0, 101.0)), min_size=1, max_size=30),
-    deterministic=st.booleans(),
-)
-def test_a_verdict_is_unreachable_exactly_when_three_identical_runs_a_side_show_no_noise(
-    *, mine: list[float], theirs: list[float], deterministic: bool
-) -> None:
-    """Over 1 to 30 runs a side: only zero spread at the minimum count, without a floor, is a
-    comparison no further run can settle; a declared floor never is."""
-    if deterministic:
-        mine, theirs = [mine[0]] * len(mine), [theirs[0]] * len(theirs)
-    scope = core.Scope(owner=core.AttemptId(root="a"), generation=0)
-
-    def samples(values: list[float], name: str) -> tuple[core.Sample, ...]:
-        return tuple(
-            core.Sample(
-                run=core.RequestId(root=f"{name}-{n}"),
-                scope=scope,
-                commit=revision(name),
-                measured_input=name,
-                evaluation="evaluation",
-                gates=("benchmark",),
-                host="host",
-                dedicated_resources=True,
-                reading=reading(value),
-                observed_at=0.0,
-            )
-            for n, value in enumerate(values)
-        )
-
-    anchor = core.BaseRef(commit=revision("base"), measured_input="base")
-    for floor in (0.0, FLOOR):
-        policy = core.ComparisonPolicy(noise_floor=floor)
-        made = core.compare(
-            samples(mine, "input"),
-            samples(theirs, "base"),
-            scope=scope,
-            anchor=anchor,
-            policy=policy,
-        )
-        assert made is not None
-        alike = len(set(mine)) == 1 and len(set(theirs)) == 1
-        enough = min(len(mine), len(theirs)) >= core.MIN_SAMPLES_WITHOUT_FLOOR
-        assert core.verdict_unreachable(made, policy) == (not floor and alike and enough)

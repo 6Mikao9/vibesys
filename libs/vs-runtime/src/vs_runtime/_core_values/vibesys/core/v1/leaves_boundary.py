@@ -184,9 +184,9 @@ def encode_Sample(v: values.Sample) -> pb.Sample:
         gates=[x for x in v.gates],
         host=v.host,
         dedicated_resources=v.dedicated_resources,
-        reading=encode_Reading(v.reading),
         observed_at=v.observed_at,
         base=None if v.base is None else encode_BaseRef(v.base),
+        readings=[encode_Reading(x) for x in v.readings],
     )
 
 
@@ -200,49 +200,63 @@ def decode_Sample(m: pb.Sample) -> values.Sample:
         gates=tuple(x for x in m.gates),
         host=m.host,
         dedicated_resources=m.dedicated_resources,
-        reading=decode_Reading(_required(m.reading)),
         observed_at=m.observed_at,
         base=None if m.base is None else decode_BaseRef(m.base),
+        readings=tuple(decode_Reading(x) for x in m.readings),
+    )
+
+
+def encode_ObjectiveComparison(v: values.ObjectiveComparison) -> pb.ObjectiveComparison:
+    return pb.ObjectiveComparison(
+        metric=v.metric,
+        unit=v.unit,
+        direction=encode_Direction(v.direction),
+        candidate_value=v.candidate_value,
+        base_value=v.base_value,
+        ratio=v.ratio,
+        noise=v.noise,
+        verdict=encode_ComparisonVerdict(v.verdict),
+    )
+
+
+def decode_ObjectiveComparison(m: pb.ObjectiveComparison) -> values.ObjectiveComparison:
+    return values.ObjectiveComparison(
+        metric=m.metric,
+        unit=m.unit if m.has_field("unit") else None,
+        direction=decode_Direction(m.direction),
+        candidate_value=m.candidate_value,
+        base_value=m.base_value,
+        ratio=m.ratio,
+        noise=m.noise,
+        verdict=decode_ComparisonVerdict(m.verdict),
     )
 
 
 def encode_Comparison(v: values.Comparison) -> pb.Comparison:
     return pb.Comparison(
         scope=encode_Scope(v.scope),
-        metric=v.metric,
-        unit=v.unit,
-        direction=encode_Direction(v.direction),
         candidate=encode_RevisionRef(v.candidate),
         candidate_input=v.candidate_input,
         base=encode_RevisionRef(v.base),
         base_input=v.base_input,
-        candidate_value=v.candidate_value,
-        base_value=v.base_value,
-        ratio=v.ratio,
-        noise=v.noise,
         verdict=encode_ComparisonVerdict(v.verdict),
         candidate_samples=str(v.candidate_samples),
         base_samples=str(v.base_samples),
+        objectives=[encode_ObjectiveComparison(x) for x in v.objectives],
     )
 
 
 def decode_Comparison(m: pb.Comparison) -> values.Comparison:
     return values.Comparison(
         scope=decode_Scope(_required(m.scope)),
-        metric=m.metric,
-        unit=m.unit if m.has_field("unit") else None,
-        direction=decode_Direction(m.direction),
         candidate=decode_RevisionRef(_required(m.candidate)),
         candidate_input=m.candidate_input,
         base=decode_RevisionRef(_required(m.base)),
         base_input=m.base_input,
-        candidate_value=m.candidate_value,
-        base_value=m.base_value,
-        ratio=m.ratio,
-        noise=m.noise,
         verdict=decode_ComparisonVerdict(m.verdict),
         candidate_samples=int(m.candidate_samples),
         base_samples=int(m.base_samples),
+        objectives=tuple(decode_ObjectiveComparison(x) for x in m.objectives),
     )
 
 
@@ -256,6 +270,7 @@ ENCODERS: dict[type, Callable[..., Message]] = {
     values.Reading: encode_Reading,
     values.BaseRef: encode_BaseRef,
     values.Sample: encode_Sample,
+    values.ObjectiveComparison: encode_ObjectiveComparison,
     values.Comparison: encode_Comparison,
 }
 DECODERS: dict[type, Callable[..., object]] = {
@@ -268,5 +283,6 @@ DECODERS: dict[type, Callable[..., object]] = {
     pb.Reading: decode_Reading,
     pb.BaseRef: decode_BaseRef,
     pb.Sample: decode_Sample,
+    pb.ObjectiveComparison: decode_ObjectiveComparison,
     pb.Comparison: decode_Comparison,
 }

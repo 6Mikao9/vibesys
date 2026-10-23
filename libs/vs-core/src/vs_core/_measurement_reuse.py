@@ -52,7 +52,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._comparison import run_reading
+from ._comparison import run_readings
 from .types.common import ObservationStatus, RevisionRef
 from .types.evaluation import (
     MEASUREMENT_DIAGNOSTIC_LIMIT,
@@ -288,7 +288,7 @@ def reused_record(
 
     A new run's record names no earlier run. A reusing submission's record names the run it
     re-reads and carries one of that run's evidence ids with its kind, status, artifacts and the
-    reading that run took (`run_reading`: an official run's ledger record states its answer).
+    readings that run took (`run_readings`: an official run's ledger record states its answer).
     """
     reuses = job.reuses if isinstance(job, OwnedJob) else None
     if evidence.reused_from != reuses:
@@ -302,7 +302,7 @@ def reused_record(
             and item.status == evidence.status
             and item.artifacts == evidence.artifacts
             and item.kind == evidence.kind
-            and run_reading(state, source, item) == evidence.reading
+            and run_readings(state, source, item) == evidence.readings
             for item in source.evidence
         )
         for source in state.jobs

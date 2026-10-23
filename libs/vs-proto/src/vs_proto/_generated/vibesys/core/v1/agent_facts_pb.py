@@ -70,7 +70,7 @@ class EvidenceAcceptanceReceipt(Message[_EvidenceAcceptanceReceiptFields]):
         observation_sequence: str
         status: ObservationStatus
 
-_EvidenceRefFields: TypeAlias = Literal["evidence_id", "kind", "purpose", "scope", "source_request", "candidate", "observation_sequence", "evaluator_digest", "workload_digest", "environment_digest", "provenance", "status", "artifacts", "acceptance_receipt", "reused_from", "reading", "unmet_requirement"]
+_EvidenceRefFields: TypeAlias = Literal["evidence_id", "kind", "purpose", "scope", "source_request", "candidate", "observation_sequence", "evaluator_digest", "workload_digest", "environment_digest", "provenance", "status", "artifacts", "acceptance_receipt", "reused_from", "unmet_requirement", "readings"]
 
 class EvidenceRef(Message[_EvidenceRefFields]):
     """
@@ -139,17 +139,19 @@ class EvidenceRef(Message[_EvidenceRefFields]):
             ```proto
             optional vibesys.core.v1.RequestId reused_from = 15;
             ```
-        reading:
-            ```proto
-            optional vibesys.core.v1.Reading reading = 16;
-            ```
         unmet_requirement:
             ```proto
             optional string unmet_requirement = 17;
             ```
+        readings:
+            Every objective a benchmark record reports, headline first; empty for any other record.
+
+            ```proto
+            repeated vibesys.core.v1.Reading readings = 18;
+            ```
     """
 
-    __slots__ = ("evidence_id", "kind", "purpose", "scope", "source_request", "candidate", "observation_sequence", "evaluator_digest", "workload_digest", "environment_digest", "provenance", "status", "artifacts", "acceptance_receipt", "reused_from", "reading", "unmet_requirement")
+    __slots__ = ("evidence_id", "kind", "purpose", "scope", "source_request", "candidate", "observation_sequence", "evaluator_digest", "workload_digest", "environment_digest", "provenance", "status", "artifacts", "acceptance_receipt", "reused_from", "unmet_requirement", "readings")
 
     if TYPE_CHECKING:
 
@@ -171,8 +173,8 @@ class EvidenceRef(Message[_EvidenceRefFields]):
             artifacts: list[ArtifactRef] | None = None,
             acceptance_receipt: EvidenceAcceptanceReceipt | None = None,
             reused_from: RequestId | None = None,
-            reading: Reading | None = None,
             unmet_requirement: str | None = None,
+            readings: list[Reading] | None = None,
         ) -> None:
             pass
 
@@ -191,8 +193,8 @@ class EvidenceRef(Message[_EvidenceRefFields]):
         artifacts: list[ArtifactRef]
         acceptance_receipt: EvidenceAcceptanceReceipt | None
         reused_from: RequestId | None
-        reading: Reading | None
         unmet_requirement: str
+        readings: list[Reading]
 
 class EvidencePurpose(Enum):
     """
@@ -256,7 +258,7 @@ class EvidenceProvenance(Enum):
 
 
 _DESC = file_desc(
-    b'\n!vibesys/core/v1/agent_facts.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a#vibesys/core/v1/value_options.proto\x1a\x1cvibesys/core/v1/common.proto\x1a vibesys/core/v1/vocabulary.proto\x1a\x1cvibesys/core/v1/leaves.proto"\xc1\x02\n\x19EvidenceAcceptanceReceipt\x12I\n\x0esource_request\x18\x01 \x01(\x0b2\x1a.vibesys.core.v1.RequestIdR\rsourceRequestB\x06\xbaH\x03\xc8\x01\x01\x124\n\x05scope\x18\x02 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\x05scopeB\x06\xbaH\x03\xc8\x01\x01\x12S\n\x14observation_sequence\x18\x03 \x01(\tR\x13observationSequenceB \xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x04\x08\x01\x10\x01\x12N\n\x06status\x18\x04 \x01(\x0e2".vibesys.core.v1.ObservationStatusR\x06statusB\x12\xbaH\x0f\x82\x01\x0c\x10\x01\x18\x01\x18\x02\x18\x03\x18\x04\x18\x05"\x8e\x0c\n\x0bEvidenceRef\x12D\n\x0bevidence_id\x18\x01 \x01(\x0b2\x1b.vibesys.core.v1.EvidenceIdR\nevidenceIdB\x06\xbaH\x03\xc8\x01\x01\x12=\n\x04kind\x18\x02 \x01(\x0e2\x1d.vibesys.core.v1.EvidenceKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12F\n\x07purpose\x18\x03 \x01(\x0e2 .vibesys.core.v1.EvidencePurposeR\x07purposeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x124\n\x05scope\x18\x04 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\x05scopeB\x06\xbaH\x03\xc8\x01\x01\x12I\n\x0esource_request\x18\x05 \x01(\x0b2\x1a.vibesys.core.v1.RequestIdR\rsourceRequestB\x06\xbaH\x03\xc8\x01\x01\x12B\n\tcandidate\x18\x06 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\tcandidateB\x06\xbaH\x03\xc8\x01\x01\x12S\n\x14observation_sequence\x18\x07 \x01(\tR\x13observationSequenceB \xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x04\x08\x01\x10\x01\x121\n\x10evaluator_digest\x18\x08 \x01(\tR\x0fevaluatorDigestB\x06\xca\xf3\x18\x02\x08\x01\x12/\n\x0fworkload_digest\x18\t \x01(\tR\x0eworkloadDigestB\x06\xca\xf3\x18\x02\x08\x01\x125\n\x12environment_digest\x18\n \x01(\tR\x11environmentDigestB\x06\xca\xf3\x18\x02\x08\x01\x12O\n\nprovenance\x18\x0b \x01(\x0e2#.vibesys.core.v1.EvidenceProvenanceR\nprovenanceB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12F\n\x06status\x18\x0c \x01(\x0e2".vibesys.core.v1.ObservationStatusR\x06statusB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12:\n\tartifacts\x18\r \x03(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\tartifacts\x12Y\n\x12acceptance_receipt\x18\x0e \x01(\x0b2*.vibesys.core.v1.EvidenceAcceptanceReceiptR\x11acceptanceReceipt\x12C\n\x0breused_from\x18\x0f \x01(\x0b2\x1a.vibesys.core.v1.RequestIdR\nreusedFromB\x06\xca\xf3\x18\x020\x01\x12:\n\x07reading\x18\x10 \x01(\x0b2\x18.vibesys.core.v1.ReadingR\x07readingB\x06\xca\xf3\x18\x020\x01\x128\n\x11unmet_requirement\x18\x11 \x01(\tH\x00R\x10unmetRequirementB\x06\xca\xf3\x18\x020\x01\x88\x01\x01B\x14\n\x12_unmet_requirement:\xfb\x02\xbaH\xf7\x02\x1a\xf4\x02\n\x16EvidenceRef.acceptance\x12Jacceptance_receipt: source, scope, sequence and status must match evidence\x1a\x8d\x02!has(this.acceptance_receipt) || (this.acceptance_receipt.source_request == this.source_request && this.acceptance_receipt.scope == this.scope && this.acceptance_receipt.observation_sequence == this.observation_sequence && this.acceptance_receipt.status == this.status)*\xd8\x01\n\x0fEvidencePurpose\x12 \n\x1cEVIDENCE_PURPOSE_UNSPECIFIED\x10\x00\x12\x1d\n\x19EVIDENCE_PURPOSE_BASELINE\x10\x01\x12=\n!EVIDENCE_PURPOSE_LOCAL_VALIDATION\x10\x02\x1a\x16\xda\xf3\x18\x12\n\x10local-validation\x12\x1d\n\x19EVIDENCE_PURPOSE_OFFICIAL\x10\x03\x12\x1c\n\x18EVIDENCE_PURPOSE_PROFILE\x10\x04\x1a\x08\xd2\xf3\x18\x04\x08\x01\x10\x01*\x9c\x01\n\x12EvidenceProvenance\x12#\n\x1fEVIDENCE_PROVENANCE_UNSPECIFIED\x10\x00\x12\x1f\n\x1bEVIDENCE_PROVENANCE_TRUSTED\x10\x01\x126\n\x1fEVIDENCE_PROVENANCE_SELF_REPORT\x10\x02\x1a\x11\xda\xf3\x18\r\n\x0bself-report\x1a\x08\xd2\xf3\x18\x04\x08\x01\x10\x01B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
+    b'\n!vibesys/core/v1/agent_facts.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a#vibesys/core/v1/value_options.proto\x1a\x1cvibesys/core/v1/common.proto\x1a vibesys/core/v1/vocabulary.proto\x1a\x1cvibesys/core/v1/leaves.proto"\xc1\x02\n\x19EvidenceAcceptanceReceipt\x12I\n\x0esource_request\x18\x01 \x01(\x0b2\x1a.vibesys.core.v1.RequestIdR\rsourceRequestB\x06\xbaH\x03\xc8\x01\x01\x124\n\x05scope\x18\x02 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\x05scopeB\x06\xbaH\x03\xc8\x01\x01\x12S\n\x14observation_sequence\x18\x03 \x01(\tR\x13observationSequenceB \xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x04\x08\x01\x10\x01\x12N\n\x06status\x18\x04 \x01(\x0e2".vibesys.core.v1.ObservationStatusR\x06statusB\x12\xbaH\x0f\x82\x01\x0c\x10\x01\x18\x01\x18\x02\x18\x03\x18\x04\x18\x05"\x9f\x0c\n\x0bEvidenceRef\x12D\n\x0bevidence_id\x18\x01 \x01(\x0b2\x1b.vibesys.core.v1.EvidenceIdR\nevidenceIdB\x06\xbaH\x03\xc8\x01\x01\x12=\n\x04kind\x18\x02 \x01(\x0e2\x1d.vibesys.core.v1.EvidenceKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12F\n\x07purpose\x18\x03 \x01(\x0e2 .vibesys.core.v1.EvidencePurposeR\x07purposeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x124\n\x05scope\x18\x04 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\x05scopeB\x06\xbaH\x03\xc8\x01\x01\x12I\n\x0esource_request\x18\x05 \x01(\x0b2\x1a.vibesys.core.v1.RequestIdR\rsourceRequestB\x06\xbaH\x03\xc8\x01\x01\x12B\n\tcandidate\x18\x06 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\tcandidateB\x06\xbaH\x03\xc8\x01\x01\x12S\n\x14observation_sequence\x18\x07 \x01(\tR\x13observationSequenceB \xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x04\x08\x01\x10\x01\x121\n\x10evaluator_digest\x18\x08 \x01(\tR\x0fevaluatorDigestB\x06\xca\xf3\x18\x02\x08\x01\x12/\n\x0fworkload_digest\x18\t \x01(\tR\x0eworkloadDigestB\x06\xca\xf3\x18\x02\x08\x01\x125\n\x12environment_digest\x18\n \x01(\tR\x11environmentDigestB\x06\xca\xf3\x18\x02\x08\x01\x12O\n\nprovenance\x18\x0b \x01(\x0e2#.vibesys.core.v1.EvidenceProvenanceR\nprovenanceB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12F\n\x06status\x18\x0c \x01(\x0e2".vibesys.core.v1.ObservationStatusR\x06statusB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12:\n\tartifacts\x18\r \x03(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\tartifacts\x12Y\n\x12acceptance_receipt\x18\x0e \x01(\x0b2*.vibesys.core.v1.EvidenceAcceptanceReceiptR\x11acceptanceReceipt\x12C\n\x0breused_from\x18\x0f \x01(\x0b2\x1a.vibesys.core.v1.RequestIdR\nreusedFromB\x06\xca\xf3\x18\x020\x01\x128\n\x11unmet_requirement\x18\x11 \x01(\tH\x00R\x10unmetRequirementB\x06\xca\xf3\x18\x020\x01\x88\x01\x01\x12<\n\x08readings\x18\x12 \x03(\x0b2\x18.vibesys.core.v1.ReadingR\x08readingsB\x06\xca\xf3\x18\x020\x01B\x14\n\x12_unmet_requirement:\xfb\x02\xbaH\xf7\x02\x1a\xf4\x02\n\x16EvidenceRef.acceptance\x12Jacceptance_receipt: source, scope, sequence and status must match evidence\x1a\x8d\x02!has(this.acceptance_receipt) || (this.acceptance_receipt.source_request == this.source_request && this.acceptance_receipt.scope == this.scope && this.acceptance_receipt.observation_sequence == this.observation_sequence && this.acceptance_receipt.status == this.status)J\x04\x08\x10\x10\x11R\x07reading*\xd8\x01\n\x0fEvidencePurpose\x12 \n\x1cEVIDENCE_PURPOSE_UNSPECIFIED\x10\x00\x12\x1d\n\x19EVIDENCE_PURPOSE_BASELINE\x10\x01\x12=\n!EVIDENCE_PURPOSE_LOCAL_VALIDATION\x10\x02\x1a\x16\xda\xf3\x18\x12\n\x10local-validation\x12\x1d\n\x19EVIDENCE_PURPOSE_OFFICIAL\x10\x03\x12\x1c\n\x18EVIDENCE_PURPOSE_PROFILE\x10\x04\x1a\x08\xd2\xf3\x18\x04\x08\x01\x10\x01*\x9c\x01\n\x12EvidenceProvenance\x12#\n\x1fEVIDENCE_PROVENANCE_UNSPECIFIED\x10\x00\x12\x1f\n\x1bEVIDENCE_PROVENANCE_TRUSTED\x10\x01\x126\n\x1fEVIDENCE_PROVENANCE_SELF_REPORT\x10\x02\x1a\x11\xda\xf3\x18\r\n\x0bself-report\x1a\x08\xd2\xf3\x18\x04\x08\x01\x10\x01B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
     [
         validate_pb.desc(),
         value_options_pb.desc(),

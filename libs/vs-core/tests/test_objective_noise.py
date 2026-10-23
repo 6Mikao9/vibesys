@@ -41,7 +41,7 @@ def sample(value: float, *, direction: Direction = "max", measured_input: str = 
         gates=("accuracy", "benchmark"),
         host="host",
         dedicated_resources=True,
-        reading=core.Reading(metric=METRIC, value=value, direction=direction),
+        readings=(core.Reading(metric=METRIC, value=value, direction=direction),),
         observed_at=0.0,
         base=ANCHOR if measured_input != "base-input" else None,
     )
@@ -182,9 +182,13 @@ def test_a_task_with_only_relative_noise_compares_as_it_always_did(
         )
 
 
-def test_a_tolerance_of_zero_declares_nothing() -> None:
-    result = verdict_of(1.5, 1, 1, tolerated(0.0), "max")
-    assert result.verdict is core.ComparisonVerdict.INCONCLUSIVE
+def test_a_tolerance_of_zero_declares_nothing_so_the_stated_default_applies() -> None:
+    """A tolerance of zero is no declaration: the comparison is the undeclared one, never exact."""
+    zero = verdict_of(1.5, 1, 1, tolerated(0.0), "max")
+    undeclared = verdict_of(1.5, 1, 1, core.ComparisonPolicy(), "max")
+    assert zero == undeclared
+    assert zero.verdict is core.ComparisonVerdict.BETTER
+    assert zero.objectives[0].noise > 0
 
 
 @pytest.mark.regression

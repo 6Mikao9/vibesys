@@ -245,7 +245,7 @@ def finished_steps(
             environment_digest=request.plan.environment_digest,
             provenance="trusted",
             status=status,
-            reading=reading(value) if stage == "benchmark" and value is not None else None,
+            readings=(reading(value),) if stage == "benchmark" and value is not None else (),
             reused_from=reused,
         )
         for stage in ("accuracy", "benchmark")
@@ -440,7 +440,7 @@ def test_a_comparison_is_made_once_both_sides_have_a_sample_whichever_ends_first
                 assert lab.comparisons() == ()
         (comparison,) = lab.comparisons()
         assert comparison.verdict is core.ComparisonVerdict.BETTER, order
-        assert comparison.ratio == 1.1
+        assert comparison.objectives[0].ratio == 1.1
         assert (comparison.candidate_samples, comparison.base_samples) == (1, 1)
 
 
@@ -451,10 +451,13 @@ def test_the_comparison_names_the_base_commit_and_both_values() -> None:
     (comparison,) = lab.comparisons()
     assert comparison.base == core.initial_state().run.facts.baseline
     assert comparison.candidate == revision("c1")
-    assert (comparison.candidate_value, comparison.base_value) == (150.0, 100.0)
-    assert comparison.metric == METRIC
-    assert comparison.unit == "tok/s"
-    assert comparison.direction == "max"
+    assert (comparison.objectives[0].candidate_value, comparison.objectives[0].base_value) == (
+        150.0,
+        100.0,
+    )
+    assert comparison.objectives[0].metric == METRIC
+    assert comparison.objectives[0].unit == "tok/s"
+    assert comparison.objectives[0].direction == "max"
 
 
 def test_a_faster_idea_is_better_a_slower_one_worse_and_one_in_the_noise_neither() -> None:
@@ -520,7 +523,7 @@ def test_a_close_call_earns_the_base_one_more_run_and_a_decisive_result_does_not
     (first, second) = lab.comparisons()
     assert first.verdict is second.verdict is core.ComparisonVerdict.WITHIN_NOISE
     assert (first.base_samples, second.base_samples) == (1, 2)
-    assert second.noise < first.noise
+    assert second.objectives[0].noise < first.objectives[0].noise
 
     decisive = Lab.of("a")
     decisive.call("a", "far", "input-1")
@@ -581,11 +584,11 @@ def test_samples_of_one_input_aggregate_and_a_lucky_run_changes_nothing_but_the_
         lab.call("a", f"c{number}", "input-1")
         lab.measure(values)
     samples = [s for s in lab.state.evaluation.samples if s.measured_input == "input-1"]
-    assert [s.reading.value for s in samples] == list(runs)
+    assert [s.readings[0].value for s in samples] == list(runs)
     last = lab.comparisons()[-1]
     assert last.candidate_samples == len(runs)
-    assert math.isclose(last.candidate_value, sum(runs) / len(runs))
-    assert last.candidate_value != max(runs)
+    assert math.isclose(last.objectives[0].candidate_value, sum(runs) / len(runs))
+    assert last.objectives[0].candidate_value != max(runs)
 
 
 def test_a_sample_is_recorded_only_for_a_run_that_names_its_measured_input() -> None:
@@ -615,7 +618,7 @@ def test_a_sample_cannot_be_constructed_without_its_commit_or_measured_input() -
         gates=("benchmark",),
         host="h",
         dedicated_resources=False,
-        reading=reading(1.0),
+        readings=(reading(1.0),),
         observed_at=0.0,
     )
     for missing, empty in (("commit", None), ("measured_input", None), ("measured_input", "")):
@@ -700,7 +703,7 @@ def test_a_comparison_whose_base_went_partly_stale_is_recomputed_over_the_rest()
     lab.advance(0.5 * STALENESS)
     now = core.moment_of(lab.state.run)
     (presented,) = core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now)
-    assert (presented.base_samples, presented.base_value) == (1, 104.0)
+    assert (presented.base_samples, presented.objectives[0].base_value) == (1, 104.0)
     assert presented.verdict is core.ComparisonVerdict.BETTER
     logged = [c for c in lab.comparisons() if c.candidate_input == "input-1"]
     assert presented not in logged, "the log holds only the comparison with the base run of 100"
@@ -764,7 +767,7 @@ def test_an_input_presents_the_comparison_of_its_newest_evaluation() -> None:
     lab.measure(values | {"input-1": 140.0})
     now = core.moment_of(lab.state.run)
     (latest,) = core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now)
-    assert (latest.base_input, latest.candidate_samples, latest.candidate_value) == (
+    assert (latest.base_input, latest.candidate_samples, latest.objectives[0].candidate_value) == (
         "base",
         1,
         140.0,
@@ -783,7 +786,10 @@ def test_a_verdict_from_a_zero_noise_under_a_declared_floor_is_no_close_call() -
     first = lab.call("a", "c1", "input-1")[0]
     lab.measure({"input-1": 0.0, "base": 100.0})
     (comparison,) = lab.comparisons()
-    assert (comparison.verdict, comparison.noise) == (core.ComparisonVerdict.WORSE, 0.0)
+    assert (comparison.verdict, comparison.objectives[0].noise) == (
+        core.ComparisonVerdict.WORSE,
+        0.0,
+    )
     assert not core.close_call(comparison)
     assert len(lab.baselines()) == 1, "no extra base run"
     assert final_check(lab, "a", "c1", "input-1").reuses == first.request_id
@@ -906,8 +912,8 @@ def official_reading(lab: Lab, check: core.SubmitMeasurement) -> core.Reading:
         for item in lab.state.evaluation.evidence
         if item.source_request == check.request_id and item.kind is core.EvidenceKind.BENCHMARK
     )
-    assert record.reading is not None
-    return record.reading
+    assert record.readings
+    return record.readings[0]
 
 
 @pytest.mark.regression
@@ -943,45 +949,42 @@ def test_the_official_record_states_the_value_its_comparison_compared(
         lab.state = ended_with(lab.state, check, official)
     else:
         source = next(s for s in lab.state.evaluation.samples if s.run == check.reuses)
-        lab.state = ended_with(lab.state, check, source.reading.value, reused=check.reuses)
+        lab.state = ended_with(lab.state, check, source.readings[0].value, reused=check.reuses)
     stated = official_reading(lab, check)
-    assert stated.value == lab.comparisons()[-1].candidate_value
+    assert stated.value == lab.comparisons()[-1].objectives[0].candidate_value
     (ranked,) = (
         item
         for item in lab.state.evaluation.measurements_of(revision(f"c{len(values) - 1}"))
         if item.purpose == "official" and item.kind is core.EvidenceKind.BENCHMARK
     )
-    assert ranked.reading == stated
-    runs = [s.reading.value for s in lab.state.evaluation.samples if s.measured_input == "input-1"]
+    assert ranked.readings[0] == stated
+    runs = [
+        s.readings[0].value for s in lab.state.evaluation.samples if s.measured_input == "input-1"
+    ]
     assert runs == [*values, *([official] if check.reuses is None else [])]
     assert reloaded(lab.state) == lab.state
 
 
 @pytest.mark.regression
-def test_a_task_that_declares_no_noise_gets_no_verdict_from_runs_that_show_none() -> None:
-    """With no declared ``relative_noise``, identical runs measure no noise either.
+def test_a_task_that_declares_no_noise_judges_identical_runs_by_the_stated_default() -> None:
+    """With no declared ``relative_noise``, identical runs show no noise and the default applies.
 
-    Before, the close call earned the base one more run, and when it read what the first did
-    (a quantized or cached benchmark), the spread was zero and the 0.3% gap between the two
-    sides was ``better``: the official check then reused the agent's single run. Now each side
-    takes three runs (the fewest that can give a verdict) and no more, the comparison stays
-    ``inconclusive``, and since no run can change that (`verdict_unreachable`) the official
-    check is answered by the samples held instead of a run that would read the same.
+    The noise is never zero, so a quantized or cached benchmark whose runs read alike cannot make
+    a 0.3% gap ``better``: the gap is inside the default's two standard errors, the result is a
+    close call, and each side takes three runs (the fewest that show a spread) and no more.
     """
     lab = Lab.of("a", floor=0.0)
     lab.call("a", "c1", "input-1")
     lab.measure({"input-1": 100.3, "base": 100.0})
     last = lab.comparisons()[-1]
     assert (last.candidate_samples, last.base_samples) == (3, 3)
-    assert {c.verdict for c in lab.comparisons()} == {core.ComparisonVerdict.INCONCLUSIVE}
-    assert core.verdict_unreachable(last, core.moment_of(lab.state.run).policy)
+    assert {c.verdict for c in lab.comparisons()} == {core.ComparisonVerdict.WITHIN_NOISE}
+    assert all(item.noise > 0 for item in last.objectives)
     assert len(lab.baselines()) == core.MIN_SAMPLES_WITHOUT_FLOOR, "at most two extra base runs"
-    check = final_check(lab, "a", "c1", "input-1")
-    assert check.reuses is not None, "no run can settle it: the samples held answer"
 
 
-def test_three_runs_a_side_without_a_declared_floor_give_a_verdict() -> None:
-    """One evaluation of one commit: core runs it and its base three times each, with a spread."""
+def test_runs_that_show_a_spread_without_a_declared_floor_give_a_verdict() -> None:
+    """One evaluation of one commit: core runs it and its base until a verdict, here with a spread."""
     lab = Lab.of("a", floor=0.0)
     lab.call("a", "c1", "input-1")
     readings = {"input-1": iter((110.0, 111.0, 109.0)), "base": iter((100.0, 101.0, 99.0))}
@@ -996,7 +999,6 @@ def test_three_runs_a_side_without_a_declared_floor_give_a_verdict() -> None:
         lab.ended.add(request.request_id.root)
         lab.state = ended_with(lab.state, request, next(readings[request.plan.measured_input]))
     last = lab.comparisons()[-1]
-    assert (last.candidate_samples, last.base_samples) == (3, 3)
     assert last.verdict is core.ComparisonVerdict.BETTER
     assert not core.close_call(last)
     assert final_check(lab, "a", "c1", "input-1").reuses is not None
@@ -1038,7 +1040,7 @@ def test_an_official_run_is_reused_by_its_own_reading_not_the_answer_its_record_
     The first official run of the input is the first conclusive run, so it carries the answer
     for a later official measurement of the same input (another commit of the same tree). Its
     ledger record states the mean of the samples, but the runtime re-reports the run's own
-    reading, so the reused record is checked against that (``run_reading``); checked against
+    reading, so the reused record is checked against that (``run_readings``); checked against
     the stated mean it would be refused and the measurement would run afresh.
     """
     lab = Lab.of("a")
@@ -1169,7 +1171,7 @@ def test_a_comparison_is_the_aggregate_of_every_sample_in_any_order(
         lab.measure({"input-1": value, "base": base})
     held = lab.comparisons()[-1]
     assert held.candidate_samples == len(values)
-    assert math.isclose(held.candidate_value, sum(values) / len(values))
+    assert math.isclose(held.objectives[0].candidate_value, sum(values) / len(values))
     candidate = [s for s in lab.state.evaluation.samples if s.measured_input == "input-1"]
     anchor = [s for s in lab.state.evaluation.samples if s.measured_input == "base"]
     seed.shuffle(candidate)
@@ -1183,8 +1185,8 @@ def test_a_comparison_is_the_aggregate_of_every_sample_in_any_order(
         policy=core.policy_of(lab.state.run.facts),
     )
     assert again is not None
-    assert math.isclose(again.ratio, held.ratio)
-    assert math.isclose(again.noise, held.noise)
+    assert math.isclose(again.objectives[0].ratio, held.objectives[0].ratio)
+    assert math.isclose(again.objectives[0].noise, held.objectives[0].noise)
     assert again.verdict is held.verdict
 
 
@@ -1215,7 +1217,7 @@ def test_a_finished_measurement_reaches_the_search_with_the_comparison_of_its_ca
     (finished,) = finished_for_search(lab.state, done)
     assert finished.comparison is not None
     assert finished.comparison.candidate_samples == 1
-    assert finished.comparison.ratio == pytest.approx(1.01)
+    assert finished.comparison.objectives[0].ratio == pytest.approx(1.01)
     assert finished.comparison.base == core.initial_state().run.facts.baseline
     lab.state = done.state
     assert finished.comparison == lab.comparisons()[-1]

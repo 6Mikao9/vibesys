@@ -227,9 +227,10 @@ _EvaluationLeaseFields: TypeAlias = Literal["key", "retain"]
 
 class EvaluationLease(Message[_EvaluationLeaseFields]):
     """
-    A sequence of measurement jobs holds one slot until its final member ends.
+    A sequence may retain an idle slot between members while no job waits for it.
+    After yielding to waiting work, its next member reacquires in submission FIFO.
     Scoped by the submitting owner and generation. Closing that scope cancels
-    every member and returns the slot, including between members or after a crash.
+    every member and returns any reservation, including after a crash.
 
     ```proto
     message vibesys.core.v1.EvaluationLease

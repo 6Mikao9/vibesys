@@ -34,6 +34,8 @@ message EvidenceAcceptanceReceipt {
 }
 
 message EvidenceRef {
+  reserved 16;
+  reserved "reading";
   option (buf.validate.message).cel = {id: "EvidenceRef.acceptance", message: "acceptance_receipt: source, scope, sequence and status must match evidence", expression: "!has(this.acceptance_receipt) || (this.acceptance_receipt.source_request == this.source_request && this.acceptance_receipt.scope == this.scope && this.acceptance_receipt.observation_sequence == this.observation_sequence && this.acceptance_receipt.status == this.status)"};
   EvidenceId evidence_id = 1 [(buf.validate.field).required = true];
   EvidenceKind kind = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
@@ -50,6 +52,7 @@ message EvidenceRef {
   repeated ArtifactRef artifacts = 13;
   EvidenceAcceptanceReceipt acceptance_receipt = 14;
   RequestId reused_from = 15 [(core_field).omit_unset = true];
-  Reading reading = 16 [(core_field).omit_unset = true];
   optional string unmet_requirement = 17 [(core_field).omit_unset = true];
+  // Every objective a benchmark record reports, headline first; empty for any other record.
+  repeated Reading readings = 18 [(core_field).omit_unset = true];
 }

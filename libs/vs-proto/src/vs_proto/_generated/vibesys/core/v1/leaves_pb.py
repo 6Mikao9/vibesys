@@ -281,7 +281,7 @@ _ReadingFields: TypeAlias = Literal["metric", "value", "direction", "unit", "rep
 
 class Reading(Message[_ReadingFields]):
     """
-    A run's headline reading of the benchmark stage, as the trusted record states it.
+    One objective's reading of a run's benchmark stage, as the trusted record states it.
 
     ```proto
     message vibesys.core.v1.Reading
@@ -370,7 +370,7 @@ class BaseRef(Message[_BaseRefFields]):
         commit: RevisionRef | None
         measured_input: str
 
-_SampleFields: TypeAlias = Literal["run", "scope", "commit", "measured_input", "evaluation", "gates", "host", "dedicated_resources", "reading", "observed_at", "base"]
+_SampleFields: TypeAlias = Literal["run", "scope", "commit", "measured_input", "evaluation", "gates", "host", "dedicated_resources", "observed_at", "base", "readings"]
 
 class Sample(Message[_SampleFields]):
     """
@@ -379,6 +379,7 @@ class Sample(Message[_SampleFields]):
     A sample is built only from a run that ended conclusively with a trusted benchmark reading,
     and requires the ``commit`` it measured and the ``measured_input`` digest (#2961). The
     ``base`` is set on a candidate's sample and names the revision it is compared with.
+    ``readings`` are the run's reading of every objective its benchmark reported, headline first.
 
     ```proto
     message vibesys.core.v1.Sample
@@ -417,10 +418,6 @@ class Sample(Message[_SampleFields]):
             ```proto
             bool dedicated_resources = 8;
             ```
-        reading:
-            ```proto
-            optional vibesys.core.v1.Reading reading = 9;
-            ```
         observed_at:
             ```proto
             double observed_at = 10;
@@ -429,9 +426,13 @@ class Sample(Message[_SampleFields]):
             ```proto
             optional vibesys.core.v1.BaseRef base = 11;
             ```
+        readings:
+            ```proto
+            repeated vibesys.core.v1.Reading readings = 12;
+            ```
     """
 
-    __slots__ = ("run", "scope", "commit", "measured_input", "evaluation", "gates", "host", "dedicated_resources", "reading", "observed_at", "base")
+    __slots__ = ("run", "scope", "commit", "measured_input", "evaluation", "gates", "host", "dedicated_resources", "observed_at", "base", "readings")
 
     if TYPE_CHECKING:
 
@@ -446,9 +447,9 @@ class Sample(Message[_SampleFields]):
             gates: list[str] | None = None,
             host: str = "",
             dedicated_resources: bool = False,
-            reading: Reading | None = None,
             observed_at: float = 0,
             base: BaseRef | None = None,
+            readings: list[Reading] | None = None,
         ) -> None:
             pass
 
@@ -460,20 +461,101 @@ class Sample(Message[_SampleFields]):
         gates: list[str]
         host: str
         dedicated_resources: bool
-        reading: Reading | None
         observed_at: float
         base: BaseRef | None
+        readings: list[Reading]
 
-_ComparisonFields: TypeAlias = Literal["scope", "metric", "unit", "direction", "candidate", "candidate_input", "base", "base_input", "candidate_value", "base_value", "ratio", "noise", "verdict", "candidate_samples", "base_samples"]
+_ObjectiveComparisonFields: TypeAlias = Literal["metric", "unit", "direction", "candidate_value", "base_value", "ratio", "noise", "verdict"]
+
+class ObjectiveComparison(Message[_ObjectiveComparisonFields]):
+    """
+    How a candidate's samples stand against its base's on one objective: the ratio, its noise and
+    the verdict.
+
+    ``ratio`` is the candidate's mean over the base's, as measured; ``direction`` says which way is
+    better, so ``better`` is a ratio above one for ``max`` and below one for ``min``. ``noise`` is
+    one standard error of the ratio, and a verdict needs two of them: the statistic is in
+    ``vs_core._dominance``. ``verdict`` is ``better`` or ``worse`` beyond the objective's tolerance,
+    ``within_noise`` inside it, and ``inconclusive`` when the objective cannot be judged (a base
+    mean of zero).
+
+    ```proto
+    message vibesys.core.v1.ObjectiveComparison
+    ```
+
+    Attributes:
+        metric:
+            ```proto
+            string metric = 1;
+            ```
+        unit:
+            ```proto
+            optional string unit = 2;
+            ```
+        direction:
+            ```proto
+            vibesys.core.v1.Direction direction = 3;
+            ```
+        candidate_value:
+            ```proto
+            double candidate_value = 4;
+            ```
+        base_value:
+            ```proto
+            double base_value = 5;
+            ```
+        ratio:
+            ```proto
+            double ratio = 6;
+            ```
+        noise:
+            ```proto
+            double noise = 7;
+            ```
+        verdict:
+            ```proto
+            vibesys.core.v1.ComparisonVerdict verdict = 8;
+            ```
+    """
+
+    __slots__ = ("metric", "unit", "direction", "candidate_value", "base_value", "ratio", "noise", "verdict")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            metric: str = "",
+            unit: str | None = None,
+            direction: Direction | None = None,
+            candidate_value: float = 0,
+            base_value: float = 0,
+            ratio: float = 0,
+            noise: float = 0,
+            verdict: ComparisonVerdict | None = None,
+        ) -> None:
+            pass
+
+        metric: str
+        unit: str
+        direction: Direction
+        candidate_value: float
+        base_value: float
+        ratio: float
+        noise: float
+        verdict: ComparisonVerdict
+
+_ComparisonFields: TypeAlias = Literal["scope", "candidate", "candidate_input", "base", "base_input", "verdict", "candidate_samples", "base_samples", "objectives"]
 
 class Comparison(Message[_ComparisonFields]):
     """
-    A candidate's samples compared with its base's: the ratio, its noise and the verdict.
+    A candidate's samples compared with its base's on every objective, and the dominance result.
 
-    ``ratio`` is the candidate's mean over the base's, as measured; ``direction`` says which
-    way is better, so ``better`` is a ratio above one for ``max`` and below one for ``min``.
-    ``noise`` is one standard error of the ratio, and a verdict needs two of them: the
-    statistic is in ``vs_core._comparison``.
+    ``objectives`` holds one comparison per objective every sample reports, headline first.
+    ``verdict`` is the one dominance rule over them (``vs_core._dominance``): ``worse`` when some
+    objective is worse beyond its tolerance, else ``better`` when some objective is better beyond
+    it (the candidate dominates the base), else ``inconclusive`` when some objective cannot be
+    judged, else ``within_noise``.
 
     ```proto
     message vibesys.core.v1.Comparison
@@ -483,18 +565,6 @@ class Comparison(Message[_ComparisonFields]):
         scope:
             ```proto
             optional vibesys.core.v1.Scope scope = 1;
-            ```
-        metric:
-            ```proto
-            string metric = 2;
-            ```
-        unit:
-            ```proto
-            optional string unit = 3;
-            ```
-        direction:
-            ```proto
-            vibesys.core.v1.Direction direction = 4;
             ```
         candidate:
             ```proto
@@ -512,22 +582,6 @@ class Comparison(Message[_ComparisonFields]):
             ```proto
             string base_input = 8;
             ```
-        candidate_value:
-            ```proto
-            double candidate_value = 9;
-            ```
-        base_value:
-            ```proto
-            double base_value = 10;
-            ```
-        ratio:
-            ```proto
-            double ratio = 11;
-            ```
-        noise:
-            ```proto
-            double noise = 12;
-            ```
         verdict:
             ```proto
             vibesys.core.v1.ComparisonVerdict verdict = 13;
@@ -540,9 +594,13 @@ class Comparison(Message[_ComparisonFields]):
             ```proto
             string base_samples = 15;
             ```
+        objectives:
+            ```proto
+            repeated vibesys.core.v1.ObjectiveComparison objectives = 16;
+            ```
     """
 
-    __slots__ = ("scope", "metric", "unit", "direction", "candidate", "candidate_input", "base", "base_input", "candidate_value", "base_value", "ratio", "noise", "verdict", "candidate_samples", "base_samples")
+    __slots__ = ("scope", "candidate", "candidate_input", "base", "base_input", "verdict", "candidate_samples", "base_samples", "objectives")
 
     if TYPE_CHECKING:
 
@@ -550,38 +608,26 @@ class Comparison(Message[_ComparisonFields]):
             self,
             *,
             scope: Scope | None = None,
-            metric: str = "",
-            unit: str | None = None,
-            direction: Direction | None = None,
             candidate: RevisionRef | None = None,
             candidate_input: str = "",
             base: RevisionRef | None = None,
             base_input: str = "",
-            candidate_value: float = 0,
-            base_value: float = 0,
-            ratio: float = 0,
-            noise: float = 0,
             verdict: ComparisonVerdict | None = None,
             candidate_samples: str = "",
             base_samples: str = "",
+            objectives: list[ObjectiveComparison] | None = None,
         ) -> None:
             pass
 
         scope: Scope | None
-        metric: str
-        unit: str
-        direction: Direction
         candidate: RevisionRef | None
         candidate_input: str
         base: RevisionRef | None
         base_input: str
-        candidate_value: float
-        base_value: float
-        ratio: float
-        noise: float
         verdict: ComparisonVerdict
         candidate_samples: str
         base_samples: str
+        objectives: list[ObjectiveComparison]
 
 class Direction(Enum):
     """
@@ -670,7 +716,7 @@ class TaskObjectiveDirection(Enum):
 
 
 _DESC = file_desc(
-    b'\n\x1cvibesys/core/v1/leaves.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a#vibesys/core/v1/value_options.proto\x1a\x1cvibesys/core/v1/common.proto\x1a vibesys/core/v1/vocabulary.proto"\xe7\x01\n\x0bEvidenceKey\x12;\n\x04kind\x18\x01 \x01(\tR\x04kindB\'\xbaH\x10r\x0e\n\x0cevidence_key\xca\xf3\x18\x10*\x0e"evidence_key"\x12O\n\x0esource_request\x18\x02 \x01(\x0b2\x1a.vibesys.core.v1.RequestIdR\rsourceRequestB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12J\n\x0bevidence_id\x18\x03 \x01(\x0b2\x1b.vibesys.core.v1.EvidenceIdR\nevidenceIdB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01"\xa9\x01\n\x0bRevisionRef\x12J\n\x0brevision_id\x18\x01 \x01(\x0b2\x1b.vibesys.core.v1.RevisionIdR\nrevisionIdB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12\x1f\n\x06digest\x18\x02 \x01(\tR\x06digestB\x07\xbaH\x04r\x02\x10\x01:-\xc2\xf3\x18)\x1a\'vs_core._revision_ref.RevisionReference"n\n\tTaskStage\x12"\n\x08stage_id\x18\x01 \x01(\tR\x07stageIdB\x07\xbaH\x04r\x02\x10\x01\x12=\n\x11execution_seconds\x18\x02 \x01(\x01R\x10executionSecondsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00"\xc4\x01\n\rTaskObjective\x12\x1b\n\x04name\x18\x01 \x01(\tR\x04nameB\x07\xbaH\x04r\x02\x10\x01\x12W\n\tdirection\x18\x02 \x01(\x0e2\'.vibesys.core.v1.TaskObjectiveDirectionR\tdirectionB\x10\xbaH\x07\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\x08\x01\x12=\n\x05noise\x18\x03 \x01(\x0b2\x1f.vibesys.core.v1.ObjectiveNoiseR\x05noiseB\x06\xca\xf3\x18\x020\x01"\x9d\x04\n\x0eObjectiveNoise\x125\n\x0eschema_version\x18\x01 \x01(\x05R\rschemaVersionB\x0e\xbaH\x04\x1a\x02(\x01\xca\xf3\x18\x03*\x011\x129\n\x08revision\x18\x02 \x01(\tR\x08revisionB\x1d\xbaH\x11r\x0f2\r^[1-9][0-9]*$\xca\xf3\x18\x05\x10\x01*\x011\x12/\n\x05floor\x18\x03 \x01(\x01R\x05floorB\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00\x12@\n\x0erelative_noise\x18\x04 \x01(\x01R\rrelativeNoiseB\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00\x12\'\n\nprovenance\x18\x05 \x01(\tR\nprovenanceB\x07\xbaH\x04r\x02\x10\x01\x12E\n\x0fbaseline_values\x18\x06 \x03(\x0b2\x1c.vibesys.core.v1.NoiseSampleR\x0ebaselineValues:\xb5\x01\xbaH\xb1\x01\x1aV\n\x0epolicy_version\x12*unsupported objective noise schema version\x1a\x18this.schema_version == 1\x1aW\n\x0bnoise_floor\x12%relative_noise must be at least floor\x1a!this.relative_noise >= this.floor"2\n\x0bNoiseSample\x12#\n\x05value\x18\x01 \x01(\x01R\x05valueB\r\xbaH\x04\x12\x02@\x01\xca\xf3\x18\x02\x08\x01"\xfe\x01\n\x07Reading\x12\x1f\n\x06metric\x18\x01 \x01(\tR\x06metricB\x07\xbaH\x04r\x02\x10\x01\x12+\n\x05value\x18\x02 \x01(\x01R\x05valueB\x15\xbaH\x04\x12\x02@\x01\xca\xf3\x18\n\x08\x01:\x06Finite\x12B\n\tdirection\x18\x03 \x01(\x0e2\x1a.vibesys.core.v1.DirectionR\tdirectionB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12\x17\n\x04unit\x18\x04 \x01(\tH\x00R\x04unit\x88\x01\x01\x12?\n\x0brepetitions\x18\x05 \x01(\tR\x0brepetitionsB\x1d\xbaH\x11r\x0f2\r^[1-9][0-9]*$\xca\xf3\x18\x05\x10\x01*\x011B\x07\n\x05_unit"}\n\x07BaseRef\x12B\n\x06commit\x18\x01 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\x06commitB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12.\n\x0emeasured_input\x18\x02 \x01(\tR\rmeasuredInputB\x07\xbaH\x04r\x02\x10\x01"\xba\x04\n\x06Sample\x12:\n\x03run\x18\x01 \x01(\x0b2\x1a.vibesys.core.v1.RequestIdR\x03runB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12:\n\x05scope\x18\x02 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\x05scopeB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12B\n\x06commit\x18\x03 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\x06commitB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12.\n\x0emeasured_input\x18\x04 \x01(\tR\rmeasuredInputB\x07\xbaH\x04r\x02\x10\x01\x12\'\n\nevaluation\x18\x05 \x01(\tR\nevaluationB\x07\xbaH\x04r\x02\x10\x01\x12\x1c\n\x05gates\x18\x06 \x03(\tR\x05gatesB\x06\xca\xf3\x18\x02\x08\x01\x12\x1b\n\x04host\x18\x07 \x01(\tR\x04hostB\x07\xbaH\x04r\x02\x10\x01\x127\n\x13dedicated_resources\x18\x08 \x01(\x08R\x12dedicatedResourcesB\x06\xca\xf3\x18\x02\x08\x01\x12@\n\x07reading\x18\t \x01(\x0b2\x18.vibesys.core.v1.ReadingR\x07readingB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x127\n\x0bobserved_at\x18\n \x01(\x01R\nobservedAtB\x16\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xca\xf3\x18\x02\x08\x01\x12,\n\x04base\x18\x0b \x01(\x0b2\x18.vibesys.core.v1.BaseRefR\x04base"\xd2\x06\n\nComparison\x12:\n\x05scope\x18\x01 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\x05scopeB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12\x1f\n\x06metric\x18\x02 \x01(\tR\x06metricB\x07\xbaH\x04r\x02\x10\x01\x12\x17\n\x04unit\x18\x03 \x01(\tH\x00R\x04unit\x88\x01\x01\x12J\n\tdirection\x18\x04 \x01(\x0e2\x1a.vibesys.core.v1.DirectionR\tdirectionB\x10\xbaH\x07\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\x08\x01\x12H\n\tcandidate\x18\x05 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\tcandidateB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x120\n\x0fcandidate_input\x18\x06 \x01(\tR\x0ecandidateInputB\x07\xbaH\x04r\x02\x10\x01\x12>\n\x04base\x18\x07 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\x04baseB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12&\n\nbase_input\x18\x08 \x01(\tR\tbaseInputB\x07\xbaH\x04r\x02\x10\x01\x126\n\x0fcandidate_value\x18\t \x01(\x01R\x0ecandidateValueB\r\xbaH\x04\x12\x02@\x01\xca\xf3\x18\x02\x08\x01\x12,\n\nbase_value\x18\n \x01(\x01R\tbaseValueB\r\xbaH\x04\x12\x02@\x01\xca\xf3\x18\x02\x08\x01\x12#\n\x05ratio\x18\x0b \x01(\x01R\x05ratioB\r\xbaH\x04\x12\x02@\x01\xca\xf3\x18\x02\x08\x01\x12&\n\x05noise\x18\x0c \x01(\x01R\x05noiseB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12N\n\x07verdict\x18\r \x01(\x0e2".vibesys.core.v1.ComparisonVerdictR\x07verdictB\x10\xbaH\x07\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\x08\x01\x12M\n\x11candidate_samples\x18\x0e \x01(\tR\x10candidateSamplesB \xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x04\x08\x01\x10\x01\x12C\n\x0cbase_samples\x18\x0f \x01(\tR\x0bbaseSamplesB \xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x04\x08\x01\x10\x01B\x07\n\x05_unit*l\n\tDirection\x12\x19\n\x15DIRECTION_UNSPECIFIED\x10\x00\x12\x1c\n\rDIRECTION_MAX\x10\x01\x1a\t\xda\xf3\x18\x05\n\x03max\x12\x1c\n\rDIRECTION_MIN\x10\x02\x1a\t\xda\xf3\x18\x05\n\x03min\x1a\x08\xd2\xf3\x18\x04\x08\x01\x10\x01*\xd1\x01\n\x0bChargeClass\x12\x1c\n\x18CHARGE_CLASS_UNSPECIFIED\x10\x00\x12!\n\x11CHARGE_CLASS_FREE\x10\x01\x1a\n\xda\xf3\x18\x06\n\x04free\x12!\n\x11CHARGE_CLASS_PAID\x10\x02\x1a\n\xda\xf3\x18\x06\n\x04paid\x12-\n\x17CHARGE_CLASS_CORRECTION\x10\x03\x1a\x10\xda\xf3\x18\x0c\n\ncorrection\x12%\n\x13CHARGE_CLASS_RESUME\x10\x04\x1a\x0c\xda\xf3\x18\x08\n\x06resume\x1a\x08\xd2\xf3\x18\x04\x08\x01\x10\x01*\xa6\x01\n\x16TaskObjectiveDirection\x12(\n$TASK_OBJECTIVE_DIRECTION_UNSPECIFIED\x10\x00\x12+\n\x1cTASK_OBJECTIVE_DIRECTION_MAX\x10\x01\x1a\t\xda\xf3\x18\x05\n\x03max\x12+\n\x1cTASK_OBJECTIVE_DIRECTION_MIN\x10\x02\x1a\t\xda\xf3\x18\x05\n\x03min\x1a\x08\xd2\xf3\x18\x04\x08\x01\x10\x01B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
+    b'\n\x1cvibesys/core/v1/leaves.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a#vibesys/core/v1/value_options.proto\x1a\x1cvibesys/core/v1/common.proto\x1a vibesys/core/v1/vocabulary.proto"\xe7\x01\n\x0bEvidenceKey\x12;\n\x04kind\x18\x01 \x01(\tR\x04kindB\'\xbaH\x10r\x0e\n\x0cevidence_key\xca\xf3\x18\x10*\x0e"evidence_key"\x12O\n\x0esource_request\x18\x02 \x01(\x0b2\x1a.vibesys.core.v1.RequestIdR\rsourceRequestB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12J\n\x0bevidence_id\x18\x03 \x01(\x0b2\x1b.vibesys.core.v1.EvidenceIdR\nevidenceIdB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01"\xa9\x01\n\x0bRevisionRef\x12J\n\x0brevision_id\x18\x01 \x01(\x0b2\x1b.vibesys.core.v1.RevisionIdR\nrevisionIdB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12\x1f\n\x06digest\x18\x02 \x01(\tR\x06digestB\x07\xbaH\x04r\x02\x10\x01:-\xc2\xf3\x18)\x1a\'vs_core._revision_ref.RevisionReference"n\n\tTaskStage\x12"\n\x08stage_id\x18\x01 \x01(\tR\x07stageIdB\x07\xbaH\x04r\x02\x10\x01\x12=\n\x11execution_seconds\x18\x02 \x01(\x01R\x10executionSecondsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00"\xc4\x01\n\rTaskObjective\x12\x1b\n\x04name\x18\x01 \x01(\tR\x04nameB\x07\xbaH\x04r\x02\x10\x01\x12W\n\tdirection\x18\x02 \x01(\x0e2\'.vibesys.core.v1.TaskObjectiveDirectionR\tdirectionB\x10\xbaH\x07\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\x08\x01\x12=\n\x05noise\x18\x03 \x01(\x0b2\x1f.vibesys.core.v1.ObjectiveNoiseR\x05noiseB\x06\xca\xf3\x18\x020\x01"\x9d\x04\n\x0eObjectiveNoise\x125\n\x0eschema_version\x18\x01 \x01(\x05R\rschemaVersionB\x0e\xbaH\x04\x1a\x02(\x01\xca\xf3\x18\x03*\x011\x129\n\x08revision\x18\x02 \x01(\tR\x08revisionB\x1d\xbaH\x11r\x0f2\r^[1-9][0-9]*$\xca\xf3\x18\x05\x10\x01*\x011\x12/\n\x05floor\x18\x03 \x01(\x01R\x05floorB\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00\x12@\n\x0erelative_noise\x18\x04 \x01(\x01R\rrelativeNoiseB\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00\x12\'\n\nprovenance\x18\x05 \x01(\tR\nprovenanceB\x07\xbaH\x04r\x02\x10\x01\x12E\n\x0fbaseline_values\x18\x06 \x03(\x0b2\x1c.vibesys.core.v1.NoiseSampleR\x0ebaselineValues:\xb5\x01\xbaH\xb1\x01\x1aV\n\x0epolicy_version\x12*unsupported objective noise schema version\x1a\x18this.schema_version == 1\x1aW\n\x0bnoise_floor\x12%relative_noise must be at least floor\x1a!this.relative_noise >= this.floor"2\n\x0bNoiseSample\x12#\n\x05value\x18\x01 \x01(\x01R\x05valueB\r\xbaH\x04\x12\x02@\x01\xca\xf3\x18\x02\x08\x01"\xfe\x01\n\x07Reading\x12\x1f\n\x06metric\x18\x01 \x01(\tR\x06metricB\x07\xbaH\x04r\x02\x10\x01\x12+\n\x05value\x18\x02 \x01(\x01R\x05valueB\x15\xbaH\x04\x12\x02@\x01\xca\xf3\x18\n\x08\x01:\x06Finite\x12B\n\tdirection\x18\x03 \x01(\x0e2\x1a.vibesys.core.v1.DirectionR\tdirectionB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12\x17\n\x04unit\x18\x04 \x01(\tH\x00R\x04unit\x88\x01\x01\x12?\n\x0brepetitions\x18\x05 \x01(\tR\x0brepetitionsB\x1d\xbaH\x11r\x0f2\r^[1-9][0-9]*$\xca\xf3\x18\x05\x10\x01*\x011B\x07\n\x05_unit"}\n\x07BaseRef\x12B\n\x06commit\x18\x01 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\x06commitB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12.\n\x0emeasured_input\x18\x02 \x01(\tR\rmeasuredInputB\x07\xbaH\x04r\x02\x10\x01"\xcd\x04\n\x06Sample\x12:\n\x03run\x18\x01 \x01(\x0b2\x1a.vibesys.core.v1.RequestIdR\x03runB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12:\n\x05scope\x18\x02 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\x05scopeB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12B\n\x06commit\x18\x03 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\x06commitB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12.\n\x0emeasured_input\x18\x04 \x01(\tR\rmeasuredInputB\x07\xbaH\x04r\x02\x10\x01\x12\'\n\nevaluation\x18\x05 \x01(\tR\nevaluationB\x07\xbaH\x04r\x02\x10\x01\x12\x1c\n\x05gates\x18\x06 \x03(\tR\x05gatesB\x06\xca\xf3\x18\x02\x08\x01\x12\x1b\n\x04host\x18\x07 \x01(\tR\x04hostB\x07\xbaH\x04r\x02\x10\x01\x127\n\x13dedicated_resources\x18\x08 \x01(\x08R\x12dedicatedResourcesB\x06\xca\xf3\x18\x02\x08\x01\x127\n\x0bobserved_at\x18\n \x01(\x01R\nobservedAtB\x16\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xca\xf3\x18\x02\x08\x01\x12,\n\x04base\x18\x0b \x01(\x0b2\x18.vibesys.core.v1.BaseRefR\x04base\x12D\n\x08readings\x18\x0c \x03(\x0b2\x18.vibesys.core.v1.ReadingR\x08readingsB\x0e\xbaH\x05\x92\x01\x02\x08\x01\xca\xf3\x18\x02\x08\x01J\x04\x08\t\x10\nR\x07reading"\xa7\x03\n\x13ObjectiveComparison\x12\x1f\n\x06metric\x18\x01 \x01(\tR\x06metricB\x07\xbaH\x04r\x02\x10\x01\x12\x17\n\x04unit\x18\x02 \x01(\tH\x00R\x04unit\x88\x01\x01\x12J\n\tdirection\x18\x03 \x01(\x0e2\x1a.vibesys.core.v1.DirectionR\tdirectionB\x10\xbaH\x07\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\x08\x01\x126\n\x0fcandidate_value\x18\x04 \x01(\x01R\x0ecandidateValueB\r\xbaH\x04\x12\x02@\x01\xca\xf3\x18\x02\x08\x01\x12,\n\nbase_value\x18\x05 \x01(\x01R\tbaseValueB\r\xbaH\x04\x12\x02@\x01\xca\xf3\x18\x02\x08\x01\x12#\n\x05ratio\x18\x06 \x01(\x01R\x05ratioB\r\xbaH\x04\x12\x02@\x01\xca\xf3\x18\x02\x08\x01\x12&\n\x05noise\x18\x07 \x01(\x01R\x05noiseB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12N\n\x07verdict\x18\x08 \x01(\x0e2".vibesys.core.v1.ComparisonVerdictR\x07verdictB\x10\xbaH\x07\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\x08\x01B\x07\n\x05_unit"\xd4\x05\n\nComparison\x12:\n\x05scope\x18\x01 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\x05scopeB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12H\n\tcandidate\x18\x05 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\tcandidateB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x120\n\x0fcandidate_input\x18\x06 \x01(\tR\x0ecandidateInputB\x07\xbaH\x04r\x02\x10\x01\x12>\n\x04base\x18\x07 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\x04baseB\x0c\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\x08\x01\x12&\n\nbase_input\x18\x08 \x01(\tR\tbaseInputB\x07\xbaH\x04r\x02\x10\x01\x12N\n\x07verdict\x18\r \x01(\x0e2".vibesys.core.v1.ComparisonVerdictR\x07verdictB\x10\xbaH\x07\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\x08\x01\x12M\n\x11candidate_samples\x18\x0e \x01(\tR\x10candidateSamplesB \xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x04\x08\x01\x10\x01\x12C\n\x0cbase_samples\x18\x0f \x01(\tR\x0bbaseSamplesB \xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x04\x08\x01\x10\x01\x12T\n\nobjectives\x18\x10 \x03(\x0b2$.vibesys.core.v1.ObjectiveComparisonR\nobjectivesB\x0e\xbaH\x05\x92\x01\x02\x08\x01\xca\xf3\x18\x02\x08\x01J\x04\x08\x02\x10\x03J\x04\x08\x03\x10\x04J\x04\x08\x04\x10\x05J\x04\x08\t\x10\nJ\x04\x08\n\x10\x0bJ\x04\x08\x0b\x10\x0cJ\x04\x08\x0c\x10\rR\x06metricR\x04unitR\tdirectionR\x0fcandidate_valueR\nbase_valueR\x05ratioR\x05noise*l\n\tDirection\x12\x19\n\x15DIRECTION_UNSPECIFIED\x10\x00\x12\x1c\n\rDIRECTION_MAX\x10\x01\x1a\t\xda\xf3\x18\x05\n\x03max\x12\x1c\n\rDIRECTION_MIN\x10\x02\x1a\t\xda\xf3\x18\x05\n\x03min\x1a\x08\xd2\xf3\x18\x04\x08\x01\x10\x01*\xd1\x01\n\x0bChargeClass\x12\x1c\n\x18CHARGE_CLASS_UNSPECIFIED\x10\x00\x12!\n\x11CHARGE_CLASS_FREE\x10\x01\x1a\n\xda\xf3\x18\x06\n\x04free\x12!\n\x11CHARGE_CLASS_PAID\x10\x02\x1a\n\xda\xf3\x18\x06\n\x04paid\x12-\n\x17CHARGE_CLASS_CORRECTION\x10\x03\x1a\x10\xda\xf3\x18\x0c\n\ncorrection\x12%\n\x13CHARGE_CLASS_RESUME\x10\x04\x1a\x0c\xda\xf3\x18\x08\n\x06resume\x1a\x08\xd2\xf3\x18\x04\x08\x01\x10\x01*\xa6\x01\n\x16TaskObjectiveDirection\x12(\n$TASK_OBJECTIVE_DIRECTION_UNSPECIFIED\x10\x00\x12+\n\x1cTASK_OBJECTIVE_DIRECTION_MAX\x10\x01\x1a\t\xda\xf3\x18\x05\n\x03max\x12+\n\x1cTASK_OBJECTIVE_DIRECTION_MIN\x10\x02\x1a\t\xda\xf3\x18\x05\n\x03min\x1a\x08\xd2\xf3\x18\x04\x08\x01\x10\x01B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
     [
         validate_pb.desc(),
         value_options_pb.desc(),
@@ -687,6 +733,7 @@ _DESC = file_desc(
         "Reading": Reading,
         "BaseRef": BaseRef,
         "Sample": Sample,
+        "ObjectiveComparison": ObjectiveComparison,
         "Comparison": Comparison,
         "Direction": Direction,
         "ChargeClass": ChargeClass,

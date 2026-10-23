@@ -36,7 +36,7 @@ def end_run(lab: Lab, run: core.SubmitMeasurement, bench: Bench) -> None:
         lab.state = ended_with(lab.state, run, bench.read(run.plan.measured_input))
         return
     source = next(s for s in lab.state.evaluation.samples if s.run == run.reuses)
-    lab.state = ended_with(lab.state, run, source.reading.value, reused=run.reuses)
+    lab.state = ended_with(lab.state, run, source.readings[0].value, reused=run.reuses)
 
 
 def official_job(lab: Lab, check: core.SubmitMeasurement) -> core.OwnedJob | None:
@@ -75,7 +75,7 @@ class Answer:
             assert record == self.closed, "a closed answer never moves"
             return
         if stated is not None:
-            assert record.value == stated.comparison.candidate_value
+            assert record.value == stated.comparison.objectives[0].candidate_value
             assert stated.answer_until == job.answer_until
         if lab.state.run.now_at >= job.answer_until:
             assert stated is None or not stated.settling, "closed only once it settled"
@@ -120,7 +120,7 @@ def test_the_official_record_states_the_figure_its_verdict_was_taken_on(
     assert answer.closed is not None, "every answer closes once its comparison settles"
     stated = official_reading(lab, check)
     ranked = [
-        item.reading
+        item.readings[0]
         for item in lab.state.evaluation.measurements_of(revision("c1"))
         if item.purpose == "official" and item.kind is core.EvidenceKind.BENCHMARK
     ]
@@ -152,7 +152,7 @@ def test_a_run_that_lands_after_the_bound_does_not_restate_the_record() -> None:
         end_run(lab, live[0], bench)
     assert official_reading(lab, check) == held
     ranked = [
-        item.reading
+        item.readings[0]
         for item in lab.state.evaluation.measurements_of(revision("c1"))
         if item.purpose == "official" and item.kind is core.EvidenceKind.BENCHMARK
     ]

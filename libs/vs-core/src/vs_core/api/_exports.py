@@ -24,7 +24,6 @@ def _load_comparison() -> dict[str, object]:
         BASE_MAX_SAMPLES,
         MAX_CORE_BASE_RUNS,
         MIN_SAMPLES_WITHOUT_FLOOR,
-        VERDICT_NOISES,
         ComparisonPolicy,
         Measured,
         Moment,
@@ -41,7 +40,6 @@ def _load_comparison() -> dict[str, object]:
         policy_of,
         samples_of,
         terms_policy,
-        verdict_unreachable,
     )
 
     return {
@@ -51,7 +49,6 @@ def _load_comparison() -> dict[str, object]:
         "MIN_SAMPLES_WITHOUT_FLOOR": MIN_SAMPLES_WITHOUT_FLOOR,
         "Measured": Measured,
         "Moment": Moment,
-        "VERDICT_NOISES": VERDICT_NOISES,
         "close_call": close_call,
         "compare": compare,
         "comparison_of": comparison_of,
@@ -65,7 +62,26 @@ def _load_comparison() -> dict[str, object]:
         "policy_of": policy_of,
         "samples_of": samples_of,
         "terms_policy": terms_policy,
-        "verdict_unreachable": verdict_unreachable,
+    }
+
+
+def _load_dominance() -> dict[str, object]:
+    from vs_core._dominance import (
+        DEFAULT_RELATIVE_NOISE,
+        VERDICT_NOISES,
+        Judgement,
+        Runs,
+        dominance,
+        judge,
+    )
+
+    return {
+        "DEFAULT_RELATIVE_NOISE": DEFAULT_RELATIVE_NOISE,
+        "Judgement": Judgement,
+        "Runs": Runs,
+        "VERDICT_NOISES": VERDICT_NOISES,
+        "dominance": dominance,
+        "judge": judge,
     }
 
 
@@ -1267,6 +1283,7 @@ def _load_types_measurement() -> dict[str, object]:
         ComparisonVerdict,
         CoreRun,
         EffectVerdict,
+        ObjectiveComparison,
         Reading,
         Runaway,
         Sample,
@@ -1281,6 +1298,7 @@ def _load_types_measurement() -> dict[str, object]:
         "ComparisonVerdict": ComparisonVerdict,
         "CoreRun": CoreRun,
         "EffectVerdict": EffectVerdict,
+        "ObjectiveComparison": ObjectiveComparison,
         "Reading": Reading,
         "Runaway": Runaway,
         "Sample": Sample,
@@ -1820,6 +1838,7 @@ EXPORT_MODULES: dict[str, Callable[[], dict[str, object]]] = {
     "vs_core._comparison": _load_comparison,
     "vs_core._continuations": _load_continuations,
     "vs_core._corevalue": _load_corevalue,
+    "vs_core._dominance": _load_dominance,
     "vs_core._envelope_migrations": _load_envelope_migrations,
     "vs_core._evidence_views": _load_evidence_views,
     "vs_core._host_epochs": _load_host_epochs,

@@ -85,7 +85,7 @@ message NoiseSample {
   double value = 1 [(buf.validate.field).double.finite = true, (core_field).explicit = true];
 }
 
-// A run's headline reading of the benchmark stage, as the trusted record states it.
+// One objective's reading of a run's benchmark stage, as the trusted record states it.
 message Reading {
   string metric = 1 [(buf.validate.field).string = {min_len: 1}];
   double value = 2 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true, aliases: "Finite"}];
@@ -108,7 +108,10 @@ message BaseRef {
 // A sample is built only from a run that ended conclusively with a trusted benchmark reading,
 // and requires the ``commit`` it measured and the ``measured_input`` digest (#2961). The
 // ``base`` is set on a candidate's sample and names the revision it is compared with.
+// ``readings`` are the run's reading of every objective its benchmark reported, headline first.
 message Sample {
+  reserved 9;
+  reserved "reading";
   RequestId run = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
   Scope scope = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
   RevisionRef commit = 3 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
@@ -117,31 +120,48 @@ message Sample {
   repeated string gates = 6 [(core_field) = {explicit: true}];
   string host = 7 [(buf.validate.field).string = {min_len: 1}];
   bool dedicated_resources = 8 [(core_field) = {explicit: true}];
-  Reading reading = 9 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
   double observed_at = 10 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
   BaseRef base = 11;
+  repeated Reading readings = 12 [(buf.validate.field).repeated.min_items = 1, (core_field) = {explicit: true}];
 }
 
-// A candidate's samples compared with its base's: the ratio, its noise and the verdict.
+// How a candidate's samples stand against its base's on one objective: the ratio, its noise and
+// the verdict.
 //
-// ``ratio`` is the candidate's mean over the base's, as measured; ``direction`` says which
-// way is better, so ``better`` is a ratio above one for ``max`` and below one for ``min``.
-// ``noise`` is one standard error of the ratio, and a verdict needs two of them: the
-// statistic is in ``vs_core._comparison``.
+// ``ratio`` is the candidate's mean over the base's, as measured; ``direction`` says which way is
+// better, so ``better`` is a ratio above one for ``max`` and below one for ``min``. ``noise`` is
+// one standard error of the ratio, and a verdict needs two of them: the statistic is in
+// ``vs_core._dominance``. ``verdict`` is ``better`` or ``worse`` beyond the objective's tolerance,
+// ``within_noise`` inside it, and ``inconclusive`` when the objective cannot be judged (a base
+// mean of zero).
+message ObjectiveComparison {
+  string metric = 1 [(buf.validate.field).string = {min_len: 1}];
+  optional string unit = 2;
+  Direction direction = 3 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  double candidate_value = 4 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
+  double base_value = 5 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
+  double ratio = 6 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
+  double noise = 7 [(buf.validate.field).double = {finite: true, gte: 0}];
+  ComparisonVerdict verdict = 8 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+}
+
+// A candidate's samples compared with its base's on every objective, and the dominance result.
+//
+// ``objectives`` holds one comparison per objective every sample reports, headline first.
+// ``verdict`` is the one dominance rule over them (``vs_core._dominance``): ``worse`` when some
+// objective is worse beyond its tolerance, else ``better`` when some objective is better beyond
+// it (the candidate dominates the base), else ``inconclusive`` when some objective cannot be
+// judged, else ``within_noise``.
 message Comparison {
+  reserved 2, 3, 4, 9, 10, 11, 12;
+  reserved "metric", "unit", "direction", "candidate_value", "base_value", "ratio", "noise";
   Scope scope = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
-  string metric = 2 [(buf.validate.field).string = {min_len: 1}];
-  optional string unit = 3;
-  Direction direction = 4 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
   RevisionRef candidate = 5 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
   string candidate_input = 6 [(buf.validate.field).string = {min_len: 1}];
   RevisionRef base = 7 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
   string base_input = 8 [(buf.validate.field).string = {min_len: 1}];
-  double candidate_value = 9 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
-  double base_value = 10 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
-  double ratio = 11 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
-  double noise = 12 [(buf.validate.field).double = {finite: true, gte: 0}];
   ComparisonVerdict verdict = 13 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
   string candidate_samples = 14 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
   string base_samples = 15 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+  repeated ObjectiveComparison objectives = 16 [(buf.validate.field).repeated.min_items = 1, (core_field) = {explicit: true}];
 }

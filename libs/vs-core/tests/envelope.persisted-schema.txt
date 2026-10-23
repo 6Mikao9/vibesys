@@ -2,7 +2,7 @@
 # with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
 # every saved document, or raises the version.
 shape RunEnvelope[FlowState]
-version 42
+version 43
 $root {"additionalProperties":false,"type":"object"}
 $root.core required {"$ref":"#/$defs/CoreState"}
 $root.event_cursor required {"$ref":"#/$defs/EventCursor"}
@@ -289,17 +289,11 @@ Comparison {"additionalProperties":false,"type":"object"}
 Comparison.base required {"$ref":"#/$defs/RevisionRef"}
 Comparison.base_input required {"minLength":1,"type":"string"}
 Comparison.base_samples required {"minimum":0,"type":"integer"}
-Comparison.base_value required {"type":"number"}
 Comparison.candidate required {"$ref":"#/$defs/RevisionRef"}
 Comparison.candidate_input required {"minLength":1,"type":"string"}
 Comparison.candidate_samples required {"minimum":0,"type":"integer"}
-Comparison.candidate_value required {"type":"number"}
-Comparison.direction required {"enum":["max","min"],"type":"string"}
-Comparison.metric required {"minLength":1,"type":"string"}
-Comparison.noise required {"minimum":0.0,"type":"number"}
-Comparison.ratio required {"type":"number"}
+Comparison.objectives required {"items":{"$ref":"#/$defs/ObjectiveComparison"},"minItems":1,"type":"array"}
 Comparison.scope required {"$ref":"#/$defs/Scope"}
-Comparison.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 Comparison.verdict required {"$ref":"#/$defs/ComparisonVerdict"}
 ComparisonSettled {"additionalProperties":false,"type":"object"}
 ComparisonSettled.base_input required {"minLength":1,"type":"string"}
@@ -482,7 +476,7 @@ EvidenceRef.kind required {"$ref":"#/$defs/EvidenceKind"}
 EvidenceRef.observation_sequence required {"$ref":"#/$defs/Count"}
 EvidenceRef.provenance required {"enum":["trusted","self-report"],"type":"string"}
 EvidenceRef.purpose required {"enum":["baseline","local-validation","official","profile"],"type":"string"}
-EvidenceRef.reading optional {"anyOf":[{"$ref":"#/$defs/Reading"},{"type":"null"}],"default":null}
+EvidenceRef.readings optional {"default":[],"items":{"$ref":"#/$defs/Reading"},"type":"array"}
 EvidenceRef.reused_from optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 EvidenceRef.scope required {"$ref":"#/$defs/Scope"}
 EvidenceRef.source_request required {"$ref":"#/$defs/RequestId"}
@@ -784,6 +778,15 @@ MessageDropped.kind optional {"const":"message_dropped","default":"message_dropp
 NoiseSample {"additionalProperties":false,"type":"object"}
 NoiseSample.value required {"type":"number"}
 NullValue {"type":"null"}
+ObjectiveComparison {"additionalProperties":false,"type":"object"}
+ObjectiveComparison.base_value required {"type":"number"}
+ObjectiveComparison.candidate_value required {"type":"number"}
+ObjectiveComparison.direction required {"enum":["max","min"],"type":"string"}
+ObjectiveComparison.metric required {"minLength":1,"type":"string"}
+ObjectiveComparison.noise required {"minimum":0.0,"type":"number"}
+ObjectiveComparison.ratio required {"type":"number"}
+ObjectiveComparison.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+ObjectiveComparison.verdict required {"$ref":"#/$defs/ComparisonVerdict"}
 ObjectiveNoise {"additionalProperties":false,"type":"object"}
 ObjectiveNoise.baseline_values optional {"default":[],"items":{"$ref":"#/$defs/NoiseSample"},"type":"array"}
 ObjectiveNoise.floor required {"exclusiveMaximum":1.0,"minimum":0.0,"type":"number"}
@@ -1174,7 +1177,7 @@ Sample.gates required {"items":{"type":"string"},"type":"array"}
 Sample.host required {"minLength":1,"type":"string"}
 Sample.measured_input required {"minLength":1,"type":"string"}
 Sample.observed_at required {"minimum":0.0,"type":"number"}
-Sample.reading required {"$ref":"#/$defs/Reading"}
+Sample.readings required {"items":{"$ref":"#/$defs/Reading"},"minItems":1,"type":"array"}
 Sample.run required {"$ref":"#/$defs/RequestId"}
 Sample.scope required {"$ref":"#/$defs/Scope"}
 SchedulingState {"additionalProperties":false,"type":"object"}

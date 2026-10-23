@@ -60,19 +60,24 @@ def comparison(samples: int) -> core.Comparison:
     """The comparison of a candidate and a base that each hold ``samples`` runs."""
     return core.Comparison(
         scope=SCOPE,
-        metric="throughput",
-        direction="max",
         candidate=CANDIDATE,
         candidate_input="candidate-input",
         base=BASE,
         base_input="base-input",
-        candidate_value=120.0,
-        base_value=100.0,
-        ratio=1.2,
-        noise=0.1,
         verdict=core.ComparisonVerdict.WITHIN_NOISE,
         candidate_samples=samples,
         base_samples=samples,
+        objectives=(
+            core.ObjectiveComparison(
+                metric="throughput",
+                direction="max",
+                candidate_value=120.0,
+                base_value=100.0,
+                ratio=1.2,
+                noise=0.1,
+                verdict=core.ComparisonVerdict.WITHIN_NOISE,
+            ),
+        ),
     )
 
 
@@ -264,7 +269,7 @@ async def measuring_headline(ctx: core.Flow, config: Config) -> None:
     plan = measurement(REVISION, at=ctx.clock.now())
     found = await ctx.evaluation.measure_compared(plan, within=LIMIT)
     assert not isinstance(found, core.Failed)
-    stated = [e.reading.value for e in found.result.evidence if e.reading is not None]
+    stated = [e.readings[0].value for e in found.result.evidence if e.readings]
     ctx.publish(Headline(value=stated[0] if stated else None))
 
 
@@ -283,7 +288,7 @@ def benchmark(value: float) -> core.EvidenceRef:
         environment_digest="environment",
         provenance="trusted",
         status=core.ObservationStatus.SUCCEEDED,
-        reading=core.Reading(metric="throughput", value=value, direction="max"),
+        readings=(core.Reading(metric="throughput", value=value, direction="max"),),
     )
 
 

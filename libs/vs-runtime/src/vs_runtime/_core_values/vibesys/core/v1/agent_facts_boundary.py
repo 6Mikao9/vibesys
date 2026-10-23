@@ -119,8 +119,8 @@ def encode_EvidenceRef(v: values.EvidenceRef) -> pb.EvidenceRef:
         if v.acceptance_receipt is None
         else encode_EvidenceAcceptanceReceipt(v.acceptance_receipt),
         reused_from=None if v.reused_from is None else encode_RequestId(v.reused_from),
-        reading=None if v.reading is None else encode_Reading(v.reading),
         unmet_requirement=v.unmet_requirement,
+        readings=[encode_Reading(x) for x in v.readings],
     )
 
 
@@ -143,8 +143,8 @@ def decode_EvidenceRef(m: pb.EvidenceRef) -> values.EvidenceRef:
         if m.acceptance_receipt is None
         else decode_EvidenceAcceptanceReceipt(m.acceptance_receipt),
         reused_from=None if m.reused_from is None else decode_RequestId(m.reused_from),
-        reading=None if m.reading is None else decode_Reading(m.reading),
         unmet_requirement=m.unmet_requirement if m.has_field("unmet_requirement") else None,
+        readings=tuple(decode_Reading(x) for x in m.readings),
     )
 
 

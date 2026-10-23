@@ -194,8 +194,9 @@ def take_turns(lab: Lab, inputs: int, gain: float) -> list[core.Comparison]:
     [
         # A close call under the floor earns the base one more run.
         (FLOOR, 1.003, (1, core.BASE_MAX_SAMPLES), core.ComparisonVerdict.WITHIN_NOISE),
-        # Without one, both sides take three runs, and a 20% gain is found.
-        (0.0, 1.2, (3, 3), core.ComparisonVerdict.BETTER),
+        # Without one, a 10% gain is a close call at one run a side (the default noise asks 14%),
+        # the base takes three runs, the candidate at least two, and it is found.
+        (0.0, 1.1, (2, 3), core.ComparisonVerdict.BETTER),
     ],
 )
 def test_a_later_candidate_is_not_stopped_by_an_earlier_candidates_base_runs(
@@ -210,7 +211,8 @@ def test_a_later_candidate_is_not_stopped_by_an_earlier_candidates_base_runs(
     """
     lab = Lab.of("a", floor=floor)
     for comparison in take_turns(lab, 2, gain):
-        assert (comparison.candidate_samples, comparison.base_samples) == held
+        assert comparison.candidate_samples >= held[0]
+        assert comparison.base_samples == held[1]
         assert comparison.verdict is verdict
     assert running(lab) == []
 
@@ -226,8 +228,9 @@ def test_every_candidate_of_a_long_attempt_gets_its_own_share_of_base_runs(input
     taken for it, so every candidate takes three base runs, and no more.
     """
     lab = Lab.of("a", floor=0.0)
-    for comparison in take_turns(lab, inputs, 1.2):
-        assert (comparison.candidate_samples, comparison.base_samples) == (3, 3)
+    for comparison in take_turns(lab, inputs, 1.1):
+        assert comparison.candidate_samples >= 2
+        assert comparison.base_samples == core.MIN_SAMPLES_WITHOUT_FLOOR
         assert comparison.verdict is core.ComparisonVerdict.BETTER
     based = {run.request_id for run in base_runs(lab)}
     for n in range(inputs):

@@ -53,7 +53,7 @@ def record(
         environment_digest="n",
         provenance="trusted",
         status=core.ObservationStatus.SUCCEEDED,
-        reading=core.Reading(metric="rate", value=1.0, direction="max"),
+        readings=(core.Reading(metric="rate", value=1.0, direction="max"),),
     )
     return ref.model_copy(update=changes)
 
@@ -62,7 +62,7 @@ FOREIGN = {
     "another revision": {"candidate": OTHER},
     "another purpose": {"purpose": "official"},
     "accuracy": {"kind": core.EvidenceKind.CORRECTNESS},
-    "no reading": {"reading": None},
+    "no reading": {"readings": ()},
     "re-read of another run": {"reused_from": core.RequestId(root="source")},
     "untrusted": {"provenance": "self-report"},
     "failed": {"status": core.ObservationStatus.FAILED},

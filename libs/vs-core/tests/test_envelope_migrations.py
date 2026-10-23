@@ -24,6 +24,9 @@ from vs_core.api.testing import FAKE_REGISTRY
 
 from .test_comparison_statistic import VALUES, compared
 
+type Json = dict[str, Json] | list[Json] | str | float | bool | None
+"""A JSON document."""
+
 _FIXTURES = Path(__file__).parent / "envelopes"
 _SUPPORTED_SINCE = 34
 """The oldest version a run was promised to resume from; lowering support edits this line."""
@@ -38,14 +41,20 @@ def _version(path: Path) -> int:
     return int(path.name.removeprefix("v").split("-", 1)[0])
 
 
-def _upgraded(source: str) -> dict[str, object]:
+def _upgraded(source: str) -> dict[str, Json]:
     return json.loads(core.upgrade_envelope(source, ("schema_version",)))
 
 
-def _comparisons(envelope: dict[str, object]) -> list[dict[str, object]]:
+def _comparisons(envelope: dict[str, Json]) -> list[dict[str, Json]]:
     core_state = envelope["core"]
     assert isinstance(core_state, dict)
-    return core_state["evaluation"]["comparisons"]
+    evaluation = core_state["evaluation"]
+    assert isinstance(evaluation, dict)
+    comparisons = evaluation["comparisons"]
+    assert isinstance(comparisons, list)
+    found = [item for item in comparisons if isinstance(item, dict)]
+    assert len(found) == len(comparisons)
+    return found
 
 
 @pytest.mark.parametrize("path", _FILES, ids=lambda path: path.stem)
@@ -60,20 +69,81 @@ def test_a_saved_envelope_of_each_supported_version_decodes_at_the_current_versi
     )
 
 
-def test_a_comparison_with_no_estimate_of_noise_reads_inconclusive_after_the_migration() -> None:
-    """The 34 save without a floor held ``within_noise`` of one to three runs a side."""
+_OBJECTIVE_KEYS = (
+    "metric",
+    "unit",
+    "direction",
+    "candidate_value",
+    "base_value",
+    "ratio",
+    "noise",
+)
+
+
+def _before_version_43(value: Json) -> Json:
+    """``value`` with every version 43 reshaping undone: the oracle of what the migration must keep.
+
+    A comparison's one objective returns to the comparison's top (its verdict is the comparison's),
+    a sample's or record's single reading returns to ``reading``, and nothing else moves.
+    """
+    if isinstance(value, list):
+        return [_before_version_43(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    node = {key: _before_version_43(item) for key, item in value.items()}
+    objectives = node.get("objectives")
+    if isinstance(objectives, list) and "candidate_input" in node:
+        node.pop("objectives")
+        (objective,) = objectives
+        assert isinstance(objective, dict)
+        node |= {key: objective[key] for key in _OBJECTIVE_KEYS if key in objective}
+    readings = node.pop("readings", None)
+    if isinstance(readings, list) and readings:
+        (node["reading"],) = readings
+    return node
+
+
+def _object(value: Json) -> dict[str, Json]:
+    assert isinstance(value, dict)
+    return value
+
+
+def _headline_verdict(comparison: dict[str, Json]) -> Json:
+    objectives = comparison["objectives"]
+    assert isinstance(objectives, list)
+    (headline,) = objectives
+    assert isinstance(headline, dict)
+    return headline["verdict"]
+
+
+def test_a_comparison_with_no_estimate_of_noise_stays_inconclusive_after_the_migration() -> None:
+    """The 34 save without a floor held ``within_noise`` of one to three runs a side.
+
+    An earlier migration read it as ``inconclusive`` (it had no estimate of noise); version 43
+    keeps that, and the headline objective states the same verdict: past settlements are not
+    decided again.
+    """
     source = (_FIXTURES / "v34-no-floor.json").read_text(encoding="utf-8")
     before, after = _comparisons(json.loads(source)), _comparisons(_upgraded(source))
     assert {c["verdict"] for c in before} == {"within_noise"}
     assert {c["verdict"] for c in after} == {"inconclusive"}
-    assert [{**c, "verdict": "x"} for c in before] == [{**c, "verdict": "x"} for c in after]
+    assert {c["verdict"] for c in after} == {"inconclusive"}
+    assert {_headline_verdict(c) for c in after} == {"inconclusive"}
+    assert [{**c, "verdict": "x"} for c in before] == [
+        {**_object(_before_version_43(c)), "verdict": "x"} for c in after
+    ]
 
 
 def test_a_measured_within_noise_is_kept_and_nothing_else_of_the_envelope_changes() -> None:
     source = (_FIXTURES / "v34-floor.json").read_text(encoding="utf-8")
     stored = json.loads(source)
     assert {c["verdict"] for c in _comparisons(stored)} == {"within_noise"}
-    assert _upgraded(source) == {**stored, "schema_version": core.ENVELOPE_SCHEMA_VERSION}
+    upgraded = _upgraded(source)
+    assert {c["verdict"] for c in _comparisons(upgraded)} == {"within_noise"}
+    assert _before_version_43(upgraded) == {
+        **stored,
+        "schema_version": core.ENVELOPE_SCHEMA_VERSION,
+    }
 
 
 def test_an_envelope_of_the_current_version_is_returned_as_it_is() -> None:
@@ -98,24 +168,29 @@ def test_an_envelope_nested_in_a_record_is_migrated_in_place() -> None:
     theirs=st.lists(VALUES, min_size=1, max_size=6),
     floor=st.sampled_from((0.0, 0.01, 0.05)),
     direction=st.sampled_from(("max", "min")),
+    decided=st.sampled_from(list(core.ComparisonVerdict)),
 )
-def test_the_migration_gives_the_verdict_a_current_run_stores_for_the_same_samples(
-    mine: list[float], theirs: list[float], floor: float, direction: Literal["max", "min"]
+def test_the_migration_keeps_the_verdict_a_version_42_run_decided_and_states_it_per_objective(
+    mine: list[float],
+    theirs: list[float],
+    floor: float,
+    direction: Literal["max", "min"],
+    decided: core.ComparisonVerdict,
 ) -> None:
-    """Version 34 called every comparison without an estimate ``within_noise``, and nothing else differs."""
-    current = compared(mine, theirs, floor=floor, direction=direction)
-    old_verdict = (
-        "within_noise"
-        if current.verdict is core.ComparisonVerdict.INCONCLUSIVE
-        else current.verdict
-    )
-    stored = json.loads((_FIXTURES / "v34-no-floor.json").read_text(encoding="utf-8"))
-    stored["core"]["run"]["facts"]["task"]["relative_noise"] = floor
-    stored["core"]["evaluation"]["comparisons"] = [
-        {**current.model_dump(mode="json"), "verdict": str(old_verdict)}
+    """A version 42 comparison judged its headline alone: it becomes that one objective, undecided again by nobody."""
+    current = compared(mine, theirs, floor=floor, direction=direction).model_dump(mode="json")
+    headline = current.pop("objectives")[0]
+    stored = json.loads((_FIXTURES / "v42-floor.json").read_text(encoding="utf-8"))
+    flat = {**current, **{key: headline[key] for key in _OBJECTIVE_KEYS}}
+    stored["core"]["evaluation"]["comparisons"] = [{**flat, "verdict": decided.value}]
+    migrated = _comparisons(_upgraded(json.dumps(stored)))
+    assert migrated == [
+        {
+            **current,
+            "verdict": decided.value,
+            "objectives": [{**headline, "verdict": decided.value}],
+        }
     ]
-    migrated = _upgraded(json.dumps(stored))
-    assert _comparisons(migrated) == [current.model_dump(mode="json")]
 
 
 def test_every_version_from_the_oldest_supported_has_a_migration_and_a_fixture() -> None:

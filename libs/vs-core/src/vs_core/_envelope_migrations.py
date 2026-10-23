@@ -142,6 +142,51 @@ def _v41_to_v42(envelope: JsonObject) -> JsonObject:
     return envelope | {"schema_version": 42}
 
 
+def _v42_to_v43(envelope: JsonObject) -> JsonObject:
+    """Version 43 judges every objective: runs and records hold ``readings``, a comparison ``objectives``.
+
+    A sample and a benchmark ``EvidenceRef`` held the headline ``reading`` of their run and
+    nothing of its other objectives; they now hold ``readings``, every objective's, headline
+    first. An old one holds exactly the headline, so ``readings`` is that one reading (an
+    evidence record with no reading has none, as an absent list). A comparison held the
+    headline's ratio, noise and verdict at its top; it now holds one entry in ``objectives``
+    (the same fields) and keeps its sample counts and its ``verdict``, which was the headline's
+    and is now the result over all objectives. Nothing is invented: the other objectives of an
+    old run were never recorded, so an old comparison compares the headline alone, and its
+    verdict (even ``inconclusive``) is kept as it was decided. Receipts and events carry the
+    same shapes, and are rewritten the same way, with what they told left as told.
+    """
+    return {**_object(_rewritten(envelope)), "schema_version": 43}
+
+
+_OBJECTIVE_FIELDS: Final = (
+    "metric",
+    "unit",
+    "direction",
+    "candidate_value",
+    "base_value",
+    "ratio",
+    "noise",
+)
+"""What a version 42 comparison stated of its one (headline) objective, less its verdict, which
+the comparison keeps and the objective repeats."""
+
+
+def _rewritten(value: JsonValue) -> JsonValue:
+    """``value`` with every sample, evidence record and comparison in it at the version 43 shape."""
+    if isinstance(value, list):
+        return [_rewritten(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    node = {key: _rewritten(item) for key, item in value.items()}
+    if "reading" in node and ("evidence_id" in node or {"run", "measured_input"} <= node.keys()):
+        node["readings"] = [node.pop("reading")]
+    elif {"candidate_input", "base_input", "candidate_value", "metric"} <= node.keys():
+        objective = {key: node.pop(key) for key in _OBJECTIVE_FIELDS if key in node}
+        node["objectives"] = [{**objective, "verdict": node["verdict"]}]
+    return node
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -175,6 +220,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     39: _v39_to_v40,
     40: _v40_to_v41,
     41: _v41_to_v42,
+    42: _v42_to_v43,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 

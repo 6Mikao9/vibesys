@@ -81,7 +81,7 @@ def test_the_candidate_is_compared_when_the_strategys_baseline_ends_after_it() -
     assert lab.comparisons() == (), "no base sample yet, so nothing to compare with"
     end(lab, own, 100.0)
     (held,) = lab.comparisons()
-    assert held.ratio == 1.3
+    assert held.objectives[0].ratio == 1.3
     assert (held.base, held.base_input, held.base_samples) == (BASE, "base", 1)
     assert [s.run for s in lab.state.evaluation.samples if s.measured_input == "base"] == [
         own.request_id
@@ -96,7 +96,7 @@ def test_the_candidate_is_compared_when_the_strategys_baseline_ended_before_the_
     assert [r.plan.purpose for r in asked] == ["local-validation"]
     end(lab, asked[0], 130.0)
     (held,) = lab.comparisons()
-    assert (held.ratio, held.base_samples) == (1.3, 1)
+    assert (held.objectives[0].ratio, held.base_samples) == (1.3, 1)
     assert base_runs(lab) == [own]
 
 

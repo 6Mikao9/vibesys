@@ -230,7 +230,7 @@ def served(lab: Lab, name: str, *, floor: float) -> None:
     moment = core.moment_of(lab.state.run)
     held = {c.candidate_input for c in lab.comparisons() if c.scope == lab.scopes[name]}
     for comparison in core.latest_comparisons(lab.state.evaluation, lab.scopes[name], held, moment):
-        if not core.close_call(comparison) or core.verdict_unreachable(comparison, moment.policy):
+        if not core.close_call(comparison):
             continue
         if floor:
             assert comparison.base_samples == core.BASE_MAX_SAMPLES, comparison

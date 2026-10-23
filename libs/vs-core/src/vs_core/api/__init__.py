@@ -22,7 +22,6 @@ if TYPE_CHECKING:
         BASE_MAX_SAMPLES,
         MAX_CORE_BASE_RUNS,
         MIN_SAMPLES_WITHOUT_FLOOR,
-        VERDICT_NOISES,
         ComparisonPolicy,
         Measured,
         Moment,
@@ -39,10 +38,17 @@ if TYPE_CHECKING:
         policy_of,
         samples_of,
         terms_policy,
-        verdict_unreachable,
     )
     from vs_core._continuations import SuspensionRefusal
     from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue
+    from vs_core._dominance import (
+        DEFAULT_RELATIVE_NOISE,
+        VERDICT_NOISES,
+        Judgement,
+        Runs,
+        dominance,
+        judge,
+    )
     from vs_core._envelope_migrations import MIGRATIONS as ENVELOPE_MIGRATIONS
     from vs_core._envelope_migrations import OLDEST_SUPPORTED_ENVELOPE_VERSION
     from vs_core._evidence_views import (
@@ -561,6 +567,7 @@ if TYPE_CHECKING:
         ComparisonVerdict,
         CoreRun,
         EffectVerdict,
+        ObjectiveComparison,
         Reading,
         Runaway,
         Sample,
@@ -799,14 +806,18 @@ _MODULES: dict[str, str] = {
         (
             "vs_core._comparison",
             (
-                "BASE_MAX_SAMPLES MAX_CORE_BASE_RUNS MIN_SAMPLES_WITHOUT_FLOOR VERDICT_NOISES "
+                "BASE_MAX_SAMPLES MAX_CORE_BASE_RUNS MIN_SAMPLES_WITHOUT_FLOOR "
                 "ComparisonPolicy Measured Moment close_call compare comparison_of comparison_settling "
                 "comparisons_of effect_resolution effect_verdict evaluation_of latest_comparisons "
-                "moment_of policy_of samples_of terms_policy verdict_unreachable "
+                "moment_of policy_of samples_of terms_policy "
             ),
         ),
         ("vs_core._continuations", ("SuspensionRefusal ")),
         ("vs_core._corevalue", ("CoreValue FrozenMap TimestampValue ")),
+        (
+            "vs_core._dominance",
+            ("DEFAULT_RELATIVE_NOISE VERDICT_NOISES Judgement Runs dominance judge "),
+        ),
         (
             "vs_core._envelope_migrations",
             ("ENVELOPE_MIGRATIONS OLDEST_SUPPORTED_ENVELOPE_VERSION "),
@@ -1014,7 +1025,7 @@ _MODULES: dict[str, str] = {
             "vs_core.types.measurement",
             (
                 "BaseClaim BaseRef Comparison ComparisonSettled ComparisonVerdict CoreRun "
-                "EffectVerdict Reading Runaway Sample StatedComparison "
+                "EffectVerdict ObjectiveComparison Reading Runaway Sample StatedComparison "
             ),
         ),
         (
@@ -1139,6 +1150,7 @@ __all__ = [
     "BASE_MAX_SAMPLES",
     "CAPTURE_SUFFIX",
     "DEADLINE_STOP",
+    "DEFAULT_RELATIVE_NOISE",
     "ENVELOPE_MIGRATIONS",
     "ENVELOPE_SCHEMA_VERSION",
     "ENVIRONMENT_STOP",
@@ -1434,6 +1446,7 @@ __all__ = [
     "JobTimeout",
     "JobWaitLapsed",
     "JobsDrainRequested",
+    "Judgement",
     "Kept",
     "KernelNotImplementedError",
     "Label",
@@ -1466,6 +1479,7 @@ __all__ = [
     "NoWinner",
     "NotOpened",
     "NotReopened",
+    "ObjectiveComparison",
     "Observation",
     "ObservationStatus",
     "ObservationsDue",
@@ -1609,6 +1623,7 @@ __all__ = [
     "RunTrace",
     "RunView",
     "Runaway",
+    "Runs",
     "Sample",
     "SchedulingChange",
     "SchedulingContext",
@@ -1799,6 +1814,7 @@ __all__ = [
     "decision_of_operation",
     "decode_stored",
     "deferred",
+    "dominance",
     "downtime",
     "effect_resolution",
     "effect_verdict",
@@ -1813,6 +1829,7 @@ __all__ = [
     "initial_state",
     "item_cancellation",
     "item_id",
+    "judge",
     "latest_comparisons",
     "ledger_refs",
     "markdown_prose",
@@ -1866,7 +1883,6 @@ __all__ = [
     "upgrade_envelope",
     "validate_startup",
     "validate_terminal_inputs",
-    "verdict_unreachable",
     "verify_encoding",
     "waits",
     "within",

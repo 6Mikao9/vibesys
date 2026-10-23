@@ -82,8 +82,8 @@ class EvidenceRef(CoreValue):
         "artifacts",
         "acceptance_receipt",
         "reused_from",
-        "reading",
         "unmet_requirement",
+        "readings",
     )
     evidence_id: EvidenceId
     kind: EvidenceKind
@@ -100,8 +100,8 @@ class EvidenceRef(CoreValue):
     artifacts: tuple[ArtifactRef, ...] = ()
     acceptance_receipt: EvidenceAcceptanceReceipt | None = None
     reused_from: Annotated[RequestId | None, Field(exclude_if=omit_unset)] = None
-    reading: Annotated[Reading | None, Field(exclude_if=omit_unset)] = None
     unmet_requirement: Annotated[str | None, Field(exclude_if=omit_unset)] = None
+    readings: Annotated[tuple[Reading, ...], Field(exclude_if=omit_unset)] = ()
 
     def __post_init__(self) -> None:
         """Enforce the proto message rules at construction as well as decode."""

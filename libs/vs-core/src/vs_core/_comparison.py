@@ -13,48 +13,15 @@ there are several. This module owns the pure decisions over samples:
 The statistic
 -------------
 
-Let the candidate have ``m`` samples with mean ``c`` and the base ``n`` samples with mean ``b``.
-The ratio is ``r = c / b``. A run's relative deviation is its distance from its own side's mean
-over that mean. ``noise`` is one standard error of the ratio of two means (first order). More
-samples shrink it, a wider spread or a higher floor grow it, and a shared host shows as spread.
-A verdict needs the difference to exceed a critical number of noises: ``better`` when the
-candidate improves on the base by more than that (a ratio above one for a ``max`` metric, below
-one for a ``min`` metric), ``worse`` when it is worse by more than that, and ``within_noise``
-otherwise. A comparison with no estimate of the noise says none of these: it is
-``inconclusive``, so a large ratio over too few runs is never called noise.
-
-- A task that declares a floor for the metric has stated its noise: the metric's own objective
-  tolerance (``TaskObjective.noise``) or, for an objective with none, the task's
-  ``relative_noise`` (`ComparisonPolicy.floor_of`: the most specific declaration wins, as in
-  the product's ``MetricSpace``). The runs' spread is
-  the pooled relative deviation, never taken below the floor (which is also all there is to go
-  on while each side holds one sample)::
-
-      s = sqrt(sum(relative deviations ** 2) / (m + n - 2))        (0 when m + n <= 2)
-      sigma = max(s, floor)
-      noise = r * sigma * sqrt(1/m + 1/n)
-
-  and the critical number is ``VERDICT_NOISES`` (2, about 95% two-sided for a known noise),
-  from one run a side.
-- A task that declares none for the metric (the floor is 0) has not said its runs are exact: it has
-  said nothing, and the noise is only what the runs show. Each side's spread is its own, since
-  a candidate's code can change how much its runs vary, and the candidate side grows with every
-  run of it while the base stops at three. This is Welch's t test: with ``v_c`` and ``v_b``
-  each side's relative variance (squared relative deviations over ``m - 1`` and ``n - 1``)::
-
-      noise = r * sqrt(v_c/m + v_b/n)
-      df = (v_c/m + v_b/n) ** 2 / ((v_c/m) ** 2 / (m - 1) + (v_b/n) ** 2 / (n - 1))
-
-  (the Welch-Satterthwaite degrees of freedom). The critical number is the two-sided 95%
-  Student-t quantile at the floor of ``df`` (`_t_critical`), conservative because the quantile
-  falls as the degrees grow, so a verdict at equal means stays near the intended 5% whatever
-  the two spreads and counts. The comparison gives a verdict only once each side holds
-  ``MIN_SAMPLES_WITHOUT_FLOOR`` runs and the noise is above zero. Fewer runs, or identical
-  runs, are no estimate of a noise: identical readings of a quantized or cached benchmark show
-  none, not that there is none. Until then the comparison is ``inconclusive`` and a close call
-  (`close_call`), which earns both sides more samples (below). Any fixed default floor would be a
-  number nobody measured; requiring the key would refuse every task that has a benchmark and no
-  ``[pareto]`` table.
+A comparison judges every objective its samples report with the one statistic of
+`vs_core._dominance` (`judge`) and gives the dominance result over them (`dominance`): a
+candidate that is no worse on any objective and better on one is ``better``, whatever the
+headline did. An objective's noise is the task's declared one when it states it
+(`ComparisonPolicy.floor_of`: the objective's own tolerance, else the task's
+``relative_noise``), else what the samples show, else a stated default; it is never zero, so
+every comparison has a verdict. A close call is a comparison whose every objective is within its
+noise (`close_call`): more samples could still make it a dominating result or a regression, and
+a decided result is never a close call.
 
 When each side is measured
 --------------------------
@@ -63,11 +30,11 @@ The base is measured once per (measured input, evaluation): the first time a can
 compared with it and no run of it is held or running, and again when every run of it a
 candidate waited on ended without a sample (`vs_core._base_runs`). It is measured again only
 when its samples are stale (older than ``TaskTerms.base_staleness`` on the run clock) or when a
-candidate's result is a close call (``within_noise`` or ``inconclusive``, `close_call`), because one more base
-sample narrows the noise. A close call never takes a base past `_base_max_samples` fresh
-samples: ``BASE_MAX_SAMPLES`` (2, so at most one extra base run) under a declared floor, and
-``MIN_SAMPLES_WITHOUT_FLOOR`` (3, so at most two extra base runs) without one, the fewest that
-can give a verdict. Nor does it chase staleness: when base samples go stale faster than a base
+candidate's result is a close call (`close_call`), because one more base sample narrows the
+noise. A close call never takes a base past `_base_max_samples` fresh samples:
+``BASE_MAX_SAMPLES`` (2, so at most one extra base run) when every objective declares its noise,
+and ``MIN_SAMPLES_WITHOUT_FLOOR`` (3, so at most two extra base runs) when some does not, the
+fewest that show a spread of their own. Nor does it chase staleness: when base samples go stale faster than a base
 run takes, the run a close call earned can land without growing the base's fresh samples (the
 sample it was meant to join expired meanwhile), and that run is the last one a close call earns
 either side of that comparison (`base_run_stalled`). The stop counts only the runs core took
@@ -83,25 +50,23 @@ land. The strategy's verdict does wait: a Measure that asks for the comparison
 (``Measure.compared``) is compared with the attempt's base too (`vs_core._base_runs.base_of`),
 and ``ctx.evaluation.measure_compared`` hands the comparison back once no run that feeds it is
 under way (`comparison_settling`), or as it stands when its bound is spent. A verdict taken on
-the first run alone would leave every close call inconclusive.
+the first run alone would leave every close call open.
 
-Without a declared floor the candidate needs those three runs too, and nobody else gives them:
-an agent's call for content it already measured is answered with that evaluation, and the
-official check adds none. So a close call without a floor also earns the candidate's
-input more runs in its scope (`remeasures_candidate`), up to ``MIN_SAMPLES_WITHOUT_FLOOR`` in
-all. Under a floor one run a side can give a verdict, and core takes no run of the candidate.
-
-A comparison without a floor whose ``MIN_SAMPLES_WITHOUT_FLOOR`` runs a side all read alike can
-never give a verdict (`verdict_unreachable`): a deterministic benchmark reads the same again. It
-earns neither side another run, so the runs a comparison costs are bounded.
+An objective that declares no noise has it estimated from the candidate's own runs too, and
+nobody else gives them: an agent's call for content it already measured is answered with that
+evaluation, and the official check adds none. So a close call on such an objective also earns
+the candidate's input more runs in its scope (`remeasures_candidate`), up to
+``MIN_SAMPLES_WITHOUT_FLOOR`` in all. When every objective declares its noise one run a side
+gives a verdict, and core takes no run of the candidate. A benchmark whose runs all read alike
+shows no spread and falls back to the stated default noise, so its runs are bounded too.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import floor, inf, sqrt
 from typing import TYPE_CHECKING
 
+from ._dominance import VERDICT_NOISES, Runs, dominance, judge
 from ._submission_receipts import receipt_ended
 from ._values import digest
 from .types.common import (
@@ -125,6 +90,7 @@ from .types.measurement import (
     ComparisonVerdict,
     Direction,
     EffectVerdict,
+    ObjectiveComparison,
     Reading,
     Sample,
     StatedComparison,
@@ -142,7 +108,6 @@ __all__ = [
     "MAX_CORE_BASE_RUNS",
     "MIN_SAMPLES_WITHOUT_FLOOR",
     "SETTLE_RUNS",
-    "VERDICT_NOISES",
     "ComparisonPolicy",
     "Measured",
     "Moment",
@@ -173,7 +138,7 @@ __all__ = [
     "remeasures_base",
     "remeasures_candidate",
     "restated_answers",
-    "run_reading",
+    "run_readings",
     "run_under_way",
     "running_baseline",
     "sample_of",
@@ -181,7 +146,6 @@ __all__ = [
     "scope_samples",
     "stated_comparisons",
     "terms_policy",
-    "verdict_unreachable",
 ]
 
 SETTLE_RUNS = 3
@@ -189,8 +153,6 @@ SETTLE_RUNS = 3
 one for each run a close call earns a side without a declared floor. A flow waits for the
 comparison that long at most, and the official record stops moving then
 (``OwnedJob.answer_until``)."""
-VERDICT_NOISES = 2.0
-"""How many standard errors a difference must exceed for a verdict under a declared floor."""
 BASE_MAX_SAMPLES = 2
 """The most fresh samples a close call earns a base under a declared floor: one run, then one
 more, never a chase.
@@ -198,39 +160,20 @@ more, never a chase.
 A base run costs as much as a candidate's, so a close call narrows the noise with one more base
 sample and stops there."""
 MIN_SAMPLES_WITHOUT_FLOOR = 3
-"""The runs each side needs before a comparison under no declared floor gives a verdict.
+"""The runs each side takes to estimate an undeclared objective's noise from its own spread.
 
-Three a side is the fewest that give each side's spread two degrees of freedom, so Welch's
-degrees of freedom are at least 2 and the Student-t critical number at most 4.303; it is also
-the most fresh samples a close call earns a base then, and the most runs of its input a close
-call earns a candidate."""
+Three a side is the fewest that give each side's spread two degrees of freedom; it is the most
+fresh samples a close call earns a base then, and the most runs of its input a close call earns
+a candidate."""
 MAX_CORE_BASE_RUNS = MIN_SAMPLES_WITHOUT_FLOOR * MAX_SUBMISSIONS_PER_MEASUREMENT
 """The most runs of an attempt's base core takes in its scope over the attempt's lifetime.
 
 The base is one measurement however many candidate inputs the agent measures, and its samples
 go stale (``TaskTerms.base_staleness``), so a long attempt measures it again for a later
-candidate. This is enough for five comparisons each to take the base to the runs a verdict
-needs without a floor, and it is the limit of the submission budget core opens for the base
+candidate. This is enough for five comparisons each to take the base to the runs that estimate
+an undeclared noise, and it is the limit of the submission budget core opens for the base
 (`vs_core._base_runs`), so it holds whoever asked for each run.
 """
-
-_T_FIRST_DEGREES = MIN_SAMPLES_WITHOUT_FLOOR - 1
-"""The fewest degrees of freedom a comparison that can give a verdict has (Welch's are never
-below the smaller side's runs less one)."""
-_T_975 = (
-    4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
-    2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
-    2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042,
-)  # fmt: skip
-"""The two-sided 95% Student-t quantile for ``_T_FIRST_DEGREES`` (2) to 30 degrees of freedom.
-
-No stdlib or dependency of vs-core computes a Student-t quantile, so this is the standard table
-to three decimals; `test_comparison_statistic` checks every entry against a numerically
-integrated Student-t distribution."""
-_DEGREES_SLACK = 1e-9
-"""Added before taking the floor of Welch's degrees of freedom: degrees that are a whole number
-in exact arithmetic (equal spreads and counts, or one side's runs all alike) can come out a few
-units in the last place below it, and the floor would then drop a whole degree."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -346,7 +289,7 @@ def evaluation_of(identity: MeasurementIdentity) -> str:
 
 
 def measures(evidence: EvidenceRef) -> bool:
-    """Whether ``evidence`` is a measurement: a trusted, successful benchmark record with a reading.
+    """Whether ``evidence`` is a measurement: a trusted, successful benchmark record with readings.
 
     Only such a record gives a sample (`sample_of`) and only such a record states an answer
     (`as_answer`): a failed or untrusted record keeps the reading its run reported.
@@ -355,7 +298,7 @@ def measures(evidence: EvidenceRef) -> bool:
         evidence.kind == EvidenceKind.BENCHMARK
         and evidence.status == ObservationStatus.SUCCEEDED
         and evidence.provenance == "trusted"
-        and evidence.reading is not None
+        and bool(evidence.readings)
     )
 
 
@@ -365,7 +308,7 @@ def sample_of(
     """The sample a finished run gives, or None when it is not a measurement record.
 
     The run must be a framework run (not a re-read of one: ``reuses`` is unset), and its
-    benchmark record trusted, successful and carrying the headline reading. The input is the
+    benchmark record trusted, successful and carrying the readings of its objectives. The input is the
     plan's own or, for a run whose plan names none, the ``measured_input`` the runtime
     digested at its commit; with neither there is no sample, since a sample cannot exist
     without its commit and the input the evaluation read there.
@@ -375,7 +318,6 @@ def sample_of(
     if (
         job.reuses is not None
         or not measures(evidence)
-        or evidence.reading is None
         or named is None
         or not isinstance(plan.candidate, RevisionRef)
     ):
@@ -389,7 +331,7 @@ def sample_of(
         gates=tuple(stage.stage_id for stage in plan.stages),
         host=plan.environment_digest,
         dedicated_resources=plan.dedicated_measurement_resources,
-        reading=evidence.reading,
+        readings=evidence.readings,
         observed_at=observed_at,
         base=job.base,
     )
@@ -398,31 +340,27 @@ def sample_of(
 def as_answer(
     state: EvaluationState, job: OwnedJob, evidence: EvidenceRef, now_at: Seconds
 ) -> EvidenceRef:
-    """``evidence`` as the official measurement's answer: its reading is the samples' mean.
+    """``evidence`` as the official measurement's answer: each reading is the samples' mean.
 
     The official measurement of an input is answered by every sample the scope holds of it, the
     run that answers included when it is a new one (`vs_core._measurement_reuse`). The
     benchmark record that carries the answer through the ledger, and so to every reader that
-    ranks candidates, states the mean of those samples (`scope_samples`): exactly the candidate
-    value the comparison with the base states (`comparison_of`), never one run's reading. A
-    later sample of the same input in the same scope (a close call's run after the official
-    check) restates the record (`restated_answers`), so the record and the settled comparison
-    are one figure. The run's own reading stays in its ``Sample``. Once an answer of the input in
-    the scope has closed (``OwnedJob.answer_until``), every official record of it states the
-    figure that answer closed on (`_closed_answer`), so a run that lands later does not part the
-    ledger from the verdict the strategy took.
+    ranks candidates, states the mean of those samples on every objective (`scope_samples`):
+    exactly the candidate values the comparison with the base states (`comparison_of`), never
+    one run's readings. A later sample of the same input in the same scope (a close call's run
+    after the official check) restates the record (`restated_answers`), so the record and the
+    settled comparison are one figure. The run's own readings stay in its ``Sample``. Once an
+    answer of the input in the scope has closed (``OwnedJob.answer_until``), every official
+    record of it states the figures that answer closed on (`_closed_answer`), so a run that
+    lands later does not part the ledger from the verdict the strategy took.
 
     Only a measurement record states an answer (`measures`): a failed or untrusted record
-    keeps the reading its run reported, so a failed run never reads as the mean of runs that
-    passed. Any other record, and a record whose samples read another metric, is returned as
-    it is. Only the headline metric is aggregated: a record's other objectives are the
-    answering run's own, since a sample holds the headline reading only.
+    keeps the readings its run reported, so a failed run never reads as the mean of runs that
+    passed. Any other record is returned as it is, and so is a reading no held sample reports.
     """
     plan = job.plan
-    reading = evidence.reading
     if (
         plan.purpose != "official"
-        or reading is None
         or not measures(evidence)
         or plan.measured_input is None
         or not isinstance(plan.candidate, RevisionRef)
@@ -432,24 +370,44 @@ def as_answer(
         evaluation_of(MeasurementIdentity.from_plan(plan, plan.candidate)), plan.measured_input
     )
     closed = _closed_answer(state, job, measured, now_at)
-    if closed is not None and closed.metric == reading.metric:
+    if closed is not None:
+        closed_values = {item.metric: item.value for item in closed}
         return evidence.model_copy(
-            update={"reading": reading.model_copy(update={"value": closed.value})}
+            update={
+                "readings": tuple(
+                    item.model_copy(update={"value": closed_values[item.metric]})
+                    if item.metric in closed_values
+                    else item
+                    for item in evidence.readings
+                )
+            }
         )
     held = scope_samples(state, job.scope, measured)
     own = sample_of(job, evidence, 0.0)
     if own is not None and all(s.run != own.run for s in held):
         held = (*held, own)
-    if not held or any(s.reading.metric != reading.metric for s in held):
-        return evidence
-    mean = _mean(tuple(s.reading.value for s in held))
-    return evidence.model_copy(update={"reading": reading.model_copy(update={"value": mean})})
+    return evidence.model_copy(
+        update={"readings": tuple(_mean_reading(item, held) for item in evidence.readings)}
+    )
+
+
+def _mean_reading(reading: Reading, samples: tuple[Sample, ...]) -> Reading:
+    """``reading`` stating the mean of ``samples``' readings of its objective, if they all report it."""
+    found = [_reading_of(sample, reading.metric) for sample in samples]
+    if not found or any(item is None for item in found):
+        return reading
+    return reading.model_copy(update={"value": _mean(tuple(item.value for item in found if item))})
+
+
+def _reading_of(sample: Sample, metric: str) -> Reading | None:
+    """The reading ``sample`` took of the objective ``metric``, if its run reported it."""
+    return next((item for item in sample.readings if item.metric == metric), None)
 
 
 def _closed_answer(
     state: EvaluationState, job: OwnedJob, measured: Measured, now_at: Seconds
-) -> Reading | None:
-    """The headline reading the first closed official answer of ``measured`` in ``job``'s scope states.
+) -> tuple[Reading, ...] | None:
+    """The readings the first closed official answer of ``measured`` in ``job``'s scope states.
 
     None while no answer of it has closed: no official job of it whose ``answer_until`` has come.
     """
@@ -468,7 +426,7 @@ def _closed_answer(
         ):
             for record in other.evidence:
                 if measures(record):
-                    return record.reading
+                    return record.readings
     return None
 
 
@@ -576,16 +534,18 @@ def closed_answers(state: EvaluationState, moment: Moment) -> EvaluationState:
     )
 
 
-def run_reading(state: EvaluationState, job: OwnedJob, evidence: EvidenceRef) -> Reading | None:
-    """The reading ``job``'s own run took for ``evidence``: its sample's, else the record's.
+def run_readings(
+    state: EvaluationState, job: OwnedJob, evidence: EvidenceRef
+) -> tuple[Reading, ...]:
+    """The readings ``job``'s own run took for ``evidence``: its sample's, else the record's.
 
     An official run's ledger record states the measurement's answer (`as_answer`), so what the
     run itself read is its ``Sample``.
     """
-    if evidence.reading is None:
-        return None
+    if not evidence.readings:
+        return ()
     own = next((s for s in state.samples if s.run == job.submission_id), None)
-    return evidence.reading if own is None else own.reading
+    return evidence.readings if own is None else own.readings
 
 
 def samples_of(state: EvaluationState, measured: Measured) -> tuple[Sample, ...]:
@@ -620,14 +580,26 @@ def _mean(values: tuple[float, ...]) -> float:
     return sum(values) / len(values)
 
 
-def _direction(samples: tuple[Sample, ...], policy: ComparisonPolicy) -> Direction | None:
-    stated = {s.reading.direction for s in samples}
+def _direction(
+    metric: str, samples: tuple[Sample, ...], policy: ComparisonPolicy
+) -> Direction | None:
+    """Which way is better for ``metric``: the one every sample's reading states, else the task's."""
+    stated = {item.direction for s in samples if (item := _reading_of(s, metric)) is not None}
     if len(stated) == 1 and None not in stated:
         return next(iter(stated))
     if stated != {None}:
         return None
-    named = dict(policy.directions)
-    return named.get(samples[0].reading.metric)
+    return dict(policy.directions).get(metric)
+
+
+def _compared_metrics(candidate: tuple[Sample, ...], base: tuple[Sample, ...]) -> tuple[str, ...]:
+    """The objectives every sample of both sides reports, in the candidate's latest reading order."""
+    both = (*candidate, *base)
+    return tuple(
+        item.metric
+        for item in candidate[-1].readings
+        if all(_reading_of(sample, item.metric) is not None for sample in both)
+    )
 
 
 def compare(
@@ -638,135 +610,60 @@ def compare(
     anchor: BaseRef,
     policy: ComparisonPolicy,
 ) -> Comparison | None:
-    """The candidate's samples compared with the base's, or None when they cannot be compared.
+    """The candidate's samples compared with the base's on every objective, or None.
 
-    ``anchor`` names the base the samples are compared with. They cannot be compared when
-    either side is empty, the samples read different metrics, no direction is known for the
-    metric, or the base's mean is zero (a ratio over it means nothing).
+    ``anchor`` names the base the samples are compared with. An objective is compared when every
+    sample of both sides reports it and a direction is known for it (the readings' own, else the
+    task's); each is judged by the one statistic (`vs_core._dominance.judge`) under the noise the
+    task declares for it, and the comparison's result is the dominance over them (`dominance`).
+    They cannot be compared when either side is empty or no objective is left to compare.
     """
     if not candidate or not base:
         return None
     both = (*candidate, *base)
-    reading = candidate[-1].reading
-    direction = _direction(both, policy)
-    if direction is None or {s.reading.metric for s in both} != {reading.metric}:
+    objectives: list[ObjectiveComparison] = []
+    for metric in _compared_metrics(candidate, base):
+        direction = _direction(metric, both, policy)
+        if direction is None:
+            continue
+        mine = _readings_of(candidate, metric)
+        theirs = _readings_of(base, metric)
+        judged = judge(
+            Runs.of(tuple(item.value for item in mine)),
+            Runs.of(tuple(item.value for item in theirs)),
+            direction=direction,
+            declared=policy.floor_of(metric),
+        )
+        objectives.append(
+            ObjectiveComparison(
+                metric=metric,
+                unit=mine[-1].unit,
+                direction=direction,
+                candidate_value=_mean(tuple(item.value for item in mine)),
+                base_value=_mean(tuple(item.value for item in theirs)),
+                ratio=judged.ratio,
+                noise=judged.noise,
+                verdict=judged.verdict,
+            )
+        )
+    if not objectives:
         return None
-    mine = tuple(s.reading.value for s in candidate)
-    theirs = tuple(s.reading.value for s in base)
-    c, b = _mean(mine), _mean(theirs)
-    if b == 0:
-        return None
-    ratio = c / b
-    m, n = len(mine), len(theirs)
-    floor = policy.floor_of(reading.metric)
-    if floor > 0:
-        sigma = max(_pooled_spread(mine, c, theirs, b), floor)
-        noise = abs(ratio) * sigma * sqrt(1 / m + 1 / n)
-        critical = VERDICT_NOISES
-    else:
-        error, degrees = _welch(mine, c, theirs, b)
-        noise = abs(ratio) * error
-        critical = _t_critical(degrees)
-    gain = ratio - 1 if direction == "max" else 1 - ratio
-    verdict = (
-        ComparisonVerdict.INCONCLUSIVE
-        if not _noise_known(m, n, noise, policy, reading.metric)
-        else ComparisonVerdict.BETTER
-        if gain > critical * noise
-        else ComparisonVerdict.WORSE
-        if gain < -critical * noise
-        else ComparisonVerdict.WITHIN_NOISE
-    )
     last = candidate[-1]
     return Comparison(
         scope=scope,
-        metric=reading.metric,
-        unit=reading.unit,
-        direction=direction,
         candidate=last.commit,
         candidate_input=last.measured_input,
         base=anchor.commit,
         base_input=anchor.measured_input,
-        candidate_value=c,
-        base_value=b,
-        ratio=ratio,
-        noise=noise,
-        verdict=verdict,
-        candidate_samples=m,
-        base_samples=n,
+        verdict=dominance(item.verdict for item in objectives),
+        candidate_samples=len(candidate),
+        base_samples=len(base),
+        objectives=tuple(objectives),
     )
 
 
-def _t_critical(degrees: float) -> float:
-    """The two-sided 95% Student-t quantile at the floor of ``degrees`` of freedom.
-
-    The floor, because the quantile falls as the degrees grow, so rounding down never gives a
-    verdict that the exact degrees would not; beyond the table's 30 its last entry, slightly
-    above the normal 1.96. Below ``_T_FIRST_DEGREES`` there is no verdict (`_noise_known`), so
-    the bar is infinite.
-    """
-    whole = floor(degrees + _DEGREES_SLACK)
-    if whole < _T_FIRST_DEGREES:
-        return inf
-    return _T_975[min(whole - _T_FIRST_DEGREES, len(_T_975) - 1)]
-
-
-def _noise_known(m: int, n: int, noise: float, policy: ComparisonPolicy, metric: str) -> bool:
-    """Whether a comparison of ``m`` and ``n`` runs of ``metric`` with this ``noise`` has an estimate of it.
-
-    A declared floor is one. Without it, the runs must be ``MIN_SAMPLES_WITHOUT_FLOOR`` a side
-    and show a spread above zero: zero spread from fewer runs, or from identical runs, is no
-    measurement of the noise.
-    """
-    return policy.declares_floor(metric) or (min(m, n) >= MIN_SAMPLES_WITHOUT_FLOOR and noise > 0)
-
-
-def _pooled_spread(mine: tuple[float, ...], c: float, theirs: tuple[float, ...], b: float) -> float:
-    """The pooled relative deviation of the runs from their own side's mean (0 below 3 runs).
-
-    Used only under a declared floor, which bounds it from below.
-    """
-    degrees = len(mine) + len(theirs) - 2
-    if degrees <= 0 or c == 0 or b == 0:
-        return 0.0
-    return sqrt((_squares(mine, c) + _squares(theirs, b)) / degrees)
-
-
-def _welch(
-    mine: tuple[float, ...], c: float, theirs: tuple[float, ...], b: float
-) -> tuple[float, float]:
-    """The relative standard error of the ratio and its Welch-Satterthwaite degrees of freedom.
-
-    Each side contributes its own relative variance over its count (module docstring); a side
-    with one run, identical runs or a zero mean contributes none. Zero error has zero degrees.
-    """
-    parts = tuple(
-        (_variance(values, mean) / len(values), len(values) - 1)
-        for values, mean in ((mine, c), (theirs, b))
-    )
-    total = sum(part for part, _ in parts)
-    if total == 0:
-        return 0.0, 0.0
-    return sqrt(total), total**2 / sum(part**2 / free for part, free in parts if part > 0)
-
-
-def _variance(values: tuple[float, ...], mean: float) -> float:
-    """One side's relative variance: squared relative deviations over its runs less one."""
-    free = len(values) - 1
-    if free == 0 or mean == 0:
-        return 0.0
-    return _squares(values, mean) / free
-
-
-def _squares(values: tuple[float, ...], mean: float) -> float:
-    """The sum of squared relative deviations from ``mean``: exactly 0 for identical runs.
-
-    A float mean of identical values can differ from them in the last bit, which would show a
-    spread of about 1e-17 where the runs showed none.
-    """
-    if min(values) == max(values):
-        return 0.0
-    return sum(((x - mean) / mean) ** 2 for x in values)
+def _readings_of(samples: tuple[Sample, ...], metric: str) -> tuple[Reading, ...]:
+    return tuple(item for s in samples if (item := _reading_of(s, metric)) is not None)
 
 
 def comparison_of(
@@ -977,10 +874,12 @@ def comparisons_to_publish(
     resume that waited for the candidate, so an agent that resumed on a provisional comparison
     learns where it ended at its next resume, whatever that resume waited for. A comparison is
     settling while a run of either side that will feed it has not ended (`comparison_settling`).
+    What a resume tells of is the result and every objective's verdict (`_standing`), so an
+    objective that moved to a verdict the agent was not told is told again.
     """
-    last: dict[tuple[str, str], tuple[ComparisonVerdict, bool]] = {}
+    last: dict[tuple[str, str], tuple[tuple[ComparisonVerdict, ...], bool]] = {}
     for comparison, settling in told:
-        last[comparison.candidate_input, comparison.base_input] = (comparison.verdict, settling)
+        last[comparison.candidate_input, comparison.base_input] = (_standing(comparison), settling)
     wanted = frozenset(covered)
     held = (c.candidate_input for c in state.comparisons if c.scope == scope)
     found: list[Comparison] = []
@@ -989,7 +888,7 @@ def comparisons_to_publish(
         settling = comparison_settling(state, comparison)
         subject = (comparison.candidate_input, comparison.base_input)
         if comparison.candidate_input in wanted or last.get(subject) != (
-            comparison.verdict,
+            _standing(comparison),
             settling,
         ):
             found.append(comparison)
@@ -998,37 +897,34 @@ def comparisons_to_publish(
     return tuple(found), tuple(settling_now)
 
 
-def effect_verdict(
-    comparison: Comparison, minimum_ratio: float, policy: ComparisonPolicy
-) -> EffectVerdict:
+def _standing(comparison: Comparison) -> tuple[ComparisonVerdict, ...]:
+    """The result of a comparison and of each of its objectives: what a resume tells the agent."""
+    return (comparison.verdict, *(item.verdict for item in comparison.objectives))
+
+
+def effect_verdict(comparison: Comparison, minimum_ratio: float) -> EffectVerdict:
     """What ``comparison`` says of an expected effect: the smallest ratio that justifies a change.
 
-    ``minimum_ratio`` is the bar over the base in the metric's own direction (above one for a
-    ``max`` metric, below one for ``min``; one asks for any improvement). The candidate's gain
-    over the base is held against the gain the bar asks for, with the comparison's own noise
-    and a critical number of noises::
+    The expected effect of a plan is a bar on its headline objective (the comparison's first),
+    judged by the same statistic as the comparison: ``minimum_ratio`` is the bar over the base
+    in the metric's own direction (above one for a ``max`` metric, below one for ``min``; one
+    asks for any improvement). The candidate's gain over the base is held against the gain the
+    bar asks for, with the headline's own noise and the critical number of noises::
 
         margin = gain - required gain
         supported     if margin >  critical * noise
         disproven     if margin < -critical * noise
         within_noise  otherwise
 
-    A comparison with no estimate of its noise is ``inconclusive``, whatever the bar.
-
-    ``policy`` is the one the comparison was made under (`compare`). Under a declared floor the
-    critical number is ``VERDICT_NOISES``, and with a bar of one this is exactly the
-    comparison's own verdict. Without one, a comparison with no estimate of its noise
-    (`_noise_known`) says nothing of any bar, and otherwise the critical number is the Student-t
-    quantile at the fewest degrees Welch's test can have, ``min(m, n) - 1`` (the stored
-    comparison does not carry its exact degrees): at least the one the verdict used, so the
-    effect is never called where the comparison would not be, and with a bar of one it is the
-    comparison's verdict or ``inconclusive``.
+    A headline that cannot be judged (a base mean of zero) is ``inconclusive``, whatever the
+    bar. With a bar of one this is exactly the headline's own verdict.
     """
-    resolution = effect_resolution(comparison, policy)
+    resolution = effect_resolution(comparison)
     if resolution is None:
         return EffectVerdict.INCONCLUSIVE
-    sign = 1.0 if comparison.direction == "max" else -1.0
-    margin = sign * (comparison.ratio - minimum_ratio)
+    headline = comparison.objectives[0]
+    sign = 1.0 if headline.direction == "max" else -1.0
+    margin = sign * (headline.ratio - minimum_ratio)
     if margin > resolution:
         return EffectVerdict.SUPPORTED
     if margin < -resolution:
@@ -1036,21 +932,17 @@ def effect_verdict(
     return EffectVerdict.WITHIN_NOISE
 
 
-def effect_resolution(comparison: Comparison, policy: ComparisonPolicy) -> float | None:
+def effect_resolution(comparison: Comparison) -> float | None:
     """How far a candidate's ratio must clear a plan's bar for `effect_verdict` to call it.
 
-    The critical number of noises times the comparison's noise, in ratio units: a candidate within
-    this of its bar is ``within_noise``, so a bar the design cannot expect to clear by this much is
-    one the framework cannot call. ``policy`` is the one the comparison was made under. None when
-    the comparison has no estimate of its noise (`_noise_known`), which says nothing of any bar.
+    The critical number of noises times the headline's noise, in ratio units: a candidate within
+    this of its bar is ``within_noise``, so a bar the design cannot expect to clear by this much
+    is one the framework cannot call. None when the headline cannot be judged.
     """
-    m, n = comparison.candidate_samples, comparison.base_samples
-    if not _noise_known(m, n, comparison.noise, policy, comparison.metric):
+    headline = comparison.objectives[0]
+    if headline.verdict is ComparisonVerdict.INCONCLUSIVE:
         return None
-    critical = (
-        VERDICT_NOISES if policy.declares_floor(comparison.metric) else _t_critical(min(m, n) - 1)
-    )
-    return critical * comparison.noise
+    return VERDICT_NOISES * headline.noise
 
 
 def comparison_of_result(
@@ -1073,40 +965,33 @@ def comparison_of_result(
 
 
 def close_call(comparison: Comparison) -> bool:
-    """Whether the candidate's result is not yet called: within the noise, or with none estimated.
+    """Whether the candidate's result is not yet called: every objective is within its noise.
 
-    That is a ``within_noise`` verdict (taken at the critical number for the comparison's own
-    spreads, `compare`, which the stored comparison does not carry, so the verdict is the only
-    place that bar is known) or an ``inconclusive`` one: a comparison with no estimate of its
-    noise (``_noise_known``) is called neither way whatever its gain, and more samples are
-    exactly what it lacks. A verdict, even from a zero noise under a declared floor (a candidate
-    that read 0), is no close call.
+    That is a ``within_noise`` result (`dominance`): no objective is better or worse beyond its
+    tolerance, so more samples could still turn it into a dominating result or a regression. A
+    result that dominates the base, or one with an objective worse beyond its tolerance, is
+    decided and no close call, whatever the remaining objectives would say with more samples; so
+    is one that cannot be judged (a zero base mean), which more samples do not change.
     """
-    return comparison.verdict in (ComparisonVerdict.WITHIN_NOISE, ComparisonVerdict.INCONCLUSIVE)
+    return comparison.verdict is ComparisonVerdict.WITHIN_NOISE
 
 
-def verdict_unreachable(comparison: Comparison, policy: ComparisonPolicy) -> bool:
-    """Whether no further run can give ``comparison`` a verdict, so none is taken for it.
+def declares_noise(comparison: Comparison, policy: ComparisonPolicy) -> bool:
+    """Whether the task declares the noise of every objective ``comparison`` judged.
 
-    Under no declared floor, once each side holds ``MIN_SAMPLES_WITHOUT_FLOOR`` runs that all
-    read alike the noise is zero, and it stays zero: a deterministic (quantized or cached)
-    benchmark reads the same value again, and no number of runs shows a noise it does not have.
-    A declared floor is a noise estimate, so a comparison under one is never in this state.
+    Otherwise some objective's noise is estimated from the samples (`vs_core._dominance`), and
+    more samples of either side improve the estimate.
     """
-    return (
-        not policy.declares_floor(comparison.metric)
-        and min(comparison.candidate_samples, comparison.base_samples) >= MIN_SAMPLES_WITHOUT_FLOOR
-        and comparison.noise == 0
-    )
+    return all(policy.declares_floor(item.metric) for item in comparison.objectives)
 
 
-def _base_max_samples(policy: ComparisonPolicy, metric: str) -> int:
+def _base_max_samples(comparison: Comparison, policy: ComparisonPolicy) -> int:
     """The most fresh samples a close call earns a base (module docstring).
 
-    ``BASE_MAX_SAMPLES`` under a declared floor; without one ``MIN_SAMPLES_WITHOUT_FLOOR``, the
-    fewest a side needs for a verdict.
+    ``BASE_MAX_SAMPLES`` when every objective declares its noise; otherwise
+    ``MIN_SAMPLES_WITHOUT_FLOOR``, the fewest that show a spread.
     """
-    return BASE_MAX_SAMPLES if policy.declares_floor(metric) else MIN_SAMPLES_WITHOUT_FLOOR
+    return BASE_MAX_SAMPLES if declares_noise(comparison, policy) else MIN_SAMPLES_WITHOUT_FLOOR
 
 
 def run_under_way(state: EvaluationState, receipt: SubmissionReceipt | None) -> bool:
@@ -1227,8 +1112,7 @@ def remeasures_base(
     held = fresh(samples_of(state, base), moment)
     return (
         close_call(comparison)
-        and not verdict_unreachable(comparison, moment.policy)
-        and len(held) < _base_max_samples(moment.policy, comparison.metric)
+        and len(held) < _base_max_samples(comparison, moment.policy)
         and not _base_under_way(
             state, BaseRef(commit=comparison.base, measured_input=comparison.base_input), base
         )
@@ -1248,15 +1132,16 @@ def remeasures_candidate(
 ) -> bool:
     """Whether a close call is worth one more run of the candidate's input, in its scope.
 
-    Only under no declared floor, while the candidate holds fewer than
+    Only while some objective's noise is undeclared, the candidate holds fewer than
     ``MIN_SAMPLES_WITHOUT_FLOOR`` runs and none of its input is running in the scope: its side
-    needs that many before any verdict (module docstring), and only core can take them, since a
-    repeat of the same content is answered with the evaluation already made. Not once the base
-    is known to go stale faster than it runs (`base_run_stalled`): its side cannot get there.
+    needs that many to show a spread of its own (module docstring), and only core can take them,
+    since a repeat of the same content is answered with the evaluation already made. Not once
+    the base is known to go stale faster than it runs (`base_run_stalled`): its side cannot get
+    there.
     """
     candidate = Measured(evaluation, comparison.candidate_input)
     return (
-        not moment.policy.declares_floor(comparison.metric)
+        not declares_noise(comparison, moment.policy)
         and close_call(comparison)
         and comparison.candidate_samples < MIN_SAMPLES_WITHOUT_FLOOR
         and not base_in_flight(state, candidate, comparison.scope)

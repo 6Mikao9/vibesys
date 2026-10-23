@@ -66,15 +66,17 @@
     "gates": [],
     "host": "x",
     "dedicated_resources": false,
-    "reading": {
-      "metric": "x",
-      "value": 0,
-      "direction": null,
-      "unit": null,
-      "repetitions": 1
-    },
     "observed_at": 0,
-    "base": null
+    "base": null,
+    "readings": [
+      {
+        "metric": "x",
+        "value": 0,
+        "direction": null,
+        "unit": null,
+        "repetitions": 1
+      }
+    ]
   },
   "Comparison": {
     "scope": {
@@ -84,9 +86,6 @@
       },
       "generation": 0
     },
-    "metric": "x",
-    "unit": null,
-    "direction": "max",
     "candidate": {
       "revision_id": {
         "root": "x",
@@ -103,13 +102,21 @@
       "digest": "x"
     },
     "base_input": "x",
-    "candidate_value": 0,
-    "base_value": 0,
-    "ratio": 0,
-    "noise": 0,
     "verdict": "better",
     "candidate_samples": 0,
-    "base_samples": 0
+    "base_samples": 0,
+    "objectives": [
+      {
+        "metric": "x",
+        "unit": null,
+        "direction": "max",
+        "candidate_value": 0,
+        "base_value": 0,
+        "ratio": 0,
+        "noise": 0,
+        "verdict": "better"
+      }
+    ]
   },
   "PureOption": {
     "key": "x",
@@ -195,7 +202,16 @@
       "status": "succeeded"
     },
     "reused_from": null,
-    "reading": null,
     "unmet_requirement": null
+  },
+  "ObjectiveComparison": {
+    "metric": "x",
+    "unit": null,
+    "direction": "max",
+    "candidate_value": 0,
+    "base_value": 0,
+    "ratio": 0,
+    "noise": 0,
+    "verdict": "better"
   }
 }

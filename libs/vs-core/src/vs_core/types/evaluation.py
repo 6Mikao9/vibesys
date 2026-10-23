@@ -215,15 +215,15 @@ class EvidenceRef(Value):
     checked carries the same evidence id and status (`vs_core._measurement_reuse`).
     """
 
-    reading: Reading | None = Field(default=None, exclude_if=unset)
-    """The benchmark record's headline reading, as the trusted record states it.
+    readings: tuple[Reading, ...] = Field(default=(), exclude_if=unset)
+    """The benchmark record's reading of every objective, headline first, as the trusted record states it.
 
-    Set by the runtime on a benchmark record only. Core keeps it so that the decisions over
+    Set by the runtime on a benchmark record only. Core keeps them so that the decisions over
     samples (`vs_core._comparison`) are pure state that a resume replays, instead of numbers
     held only in the runtime's ledger. An official measurement's record enters core's ledger
-    stating the mean of the samples that answer it (`vs_core._comparison.as_answer`), and the
-    headline a reader decodes from any record is this reading, so ranking reads the value the
-    comparison states. A run's own reading is its ``Sample``'s.
+    stating the mean of the samples that answer it (`vs_core._comparison.as_answer`) for each
+    objective, and the headline a reader decodes from any record is the first of these, so
+    ranking reads the value the comparison states. A run's own readings are its ``Sample``'s.
     """
 
     unmet_requirement: str | None = Field(default=None, exclude_if=unset)
@@ -232,7 +232,7 @@ class EvidenceRef(Value):
     Set by the runtime from the evaluator's `requirement_not_met` error. It says the revision
     lacks something the task requires, so measuring that revision again cannot help: core takes
     no further run of it (`vs_core._base_runs.requirement_unmet`). Kept on the ref, as
-    ``reading`` is, so that decision is pure state a resume replays.
+    ``readings`` are, so that decision is pure state a resume replays.
     """
 
     @property

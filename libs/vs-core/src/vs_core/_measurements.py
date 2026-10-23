@@ -14,7 +14,7 @@ from . import _wait_clock
 from ._base_runs import after_run, base_of, record_samples, with_base
 from ._comparison import (
     as_answer,
-    run_reading,
+    run_readings,
 )
 from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
@@ -1188,10 +1188,10 @@ def _same_report(
 
     An official answer whose restating closed (``OwnedJob.answer_until``) keeps the mean it
     stated then, while `as_answer` would state the mean of every sample now; the run's own
-    reading (`run_reading`) is what a repeat of its report must match.
+    readings (`run_readings`) is what a repeat of its report must match.
     """
     return isinstance(job, OwnedJob) and (
-        previous.model_copy(update={"reading": run_reading(state, job, previous)}) == reported
+        previous.model_copy(update={"readings": run_readings(state, job, previous)}) == reported
     )
 
 

@@ -17,6 +17,7 @@ from vs_core._generated.vibesys.core.v1.leaves_cv import (
     Comparison,
     Direction,
     Finite,
+    ObjectiveComparison,
     Reading,
     Sample,
 )
@@ -121,6 +122,7 @@ __all__ = [
     "Direction",
     "EffectVerdict",
     "Finite",
+    "ObjectiveComparison",
     "Reading",
     "Runaway",
     "Sample",
