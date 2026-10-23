@@ -11,12 +11,13 @@ raising ``ENVELOPE_SCHEMA_VERSION`` without them fails (`vs_core._envelope_migra
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -347,3 +348,96 @@ def test_upgrading_a_version_44_envelope_twice_changes_nothing() -> None:
     source = (_FIXTURES / "v43-embedded.json").read_text(encoding="utf-8")
     once = core.upgrade_envelope(source, ("schema_version",))
     assert core.upgrade_envelope(once, ("schema_version",)) == once
+
+
+def _fingerprint(document: Json) -> str:
+    """The digest core states for a value: sha256 of its JSON with sorted keys and no spaces."""
+    text = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _legacy_ref(index: int) -> Json:
+    return {
+        "evidence_id": {"root": f"e{index}", "kind": "evidence"},
+        "kind": "benchmark",
+        "reading": {"metric": "throughput", "value": 50.0 + index, "direction": "max"},
+    }
+
+
+_STEPS = (("v42-floor.json", False), ("v43-embedded.json", True))
+"""The save a step is held to and whether its old shapes sit inside a document held as text:
+version 43 rewrites the envelope's own fields, version 44 the documents held as text."""
+
+
+def _with_proofs(
+    fixture: str, decisions: list[Json], requests: list[Json], *, tampered: bool = False
+) -> dict[str, Json]:
+    """The ``fixture`` whose receipts and request records hold ``decisions`` and ``requests``."""
+    stored = _object(json.loads((_FIXTURES / fixture).read_text(encoding="utf-8")))
+    core_state = _object(stored["core"])
+    run = _object(core_state["run"])
+    run["receipts"] = [
+        {
+            "decision_id": {"root": f"d{index}", "kind": "decision"},
+            "decision": decision,
+            "payload_digest": "tampered" if tampered else _fingerprint(decision),
+        }
+        for index, decision in enumerate(decisions)
+    ]
+    records = _object(core_state["records"])
+    records["records"] = [
+        {"request": request, "payload_digest": "tampered" if tampered else _fingerprint(request)}
+        for request in requests
+    ]
+    return stored
+
+
+def _holding(refs: int, *, as_text: bool) -> Json:
+    """A decision that holds ``refs`` evidence records at the old shape, in its fields or as text."""
+    proof: Json = [_legacy_ref(i) for i in range(refs)]
+    if as_text:
+        return {"kind": "operation", "request": {"payload_json": json.dumps({"evidence": proof})}}
+    return {"kind": "wait", "proof": proof, "width": 2}
+
+
+def _held(migrated: dict[str, Json]) -> list[tuple[Json, str]]:
+    """Every document a receipt or request record proves by its digest, and that digest."""
+    core_state = _object(migrated["core"])
+    receipts = _object(core_state["run"])["receipts"]
+    records = _object(core_state["records"])["records"]
+    assert isinstance(receipts, list)
+    assert isinstance(records, list)
+    digest = "payload_digest"
+    held = [(_object(item)["decision"], str(_object(item)[digest])) for item in receipts]
+    return held + [(_object(item)["request"], str(_object(item)[digest])) for item in records]
+
+
+@pytest.mark.parametrize(("fixture", "as_text"), _STEPS, ids=["v42", "v43"])
+@settings(deadline=None)
+@given(refs=st.integers(min_value=0, max_value=3), others=st.integers(min_value=0, max_value=2))
+def test_a_receipt_and_a_request_record_keep_a_digest_that_proves_what_they_hold(
+    fixture: str, *, as_text: bool, refs: int, others: int
+) -> None:
+    """A step that rewrites a decision or a request states its digest again; no other is touched."""
+    rewritten = [_holding(refs, as_text=as_text)]
+    untouched: list[Json] = [{"kind": "wait", "width": width} for width in range(others)]
+    stored = _with_proofs(fixture, rewritten + untouched, rewritten + untouched)
+    migrated = _upgraded(json.dumps(stored))
+
+    assert all(digest == _fingerprint(document) for document, digest in _held(migrated))
+    before, after = _held(stored), _held(migrated)
+    moved = [new[0] != old[0] for old, new in zip(before, after, strict=True)]
+    assert moved == [refs > 0, *([False] * others)] * 2
+    for old, new, changed in zip(before, after, moved, strict=True):
+        assert (old[1] != new[1]) is changed  # a digest moves with its document and only then
+
+
+@pytest.mark.parametrize(("fixture", "as_text"), _STEPS, ids=["v42", "v43"])
+def test_a_digest_that_is_not_the_one_of_the_saved_document_is_left_for_resuming_to_refuse(
+    fixture: str, *, as_text: bool
+) -> None:
+    """Only a digest that provably covered the old document is restated: a damaged one stays so."""
+    decision = _holding(1, as_text=as_text)
+    migrated = _upgraded(json.dumps(_with_proofs(fixture, [decision], [decision], tampered=True)))
+
+    assert [digest for _, digest in _held(migrated)] == ["tampered", "tampered"]

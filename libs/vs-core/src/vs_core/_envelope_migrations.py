@@ -26,6 +26,7 @@ was told and done, as it was).
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
@@ -194,12 +195,15 @@ def _embedded(value: JsonValue) -> JsonValue:
         return [_embedded(item) for item in value]
     if not isinstance(value, dict):
         return value
-    return {
-        key: _embedded_text(item)
-        if key in _EMBEDDED_JSON and isinstance(item, str)
-        else _embedded(item)
-        for key, item in value.items()
-    }
+    return _restated(
+        value,
+        {
+            key: _embedded_text(item)
+            if key in _EMBEDDED_JSON and isinstance(item, str)
+            else _embedded(item)
+            for key, item in value.items()
+        },
+    )
 
 
 def _embedded_text(text: str) -> str:
@@ -238,12 +242,46 @@ def _rewritten(value: JsonValue) -> JsonValue:
         return [_rewritten(item) for item in value]
     if not isinstance(value, dict):
         return value
-    node = {key: _rewritten(item) for key, item in value.items()}
+    node = _restated(value, {key: _rewritten(item) for key, item in value.items()})
     if "reading" in node and ("evidence_id" in node or {"run", "measured_input"} <= node.keys()):
         node["readings"] = [node.pop("reading")]
     elif {"candidate_input", "base_input", "candidate_value", "metric"} <= node.keys():
         objective = {key: node.pop(key) for key in _OBJECTIVE_FIELDS if key in node}
         node["objectives"] = [{**objective, "verdict": node["verdict"]}]
+    return node
+
+
+_COVERED_BY_A_DIGEST: Final = (("decision", "payload_digest"), ("request", "payload_digest"))
+"""The documents a record keeps beside the digest of the text it was proven by: a decision's
+receipt, and a request's record (`vs_core._proofs`)."""
+
+
+def _digest(document: JsonValue) -> str:
+    """The fingerprint core states for a value, read off its JSON: sorted keys, no whitespace."""
+    text = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return sha256(text.encode()).hexdigest()
+
+
+def _restated(old: JsonObject, new: JsonObject) -> JsonObject:
+    """``new`` with the digest of a decision or request this step rewrote stated again.
+
+    A receipt and a request record prove what they hold by a digest of it, and resuming refuses a
+    save whose proof no longer holds ("accepted decision integrity failed"): rewriting the
+    document leaves its saved digest standing for text that is gone. The digest is restated only
+    where it is certain to be the same fingerprint: the saved one was the digest of the saved
+    document as read off its JSON, so that of the rewritten document, read the same way, is what
+    core states for it. Any other digest is left as it was and resuming refuses the save.
+    """
+    node = new
+    for cover, field in _COVERED_BY_A_DIGEST:
+        if (
+            field in old
+            and cover in old
+            and cover in new
+            and new[cover] != old[cover]
+            and old[field] == _digest(old[cover])
+        ):
+            node = {**node, field: _digest(new[cover])}
     return node
 
 
