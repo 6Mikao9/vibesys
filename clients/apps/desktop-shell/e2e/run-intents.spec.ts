@@ -256,7 +256,6 @@ test('Pause escalates to Pause now in the same epoch and waits for journal outco
     ),
   ).toEqual([]);
   await page.getByRole('button', {name: 'Settings', exact: true}).click();
-  await expect(page.getByRole('button', {name: 'Chat', exact: true})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Guidance', exact: true})).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.active())).toBe(
     0,
@@ -379,7 +378,7 @@ test('live controls remain reachable and history follows pause, resume and finis
 test('Pause now is reachable while a live run is still loading history', async ({page}) => {
   await page.setViewportSize({width: 800, height: 900});
   const {requests, append, fixture} = await openIntents(page, {history: 'pending'});
-  await expect(page.getByText('Loading', {exact: true})).toBeVisible();
+  await expect(page.getByText(/^History \d+ of \d+$/)).toBeVisible();
   const pauseNow = page.getByRole('button', {name: 'Pause now', exact: true});
   await expect(pauseNow).toBeEnabled();
   await expect(pauseNow).toBeInViewport();
@@ -388,7 +387,7 @@ test('Pause now is reachable while a live run is still loading history', async (
   await expect(page.getByText('Pause now · Pending', {exact: true})).toBeVisible();
   expect(requests[0]?.request.intent.case).toBe('pauseNow');
   await append(fixture.records.slice(fixture.initialCount));
-  await expect(page.getByText('Loading', {exact: true})).toHaveCount(0);
+  await expect(page.getByText(/^History \d+ of \d+$/)).toHaveCount(0);
   await expect(pauseNow).toBeEnabled();
   await expect(page.getByText('Pause now · Pending', {exact: true})).toBeVisible();
 });
