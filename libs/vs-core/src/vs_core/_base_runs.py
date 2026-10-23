@@ -35,6 +35,7 @@ from ._comparison import (
     Measured,
     base_in_flight,
     base_missing,
+    base_unjudged,
     claimed_base,
     comparison_of,
     comparisons_of,
@@ -711,8 +712,13 @@ def _advance(
     comparison = comparison_of(state, scope, mine, moment)
     if comparison is None:
         sampled = bool(scope_samples(state, scope, mine))
-        if (sampled or base_in_flight(state, mine, scope)) and base_missing(
-            state, Measured(evaluation, base.measured_input), moment
+        anchor = Measured(evaluation, base.measured_input)
+        if (sampled or base_in_flight(state, mine, scope)) and (
+            base_missing(state, anchor, moment)
+            or (
+                not base_in_flight(state, anchor)
+                and base_unjudged(state, scope, mine, anchor, moment)
+            )
         ):
             return _measure_base(
                 change, context, scope, plan, base, behalf, within, requested_by=requested_by

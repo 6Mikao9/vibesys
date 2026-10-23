@@ -13,10 +13,16 @@ there are several. This module owns the pure decisions over samples:
 The statistic
 -------------
 
-A comparison judges every objective its samples report with the one statistic of
+A comparison judges every objective the candidate reports with the one statistic of
 `vs_core._dominance` (`judge`) and gives the dominance result over them (`dominance`): a
 candidate that is no worse on any objective and better on one is ``better``, whatever the
-headline did. An objective's noise is the task's declared one when it states it
+headline did. Each side's runs of an objective are the samples that report it, so a sample taken
+before an objective was reported (or by a benchmark that never did) neither hides the objective
+from the comparison nor is read as a value it did not take. An objective the candidate reports
+and no fresh sample of the base does cannot be judged: the comparison is ``inconclusive`` until
+the base reports it (never ``better`` on the objectives that could be judged), the base is
+measured again for it (`base_unjudged`), and a comparison whose headline is that objective does
+not exist yet. The verdict is a pure function of the samples held, whatever order they came in. An objective's noise is the task's declared one when it states it
 (`ComparisonPolicy.floor_of`: the objective's own tolerance, else the task's
 ``relative_noise``), else what the samples show, else a stated default; it is never zero, so
 every comparison has a verdict. A close call is a comparison whose every objective is within its
@@ -115,6 +121,7 @@ __all__ = [
     "base_in_flight",
     "base_missing",
     "base_run_stalled",
+    "base_unjudged",
     "claimed_base",
     "close_call",
     "closed_answers",
@@ -392,11 +399,15 @@ def as_answer(
 
 
 def _mean_reading(reading: Reading, samples: tuple[Sample, ...]) -> Reading:
-    """``reading`` stating the mean of ``samples``' readings of its objective, if they all report it."""
-    found = [_reading_of(sample, reading.metric) for sample in samples]
-    if not found or any(item is None for item in found):
+    """``reading`` stating the mean of the readings ``samples`` took of its objective.
+
+    The samples that report it, as the comparison reads them (`compare`): the record states the
+    candidate value the comparison states.
+    """
+    found = [item for sample in samples if (item := _reading_of(sample, reading.metric))]
+    if not found:
         return reading
-    return reading.model_copy(update={"value": _mean(tuple(item.value for item in found if item))})
+    return reading.model_copy(update={"value": _mean(tuple(item.value for item in found))})
 
 
 def _reading_of(sample: Sample, metric: str) -> Reading | None:
@@ -592,16 +603,6 @@ def _direction(
     return dict(policy.directions).get(metric)
 
 
-def _compared_metrics(candidate: tuple[Sample, ...], base: tuple[Sample, ...]) -> tuple[str, ...]:
-    """The objectives every sample of both sides reports, in the candidate's latest reading order."""
-    both = (*candidate, *base)
-    return tuple(
-        item.metric
-        for item in candidate[-1].readings
-        if all(_reading_of(sample, item.metric) is not None for sample in both)
-    )
-
-
 def compare(
     candidate: tuple[Sample, ...],
     base: tuple[Sample, ...],
@@ -612,22 +613,35 @@ def compare(
 ) -> Comparison | None:
     """The candidate's samples compared with the base's on every objective, or None.
 
-    ``anchor`` names the base the samples are compared with. An objective is compared when every
-    sample of both sides reports it and a direction is known for it (the readings' own, else the
-    task's); each is judged by the one statistic (`vs_core._dominance.judge`) under the noise the
-    task declares for it, and the comparison's result is the dominance over them (`dominance`).
-    They cannot be compared when either side is empty or no objective is left to compare.
+    ``anchor`` names the base the samples are compared with. The objectives are those the
+    candidate's latest sample reports, in its reading order, headline first. An objective is
+    judged when a direction is known for it (the readings' own, else the task's) and the base
+    has a run of it: each side's runs are the samples that report it, judged by the one statistic
+    (`vs_core._dominance.judge`) under the noise the task declares for it. An objective the base
+    has no run of cannot be judged and is not dropped: it makes the result ``inconclusive``
+    unless an objective already judged is worse (a regression is decided whatever the rest
+    would say), and when it is the headline there is no comparison yet (None). The result is
+    the dominance over the objectives (`dominance`). They cannot be compared when either side is
+    empty or no objective is left to compare.
     """
     if not candidate or not base:
         return None
     both = (*candidate, *base)
+    latest = candidate[-1].readings
     objectives: list[ObjectiveComparison] = []
-    for metric in _compared_metrics(candidate, base):
+    unjudged = False
+    for index, reported in enumerate(latest):
+        metric = reported.metric
         direction = _direction(metric, both, policy)
         if direction is None:
             continue
         mine = _readings_of(candidate, metric)
         theirs = _readings_of(base, metric)
+        if not theirs:
+            if index == 0:
+                return None
+            unjudged = True
+            continue
         judged = judge(
             Runs.of(tuple(item.value for item in mine)),
             Runs.of(tuple(item.value for item in theirs)),
@@ -648,6 +662,7 @@ def compare(
         )
     if not objectives:
         return None
+    verdicts = [item.verdict for item in objectives]
     last = candidate[-1]
     return Comparison(
         scope=scope,
@@ -655,7 +670,7 @@ def compare(
         candidate_input=last.measured_input,
         base=anchor.commit,
         base_input=anchor.measured_input,
-        verdict=dominance(item.verdict for item in objectives),
+        verdict=dominance([*verdicts, ComparisonVerdict.INCONCLUSIVE] if unjudged else verdicts),
         candidate_samples=len(candidate),
         base_samples=len(base),
         objectives=tuple(objectives),
@@ -1098,25 +1113,56 @@ def base_run_stalled(
     )
 
 
+def base_unjudged(
+    state: EvaluationState, scope: Scope, candidate: Measured, base: Measured, moment: Moment
+) -> bool:
+    """Whether the base lacks an objective the candidate reports, and was last run before it did.
+
+    Such an objective cannot be judged (`compare`): the comparison stays ``inconclusive`` until a
+    base sample reports it. The base samples held may all predate the candidate's, taken by a
+    benchmark that did not yet report the objective, so the base is worth one more run for it.
+    One run answers: a base sample taken at or after the candidate's latest ran under the same
+    benchmark that reported the objective for the candidate, so one that still lacks it means
+    the benchmark does not report it for the base, and the base is not chased. With no fresh
+    sample of the base there is nothing to compare, and `base_missing` asks for that run.
+    """
+    mine = scope_samples(state, scope, candidate)
+    held = fresh(samples_of(state, base), moment)
+    if not mine or not held or max(sample.observed_at for sample in held) >= mine[-1].observed_at:
+        return False
+    reported = {item.metric for sample in held for item in sample.readings}
+    both = (*mine, *held)
+    return any(
+        item.metric not in reported and _direction(item.metric, both, moment.policy) is not None
+        for item in mine[-1].readings
+    )
+
+
 def remeasures_base(
     state: EvaluationState, comparison: Comparison, evaluation: str, moment: Moment
 ) -> bool:
-    """Whether a close call is worth one more run of the base: it narrows the noise.
+    """Whether the base is worth one more run.
 
-    Only while the base holds fewer than `_base_max_samples` fresh samples, no run of it is under
-    way (core's in any scope, or the strategy's own run core claimed), and core's last base run
-    in the scope grew its fresh samples (`base_run_stalled`), so a close call is never chased
-    with base run after base run.
+    A close call earns one, since it narrows the noise, and so does a base that lacks an
+    objective of the candidate's (`base_unjudged`). A close call only while the base holds fewer than `_base_max_samples` fresh samples and
+    core's last base run in the scope grew its fresh samples (`base_run_stalled`), so it is never
+    chased with base run after base run. Either way no run of the base is under way (core's in
+    any scope, or the strategy's own run core claimed).
     """
     base = Measured(evaluation, comparison.base_input)
     held = fresh(samples_of(state, base), moment)
-    return (
+    narrows = (
         close_call(comparison)
         and len(held) < _base_max_samples(comparison, moment.policy)
-        and not _base_under_way(
-            state, BaseRef(commit=comparison.base, measured_input=comparison.base_input), base
-        )
         and not base_run_stalled(state, comparison, evaluation, moment)
+    )
+    return (
+        narrows
+        or base_unjudged(
+            state, comparison.scope, Measured(evaluation, comparison.candidate_input), base, moment
+        )
+    ) and not _base_under_way(
+        state, BaseRef(commit=comparison.base, measured_input=comparison.base_input), base
     )
 
 

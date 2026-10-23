@@ -32,6 +32,7 @@ from .test_measurements import committed, plan, transition
 
 if TYPE_CHECKING:
     import random
+    from collections.abc import Mapping
 
 METRIC = "tok_s"
 FLOOR = 0.02
@@ -124,6 +125,17 @@ def stamped(
     return state.model_copy(update={"run": run})
 
 
+type Reported = float | tuple[core.Reading, ...] | None
+"""What a run reports: the headline's value, or every reading it took (None: none)."""
+
+
+def readings_of(value: Reported) -> tuple[core.Reading, ...]:
+    """The readings of a benchmark record that reports ``value``."""
+    if value is None:
+        return ()
+    return value if isinstance(value, tuple) else (reading(value),)
+
+
 def reading(value: float) -> core.Reading:
     return core.Reading(metric=METRIC, value=value, direction="max", unit="tok/s")
 
@@ -151,7 +163,7 @@ def started_steps(
 def ended_with(
     state: core.CoreState,
     request: core.SubmitMeasurement,
-    value: float | None,
+    value: Reported,
     *,
     reused: core.RequestId | None = None,
     failed: bool = False,
@@ -163,7 +175,7 @@ def ended_with(
 def ended_transition(
     state: core.CoreState,
     request: core.SubmitMeasurement,
-    value: float | None,
+    value: Reported,
     *,
     reused: core.RequestId | None = None,
     failed: bool = False,
@@ -176,7 +188,7 @@ def ended_transition(
 def finished_with(
     state: core.CoreState,
     request: core.SubmitMeasurement,
-    value: float | None,
+    value: Reported,
     *,
     reused: core.RequestId | None = None,
     failed: bool = False,
@@ -188,7 +200,7 @@ def finished_with(
 def finished_transition(
     state: core.CoreState,
     request: core.SubmitMeasurement,
-    value: float | None,
+    value: Reported,
     *,
     reused: core.RequestId | None = None,
     failed: bool = False,
@@ -198,7 +210,7 @@ def finished_transition(
 
 
 def ended_steps(
-    state: core.CoreState, request: core.SubmitMeasurement, value: float | None
+    state: core.CoreState, request: core.SubmitMeasurement, value: Reported
 ) -> tuple[core.Transition, ...]:
     """Every transition `ended_transition` takes, in order."""
     started = started_steps(state, request)
@@ -208,7 +220,7 @@ def ended_steps(
 def finished_steps(
     state: core.CoreState,
     request: core.SubmitMeasurement,
-    value: float | None,
+    value: Reported,
     *,
     reused: core.RequestId | None = None,
     failed: bool = False,
@@ -245,7 +257,7 @@ def finished_steps(
             environment_digest=request.plan.environment_digest,
             provenance="trusted",
             status=status,
-            readings=(reading(value),) if stage == "benchmark" and value is not None else (),
+            readings=readings_of(value) if stage == "benchmark" else (),
             reused_from=reused,
         )
         for stage in ("accuracy", "benchmark")
@@ -327,8 +339,11 @@ class Lab:
         ).state
         return submissions(self.state)[before:]
 
-    def measure(self, values: dict[str, float]) -> None:
-        """End every job still running, at the value its measured input has in ``values``."""
+    def measure(self, values: Mapping[str, Reported | list[Reported]]) -> None:
+        """End every job still running, at the value its measured input has in ``values``.
+
+        A list gives the input's runs one value each, in the order they end.
+        """
         while True:
             running = [
                 request
@@ -341,7 +356,9 @@ class Lab:
             assert request.request_id is not None
             self.ended.add(request.request_id.root)
             assert request.plan.measured_input is not None
-            self.state = ended_with(self.state, request, values[request.plan.measured_input])
+            supply = values[request.plan.measured_input]
+            value = supply.pop(0) if isinstance(supply, list) else supply
+            self.state = ended_with(self.state, request, value)
 
     def advance(self, seconds: float) -> None:
         """Move the run clock on."""
@@ -1269,3 +1286,48 @@ def test_a_measurement_of_an_input_no_agent_evaluated_reaches_the_search_without
     done = ended_transition(lab.state, check, 130.0)
     (finished,) = finished_for_search(lab.state, done)
     assert finished.comparison is None
+
+
+def ttft(value: float) -> core.Reading:
+    return core.Reading(metric="ttft_ms", value=value, direction="min", unit="ms")
+
+
+def test_a_base_that_predates_an_objective_is_measured_once_more_for_it() -> None:
+    """The base's samples report the headline only; a later candidate also reports TTFT.
+
+    TTFT cannot be judged against that base, so the candidate is not called better on the
+    headline alone: the comparison is inconclusive, the base is measured once more (the new
+    sample reports TTFT), and the comparison then judges both objectives. Before, the samples
+    that lacked TTFT hid it from the comparison for as long as they were fresh.
+    """
+    lab = Lab.of("a")
+    lab.call("a", "c1", "input-1")
+    lab.measure({"input-1": 100.0, "base": 100.0})
+    runs = len(lab.baselines())
+    lab.advance(100.0)
+    lab.call("a", "c2", "input-2")
+    lab.measure(
+        {"input-2": (reading(100.0), ttft(20000.0)), "base": (reading(100.0), ttft(35000.0))}
+    )
+
+    (pending, settled) = [c for c in lab.comparisons() if c.candidate_input == "input-2"]
+    assert pending.verdict is core.ComparisonVerdict.INCONCLUSIVE
+    assert [item.metric for item in pending.objectives] == [METRIC]
+    assert settled.verdict is core.ComparisonVerdict.BETTER
+    assert {item.metric for item in settled.objectives} == {METRIC, "ttft_ms"}
+    assert len(lab.baselines()) == runs + 1, "one more run of the base, for the objective it lacked"
+
+
+def test_a_benchmark_that_never_reports_an_objective_for_the_base_is_not_chased() -> None:
+    """The extra base run reports no TTFT either: the comparison stays inconclusive, honestly."""
+    lab = Lab.of("a")
+    lab.call("a", "c1", "input-1")
+    lab.measure({"input-1": 100.0, "base": 100.0})
+    runs = len(lab.baselines())
+    lab.advance(100.0)
+    lab.call("a", "c2", "input-2")
+    lab.measure({"input-2": (reading(100.0), ttft(20000.0)), "base": 100.0})
+
+    held = [c for c in lab.comparisons() if c.candidate_input == "input-2"]
+    assert len(lab.baselines()) == runs + 1
+    assert held[-1].verdict is core.ComparisonVerdict.INCONCLUSIVE
