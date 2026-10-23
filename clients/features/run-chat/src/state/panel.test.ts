@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import type {HarnessListing} from '@vibesys/ipc';
 import {checkMachine} from '@vibesys/machine/testing';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
 import {effectiveHarness, type PanelMachineEvent, panelMachine} from './panel.js';
 
@@ -170,4 +171,26 @@ describe('panelMachine', () => {
       },
     });
   });
+});
+
+test('only close and toggle hide the panel, whatever else the user does or the operations report', () => {
+  const events: readonly PanelMachineEvent[] = [
+    {type: 'new-chat'},
+    {type: 'choose-thread', id: 'a'},
+    {type: 'choose-thread', id: 'b'},
+    {type: 'set-composer', text: 'why?'},
+    {type: 'submit', requestId: 'request-1', threadId: null},
+    {type: 'submit', requestId: 'request-2', threadId: 'a'},
+    {type: 'new-steer'},
+    {type: 'toggle-list'},
+    {type: 'toggle-picker'},
+  ];
+  for (const seed of SEEDS) {
+    const random = new Seeded(seed);
+    let snapshot = step(opened(), {type: 'open'});
+    for (let index = 0; index < 40; index++) {
+      snapshot = step(snapshot, random.pick(events));
+      expect(snapshot.value).toMatchObject({visibility: 'open'});
+    }
+  }
 });

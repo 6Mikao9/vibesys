@@ -4,11 +4,12 @@ import {
   type ChatServicePorts,
   chatService,
   useChatThreads,
+  useSteerDeliveries,
 } from '@vibesys/feature-run-sessions/renderer';
 import {sessionCore} from '@vibesys/feature-run-sessions/state';
 import {newRequestId} from '@vibesys/request-identity';
 import type {CoreState} from '@vibesys/run-state';
-import {chatControlIntent, type HarnessOption} from '@vibesys/runs/chat';
+import {chatControlIntent, createdSession, type HarnessOption} from '@vibesys/runs/chat';
 import {addressedIntent, runReference} from '@vibesys/runs/intents';
 import {Button, Stack, Text} from '@vibesys/ui';
 import {useEffect, useMemo} from 'react';
@@ -36,8 +37,8 @@ function useLifetime(owner: object): AbortController {
   return lifetime.controller;
 }
 
-/** Compose the existing chat UI with protobuf gateway operations and session records. */
-export function useGatewayChat(
+/** The chat's state over the gateway: the panel's host, and what its thread history says. */
+export function useGatewayChatState(
   input: ChatServicePorts & {core: CoreState | null; epoch: bigint; readOnly: boolean},
 ) {
   const ports = useMemo<ChatServicePorts>(
@@ -52,6 +53,7 @@ export function useGatewayChat(
   );
   const service = useMemo(() => chatService(ports), [ports]);
   const threads = useChatThreads(ports, input.projectRoot !== '');
+  const steers = useSteerDeliveries(ports, input.projectRoot !== '');
   const lifetime = useLifetime(ports);
   const chatPorts: RunChatPorts = {
     harnesses: async () => ({
@@ -63,6 +65,7 @@ export function useGatewayChat(
         const choice = harness ?? (input.core ? runHarness(input.core) : null);
         if (!choice) return {ok: false, message: 'Choose a harness and model'};
         const threadId = await service.create(`thread-${requestId}`, choice, signal);
+        threads.created(createdSession(threadId, choice));
         threads.refresh();
         return {ok: true, threadId};
       } catch (error) {
@@ -95,7 +98,9 @@ export function useGatewayChat(
     },
     newControlId: newRequestId,
   };
-  const core = input.core ? sessionCore(input.core, threads.context) : null;
+  const core = input.core
+    ? {...sessionCore(input.core, threads.context), steerDeliveries: steers}
+    : null;
   const chat = useRunChat({
     identity: `${input.host}/${input.runId}`,
     core,
@@ -108,7 +113,18 @@ export function useGatewayChat(
   }, [chat.open, threads.refresh]);
   const shown = chat.open ? (chat.panel?.shown ?? null) : null;
   useEffect(() => threads.select(shown), [shown, threads.select]);
-  const error = threads.context?.historyError ?? threads.context?.listError;
+  return {
+    chat,
+    error: threads.context?.historyError ?? threads.context?.listError ?? null,
+    reload: threads.reload,
+  };
+}
+
+/** Compose the existing chat UI with protobuf gateway operations and session records. */
+export function useGatewayChat(
+  input: ChatServicePorts & {core: CoreState | null; epoch: bigint; readOnly: boolean},
+) {
+  const {chat, error, reload} = useGatewayChatState(input);
   return {
     ...chat,
     panel: chat.panel ? (
@@ -118,7 +134,7 @@ export function useGatewayChat(
             <Text tone="err" title={error}>
               Unavailable
             </Text>
-            <Button text="Retry history" press={threads.reload} />
+            <Button text="Retry history" press={reload} />
           </Stack>
         ) : null}
         <ChatPanel {...chat.panel} />

@@ -5,6 +5,8 @@ import {type ChatHistory, emptyHistory} from './fold.js';
 
 export interface ThreadsContext {
   readonly sessions: readonly ChatSessionCreated[];
+  /** Threads this client created: a listing that was already in flight cannot take them back. */
+  readonly created: readonly ChatSessionCreated[];
   readonly histories: Readonly<Record<string, ChatHistory>>;
   readonly selected: string | null;
   readonly listError: string | null;
@@ -13,6 +15,7 @@ export interface ThreadsContext {
 export type ThreadsEvent =
   | {readonly type: 'reload'}
   | {readonly type: 'refresh'}
+  | {readonly type: 'created'; readonly session: ChatSessionCreated}
   | {readonly type: 'select'; readonly id: string | null}
   | {
       readonly type: 'history';
@@ -20,6 +23,12 @@ export type ThreadsEvent =
       readonly history: ChatHistory;
       readonly error: string | null;
     };
+
+/** Every thread the run is known to have: the listing, then those created here it has not caught up with. */
+export function knownSessions(context: ThreadsContext): readonly ChatSessionCreated[] {
+  const listed = new Set(context.sessions.map(session => session.id));
+  return [...context.sessions, ...context.created.filter(session => !listed.has(session.id))];
+}
 
 /** Metadata discovery and the selected session have independently owned lifetimes. */
 export const threadsMachine = setup({
@@ -32,9 +41,19 @@ export const threadsMachine = setup({
   },
   delays: {deadline: 15000},
 }).createMachine({
-  context: {sessions: [], histories: {}, selected: null, listError: null, historyError: null},
+  context: {
+    sessions: [],
+    created: [],
+    histories: {},
+    selected: null,
+    listError: null,
+    historyError: null,
+  },
   type: 'parallel',
   on: {
+    created: {
+      actions: assign(({context, event}) => ({created: [...context.created, event.session]})),
+    },
     history: {
       guard: ({context, event}) => event.id === context.selected,
       actions: assign(({context, event}) => ({

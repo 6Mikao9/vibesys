@@ -1,3 +1,4 @@
+import type {ChatSessionCreated} from '@vibesys/runs/chat';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
 import type {threadsMachine} from '../../state/index.js';
@@ -24,9 +25,13 @@ export function useChatThreads(ports: ChatServicePorts, enabled: boolean) {
     [],
   );
   const refresh = useCallback(() => current.current?.send({type: 'refresh'}), []);
+  const created = useCallback(
+    (session: ChatSessionCreated) => current.current?.send({type: 'created', session}),
+    [],
+  );
   const reload = useCallback(() => {
     current.current?.send({type: 'refresh'});
     current.current?.send({type: 'reload'});
   }, []);
-  return {context: snapshot?.context, select, refresh, reload};
+  return {context: snapshot?.context, select, refresh, created, reload};
 }

@@ -166,27 +166,6 @@ export const panelMachine = setup({
     'set-harness': {
       actions: assign(({event}) => ({harness: event.harness, pickerOpen: false, uncertain: null})),
     },
-    'choose-thread': {
-      target: '.chat.idle',
-      actions: assign(({event}) => ({
-        choice: {kind: 'thread', id: event.id},
-        pending: null,
-        uncertain: null,
-        listOpen: false,
-        pickerOpen: false,
-      })),
-    },
-    'new-chat': {
-      target: '.chat.idle',
-      actions: assign(() => ({
-        choice: {kind: 'new'},
-        pending: null,
-        uncertain: null,
-        composer: '',
-        listOpen: false,
-        pickerOpen: false,
-      })),
-    },
   },
   states: {
     visibility: {
@@ -216,6 +195,30 @@ export const panelMachine = setup({
     },
     chat: {
       initial: 'idle',
+      /** Leaving a thread for another, or for a new chat, drops the question in flight; the panel stays. */
+      on: {
+        'choose-thread': {
+          target: '.idle',
+          actions: assign(({event}) => ({
+            choice: {kind: 'thread', id: event.id},
+            pending: null,
+            uncertain: null,
+            listOpen: false,
+            pickerOpen: false,
+          })),
+        },
+        'new-chat': {
+          target: '.idle',
+          actions: assign(() => ({
+            choice: {kind: 'new'},
+            pending: null,
+            uncertain: null,
+            composer: '',
+            listOpen: false,
+            pickerOpen: false,
+          })),
+        },
+      },
       states: {
         idle: {
           on: {

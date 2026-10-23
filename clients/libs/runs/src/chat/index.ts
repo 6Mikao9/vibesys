@@ -2,10 +2,12 @@
 import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {getTextEncoding} from '@bufbuild/protobuf/wire';
 import {
+  AgentTurnAttrsSchema,
   type ChatMessageRequest,
   ChatMessageRequestSchema,
   type ChatMessageResponse,
   type ChatSessionCreated,
+  ChatSessionCreatedSchema,
   type ChatSteerProposed,
   type CreateChatSessionRequest,
   GetBlobsRequestSchema,
@@ -35,7 +37,22 @@ export type {
   ChatSteerProposed,
   Record,
 } from '@vibesys/proto';
-export {ChatRole, SteerMode, SteerTargetKind} from '@vibesys/proto';
+export {
+  ChatRole,
+  IntentAction,
+  type IntentState,
+  IntentStep,
+  SteerMode,
+  SteerTargetKind,
+} from '@vibesys/proto';
+
+/** The role of the agent turn a span label describes; null for any other span. */
+export function turnRole(
+  attrs: {readonly typeUrl: string; readonly value: Uint8Array} | undefined,
+): string | null {
+  if (attrs?.typeUrl.split('/').at(-1) !== AgentTurnAttrsSchema.typeName) return null;
+  return fromBinary(AgentTurnAttrsSchema, attrs.value).role || null;
+}
 
 /** The wire enum for a steer's UI-facing mode name; an unnamed mode is the next turn. */
 export function steerModeOf(mode: string | undefined): SteerMode {
@@ -190,6 +207,13 @@ export type {ChatSessionCreated, CreateChatSessionRequest, HarnessOption} from '
 export const CHAT_SESSIONS_METHOD = `/${HostService.typeName}/${HostService.method.listChatSessions.name}`;
 export const CHAT_CATALOG_METHOD = `/${HostService.typeName}/${HostService.method.read.name}`;
 
+/** The metadata of a session this client just created, before discovery lists it. */
+export function createdSession(
+  id: string,
+  harness: {readonly provider: string; readonly model: string},
+): ChatSessionCreated {
+  return create(ChatSessionCreatedSchema, {id, provider: harness.provider, model: harness.model});
+}
 export function sessionListRequest(runId: string): Uint8Array {
   return toBinary(ListChatSessionsRequestSchema, create(ListChatSessionsRequestSchema, {runId}));
 }

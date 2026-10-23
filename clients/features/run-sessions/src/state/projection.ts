@@ -1,10 +1,10 @@
 import type {CoreState} from '@vibesys/run-state';
 import {SteerMode, SteerTargetKind} from '@vibesys/runs/chat';
-import type {ThreadsContext} from './threads.js';
+import {knownSessions, type ThreadsContext} from './threads.js';
 
 /** Session records project into the transport-neutral chat view consumed by the Run UI. */
 export function sessionCore(core: CoreState, context: ThreadsContext | undefined): CoreState {
-  const sessions = context?.sessions ?? [];
+  const sessions = context ? knownSessions(context) : [];
   const histories = context?.histories ?? {};
   const transcripts = Object.fromEntries(
     sessions.map(session => [
