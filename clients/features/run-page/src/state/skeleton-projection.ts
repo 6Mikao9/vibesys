@@ -47,6 +47,7 @@ export function projectSkeleton(
   );
   return {
     headline: readHeadline(options.head, seq),
+    input: reading.input,
     at: Number(seq),
     trace: {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)},
     overview: reading.overview,

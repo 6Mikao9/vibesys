@@ -13,7 +13,7 @@ import {
 import type {CoreState} from '../state.js';
 import {skeletonCore} from './core.js';
 import {baselineFacts, capacityIntervals, comparisonFacts, inputFailures} from './facts.js';
-import {measuredSpans} from './readings.js';
+import {inputMeasurement, measuredSpans} from './readings.js';
 import {screenSpans} from './spans.js';
 import {type StartupStep, startupSteps} from './startup.js';
 import type {SkeletonContent, StoreHistory, StoreView} from './types.js';
@@ -49,6 +49,8 @@ export interface SkeletonReading {
   readonly comparisons: ReturnType<typeof comparisonFacts>;
   readonly baselines: ReturnType<typeof baselineFacts>;
   readonly pauses: ReturnType<typeof capacityIntervals>;
+  /** The input's measured value of the objective metric, apart from any idea's measurement. */
+  readonly input: number | null;
   readonly inputFailures: ReturnType<typeof inputFailures>;
   readonly startup: readonly StartupStep[];
   readonly streams: readonly LogStream[];
@@ -161,6 +163,7 @@ export function readSkeleton(
     comparisons: comparisonFacts(view),
     baselines: baselineFacts(view),
     pauses: capacityIntervals(view),
+    input: inputMeasurement(spans, view),
     inputFailures: inputFailures(skeleton, view),
     startup: startupSteps(skeleton, view.seq),
     latest: times.reduce<number | null>(

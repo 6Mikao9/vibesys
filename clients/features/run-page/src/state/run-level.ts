@@ -89,8 +89,9 @@ function bestCandidate(model: RunModel): Candidate | null {
   return model.candidates.candidates.find(item => item.id === id) ?? null;
 }
 
+/** The input's value: an idea's measurement carries it, else the input gate's own reading. */
 function inputValue(model: RunModel): number | null {
-  return inputValueOf(model.candidates.candidates);
+  return inputValueOf(model.candidates.candidates) ?? model.input ?? null;
 }
 
 /** Within this of 1 the best reads as the same as the input. */
@@ -239,7 +240,8 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
   const input =
     all
       .flatMap(item => item.measurement?.inputReadings ?? [])
-      .find(reading => reading.name === axis.name)?.value ?? null;
+      .find(reading => reading.name === axis.name)?.value ??
+    (axis.name === model.overview?.objective.metric ? (model.input ?? null) : null);
   const unit =
     all
       .flatMap(item => [

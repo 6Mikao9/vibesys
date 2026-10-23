@@ -56,6 +56,11 @@ function sameFacts(a: RunFacts, b: RunFacts): boolean {
 
 /** The run at one sequence. */
 export interface RunModel {
+  /**
+   * The input's measured value of the objective metric, read from the input gate itself: known
+   * before any idea is measured, when no idea's measurement carries it.
+   */
+  readonly input?: number | null;
   /** The writer's headline at exactly this committed prefix, when available. */
   readonly headline?: HeadlineReading | undefined;
   /** The sequence shown; null at the live end. */

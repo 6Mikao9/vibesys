@@ -5,15 +5,27 @@
  */
 
 import {afterAll, beforeAll, expect, test} from 'bun:test';
-import {clone, fromBinary} from '@bufbuild/protobuf';
+import {clone, create, fromBinary} from '@bufbuild/protobuf';
 import {anyPack} from '@bufbuild/protobuf/wkt';
-import {GateAttrsSchema, GateSubject, RecordSchema} from '@vibesys/proto';
+import {
+  Change,
+  GateAttrsSchema,
+  GateStage,
+  GateSubject,
+  RecordSchema,
+  type RunHead,
+  RunHeadSchema,
+  RuntimeType,
+  SpanStatus,
+} from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {foldSkeleton, seedSkeleton} from '@vibesys/run-skeleton';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
+  heroView,
+  objectivesOf,
   projectSkeleton,
   RUN_ROUTE,
   runPageInitial,
@@ -50,9 +62,13 @@ const SEED = {
 };
 
 /** What the page shows for `records`: the real projection into the real Run screen. */
-async function rendered(records: ReturnType<typeof storeRunFixture>['records']) {
+async function rendered(
+  records: ReturnType<typeof storeRunFixture>['records'],
+  head?: (through: bigint) => RunHead,
+) {
   const skeleton = foldSkeleton(seedSkeleton(), records);
-  const whole = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n);
+  const through = skeleton.throughSeq ?? 0n;
+  const whole = projectSkeleton(skeleton, through, '', head ? {head: head(through)} : {});
   const state = skeletonScreenState(SEED, skeleton, whole, runPageInitial(SEED));
   const container = document.createElement('div');
   document.body.append(container);
@@ -74,6 +90,8 @@ async function rendered(records: ReturnType<typeof storeRunFixture>['records']) 
     sparklines: container.querySelectorAll('.vs-spark-line').length,
     charts: container.querySelectorAll('.vs-chart').length,
     points: skeleton.metrics.reduce((sum, series) => sum + series.points.length, 0),
+    // Whether the tile claims a measured value: what it shows, the chart must draw from too.
+    tileValue: heroView(whole, objectivesOf(whole)).tiles.some(tile => tile.figure !== '\u2013'),
   };
   await act(async () => root.unmount());
   container.remove();
@@ -93,6 +111,76 @@ function inputOnly(records: ReturnType<typeof storeRunFixture>['records']) {
     return copy;
   });
 }
+
+/** The history with the input measured by a gate of its own, before any idea: no idea carries it. */
+function withStandaloneInput(
+  records: ReturnType<typeof storeRunFixture>['records'],
+  value: number,
+) {
+  const gate = create(RecordSchema, {
+    epoch: 1,
+    body: {
+      case: 'span',
+      value: {
+        change: Change.ENDED,
+        span: {
+          id: 'input-gate',
+          runtimeType: RuntimeType.OPERATION,
+          name: 'Benchmark',
+          status: SpanStatus.DONE,
+          startedAt: 0,
+          endedAt: 1,
+          label: {
+            kind: 'gate',
+            title: 'Benchmark',
+            verdict: 'passed',
+            attrs: anyPack(
+              GateAttrsSchema,
+              create(GateAttrsSchema, {stage: GateStage.BENCHMARK, subject: GateSubject.INPUT}),
+            ),
+          },
+        },
+      },
+    },
+  });
+  const point = create(RecordSchema, {
+    epoch: 1,
+    body: {case: 'metric', value: {series: 'throughput', span: 'input-gate', value, clock: 1}},
+  });
+  return [...records.slice(0, 2), gate, point, ...records.slice(2)].map((record, index) =>
+    create(RecordSchema, {...record, seq: BigInt(index + 1)}),
+  );
+}
+
+test('the tile, the sparkline and the chart read one source, whoever measured the input', async () => {
+  for (const count of [0, 1, 3]) {
+    const made = storeRunFixture('short', count, 1).records;
+    for (const withHead of [false, true]) {
+      const records = withStandaloneInput(made, 100);
+      for (let length = 4; length <= records.length; length += 3) {
+        const head = withHead
+          ? (through: bigint): RunHead =>
+              create(RunHeadSchema, {
+                committedSeq: through,
+                objective: {
+                  series: {name: 'throughput', unit: 'ops/s'},
+                  bestValue: 100,
+                  inputValue: 100,
+                },
+              })
+          : undefined;
+        const drawn = await rendered(records.slice(0, length), head);
+        const label = `${count} ideas, ${length} records, head ${withHead}`;
+        // Every measured point is drawn, and a tile that shows a value never stands alone.
+        expect(drawn.points, label).toBeGreaterThan(0);
+        expect(drawn.sparklines, `sparkline: ${label}`).toBeGreaterThan(0);
+        expect(drawn.charts, `chart: ${label}`).toBeGreaterThan(0);
+        if (drawn.tileValue)
+          expect(drawn.charts, `tile without chart: ${label}`).toBeGreaterThan(0);
+      }
+    }
+  }
+});
 
 test('the sparkline and the chart are drawn iff the history holds a measured point', async () => {
   for (const kind of ['short', 'live', 'facts'] as const) {
