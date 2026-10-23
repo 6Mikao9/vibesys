@@ -1123,18 +1123,31 @@ def test_a_log_of_an_older_projection_is_rebuilt_once_and_the_reason_is_named(
     journal.close()
     directory = Project.log_directory_for(project.root, "run-1")
     os.utime(directory / "core-events.jsonl", (100, 100))
-    kwargs = {
-        "clock": ManualClock(start=1000),
-        "threads": SimThreads(),
-        "install_sync": FakeFileSync(),
-    }
-    assert convert_run(project, "run-1", **kwargs).status is ConversionStatus.CONVERTED
+    assert (
+        convert_run(
+            project,
+            "run-1",
+            clock=ManualClock(start=1000),
+            threads=SimThreads(),
+            install_sync=FakeFileSync(),
+        ).status
+        is ConversionStatus.CONVERTED
+    )
     receipt = directory / "run.conversion-source.pb"
     current = RunConversionReceipt.from_binary(receipt.read_bytes())
     # The same projection and the same journal: nothing is written, however often it is asked.
     settled = {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()}
     for _ in range(3):
-        assert convert_run(project, "run-1", **kwargs).status is ConversionStatus.EXISTS
+        assert (
+            convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(start=1000),
+                threads=SimThreads(),
+                install_sync=FakeFileSync(),
+            ).status
+            is ConversionStatus.EXISTS
+        )
     assert {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()} == settled
     # A receipt of an older projection rebuilds the log, once, and says which projection moved.
     older = RunConversionReceipt(
@@ -1143,13 +1156,28 @@ def test_a_log_of_an_older_projection_is_rebuilt_once_and_the_reason_is_named(
         projection_version=current.projection_version - 1,
     )
     receipt.write_bytes(older.to_binary())
-    rebuilt = convert_run(project, "run-1", **kwargs)
+    rebuilt = convert_run(
+        project,
+        "run-1",
+        clock=ManualClock(start=1000),
+        threads=SimThreads(),
+        install_sync=FakeFileSync(),
+    )
     assert rebuilt.status is ConversionStatus.CONVERTED
     assert (
         f"rebuilt: projection {older.projection_version} to {current.projection_version}"
         in rebuilt.reason
     )
-    assert convert_run(project, "run-1", **kwargs).status is ConversionStatus.EXISTS
+    assert (
+        convert_run(
+            project,
+            "run-1",
+            clock=ManualClock(start=1000),
+            threads=SimThreads(),
+            install_sync=FakeFileSync(),
+        ).status
+        is ConversionStatus.EXISTS
+    )
 
 
 @pytest.mark.parametrize("kind", ["empty", "pretrace", "broken", "unsupported"])
@@ -1172,15 +1200,16 @@ def test_a_journal_that_cannot_convert_says_why_instead_of_pending(
     )
     os.utime(source, (100, 100))
     assert observe_conversion(project, "run-1").detail == "History conversion pending"
-    kwargs = {
-        "clock": ManualClock(start=1000),
-        "threads": SimThreads(),
-        "install_sync": FakeFileSync(),
-    }
 
     def convert() -> ConversionStatus | None:
         try:
-            return convert_run(project, "run-1", **kwargs).status
+            return convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(start=1000),
+                threads=SimThreads(),
+                install_sync=FakeFileSync(),
+            ).status
         except ValueError:
             return None  # a malformed journal is a failure the bulk pass reports
 
