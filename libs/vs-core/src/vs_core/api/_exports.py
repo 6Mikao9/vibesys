@@ -91,6 +91,12 @@ def _load_continuations() -> dict[str, object]:
     return {"SuspensionRefusal": SuspensionRefusal}
 
 
+def _load_executor_lifetime() -> dict[str, object]:
+    from vs_core._executor_lifetime import ExecutorLifetime, executor_lifetime
+
+    return {"ExecutorLifetime": ExecutorLifetime, "executor_lifetime": executor_lifetime}
+
+
 def _load_corevalue() -> dict[str, object]:
     from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue
 
@@ -1843,6 +1849,7 @@ EXPORT_MODULES: dict[str, Callable[[], dict[str, object]]] = {
     "vs_core._dominance": _load_dominance,
     "vs_core._envelope_migrations": _load_envelope_migrations,
     "vs_core._evidence_views": _load_evidence_views,
+    "vs_core._executor_lifetime": _load_executor_lifetime,
     "vs_core._host_epochs": _load_host_epochs,
     "vs_core._ids": _load_ids,
     "vs_core._ledger_compaction": _load_ledger_compaction,

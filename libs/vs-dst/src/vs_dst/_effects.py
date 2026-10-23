@@ -3,6 +3,14 @@
 A host that dies loses its memory; the effects it caused do not go away. `RecoverableExecutors`
 seal what each request's effect did, so a restarted host that inspects a request learns its
 result instead of running the effect again.
+
+An executor that is the host instance itself (`executor_lifetime`: an agent session and its
+turns) leaves nothing but its receipts when the instance dies. Its provider process, the turn it
+had in flight and the open session are gone, and a result that was not final when the executor
+returned it (an answer it could not give) is never sealed. Such a request is begun and never
+sealed, which is what the production store reports of it (`BegunUnsealed`): a restarted executor
+can say only that the effect may have run. Every other executor's effect is durable, so what it
+answered is what a restart finds.
 """
 
 from __future__ import annotations
@@ -13,15 +21,17 @@ from typing import TYPE_CHECKING
 from vs_core.api import (
     ContractError,
     EventId,
+    ExecutorLifetime,
     InspectRequest,
     Observation,
     ObservationStatus,
     ReissueProof,
     RequestObserved,
     TargetObservation,
+    executor_lifetime,
 )
 from vs_core.api.testing import Succeeded
-from vs_runtime.api.core import ExecutionResult
+from vs_runtime.api.core import ExecutionResult, Settled, settle
 from vs_runtime.api.testing import ScriptedExecutors
 
 if TYPE_CHECKING:
@@ -40,7 +50,10 @@ class Effects:
     """What the executors' world did, kept across restarts of the host."""
 
     sealed: dict[str, ExecutionResult] = field(default_factory=dict)
-    """The result each request's effect left behind: what a restarted host inspects."""
+    """The final result each request's effect left behind: what a restarted host inspects."""
+    begun: set[str] = field(default_factory=set)
+    """Requests of an instance-bound executor whose effect may have run: begun before the
+    effect, sealed only for a final result."""
     executed: list[str] = field(default_factory=list)
     """Requests whose effect ran, in order; a request in it twice ran twice."""
     sequences: dict[str, int] = field(default_factory=dict)
@@ -88,9 +101,16 @@ class RecoverableExecutors(ScriptedExecutors):
         if request.request_id is None:
             raise ContractError(("request_id",), "a dispatched request carries its identity")
         identity = request.request_id.root
-        self._effects.executed.append(identity)
+        if identity in self._effects.sealed:
+            return self._effects.sealed[identity]  # a sealed result is replayed, never recomputed
+        if identity not in self._effects.begun:
+            self._effects.begun.add(identity)  # durable before the effect
+            self._effects.executed.append(identity)
         result = await self._enacted(request, await super().execute(request, context))
-        self._effects.sealed[identity] = result
+        if executor_lifetime(request) is ExecutorLifetime.DURABLE or isinstance(
+            settle(result), Settled
+        ):
+            self._effects.sealed[identity] = result
         return result
 
     async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
@@ -105,7 +125,12 @@ class RecoverableExecutors(ScriptedExecutors):
         )
 
     def _inspect(self, request: InspectRequest, context: ExecutionContext) -> ExecutionResult:
-        """What a restarted host learns of a request: its sealed result, or that it never ran."""
+        """What a restarted host learns of a request: sealed, begun and never sealed, or never run.
+
+        Begun without a seal is what the production store reports (`BegunUnsealed`): the effect
+        may have run, so the answer is Unknown, with the proof that lets core send the request
+        again to resume it.
+        """
         target = request.target
         sealed = self._effects.sealed.get(target.root)
         owner_events: tuple[OwnerEvent, ...] = ()
@@ -113,6 +138,7 @@ class RecoverableExecutors(ScriptedExecutors):
             facts = self._target(sealed.observation)
             owner_events = sealed.owner_events
         else:
+            began = target.root in self._effects.begun
             sequence = self._next(target.root)
             # An effect that never started holds nothing: there is nothing left to release.
             observation = Observation(
@@ -122,13 +148,17 @@ class RecoverableExecutors(ScriptedExecutors):
                 admission_id=request.admission_id,
                 sequence=sequence,
                 observed_at=context.now_at,
-                status=ObservationStatus.REJECTED,
+                status=ObservationStatus.UNKNOWN if began else ObservationStatus.REJECTED,
                 accepted=False,
-                terminal=True,
-                released=True,
-                children_complete=True,
+                terminal=not began,
+                released=not began,
+                children_complete=not began,
+                diagnostic="the effect began and has no recorded result" if began else "",
             )
-            facts = TargetObservation(observation=observation, reissue=ReissueProof.NEVER_BEGAN)
+            facts = TargetObservation(
+                observation=observation,
+                reissue=ReissueProof.BEGUN_UNSEALED if began else ReissueProof.NEVER_BEGAN,
+            )
         own = self._observed(request, Succeeded(), context.now_at)
         return ExecutionResult(
             observation=own.model_copy(update={"target": facts}), owner_events=owner_events

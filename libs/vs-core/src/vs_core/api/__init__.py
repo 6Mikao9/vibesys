@@ -60,6 +60,7 @@ if TYPE_CHECKING:
         trusted_keys,
         turn_candidate,
     )
+    from vs_core._executor_lifetime import ExecutorLifetime, executor_lifetime
     from vs_core._host_epochs import downtime
     from vs_core._ids import (
         IdScheme,
@@ -830,6 +831,7 @@ _MODULES: dict[str, str] = {
                 "ledger_refs trusted_keys turn_candidate "
             ),
         ),
+        ("vs_core._executor_lifetime", ("ExecutorLifetime executor_lifetime ")),
         ("vs_core._host_epochs", ("downtime ")),
         (
             "vs_core._ids",
@@ -1374,6 +1376,7 @@ __all__ = [
     "EvidenceRequirements",
     "Exchanges",
     "ExecuteRegisteredOperation",
+    "ExecutorLifetime",
     "ExportPatchBase",
     "Failed",
     "FailureKind",
@@ -1823,6 +1826,7 @@ __all__ = [
     "escalate_stop",
     "evaluation_of",
     "evidence_view",
+    "executor_lifetime",
     "flow",
     "held_limit",
     "hours",

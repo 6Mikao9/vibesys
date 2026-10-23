@@ -24,7 +24,9 @@ from vs_core.api import (
     ControlInput,
     DiscardWorkspace,
     DispatchTurn,
+    EnsureSession,
     EnsureWorkspace,
+    ExecutorLifetime,
     ResumeSessionTurn,
     RetainRevision,
     RevisionRef,
@@ -32,6 +34,7 @@ from vs_core.api import (
     SnapshotAndRetain,
     StopMode,
     SubmitMeasurement,
+    executor_lifetime,
 )
 from vs_core.api.testing import Failed, Succeeded, Unknown
 from vs_dst.api import Effects, RecoverableExecutors
@@ -82,6 +85,10 @@ class Fault(StrEnum):
     INFRASTRUCTURE = "infrastructure"
     PROVIDER = "provider"
     """The agent provider errors: the next turns never answer and the first cancel of one hangs."""
+    WEDGED_STOP = "wedged-stop"
+    """The agent provider wedges and the host is stopped: every turn, cancel and close stays
+    unanswered until the host is killed ``grace`` durable points later, so its stop leaves them
+    begun and never sealed."""
 
 
 PROVIDER_OUTAGE = 2
@@ -96,7 +103,7 @@ class Point(StrEnum):
 class DurableStore(FakeStateStore):
     """Commit faults use the common FaultPlan; stalls advance only virtual time."""
 
-    def __init__(self, fault: Fault, at: int, boundary: Point) -> None:
+    def __init__(self, fault: Fault, at: int, boundary: Point, grace: int) -> None:
         super().__init__()
         self.at = at
         self.boundary = boundary
@@ -109,6 +116,7 @@ class DurableStore(FakeStateStore):
         self.refusing = False
         self.outage = 0
         self.hung_cancels = 0
+        self.wedged = False
         self.gate = FaultGate(
             FaultPlan(
                 seed=at,
@@ -116,11 +124,13 @@ class DurableStore(FakeStateStore):
                     FaultRule(
                         boundary=Boundary.DURABLE_WRITE,
                         target=boundary.value,
-                        at=at,
+                        # A stopped host that the provider wedged is killed ``grace`` durable
+                        # points after its stop, as an operator kills one that outlasts its grace.
+                        at=at + grace if fault is Fault.WEDGED_STOP else at,
                         fault=HostFault.CRASH_AFTER,
                     ),
                 )
-                if fault in (Fault.CRASH, Fault.ROLLBACK)
+                if fault in (Fault.CRASH, Fault.ROLLBACK, Fault.WEDGED_STOP)
                 else (),
             )
         )
@@ -155,6 +165,8 @@ class DurableStore(FakeStateStore):
             self.refusing = True
         elif self.fault is Fault.PROVIDER:
             self.outage, self.hung_cancels = PROVIDER_OUTAGE, 1
+        elif self.fault is Fault.WEDGED_STOP:
+            self.stopping = self.wedged = True
 
     def provider_silence(self, request: Request) -> Unknown | None:
         """Silence for an agent call the outage swallows: no reply ever arrives.
@@ -162,6 +174,12 @@ class DurableStore(FakeStateStore):
         Core ends a swallowed turn at its limit, cancels it and asks again as the role says;
         the same outage hangs the first cancellation of a lost turn.
         """
+        if (
+            self.wedged
+            and executor_lifetime(request) is ExecutorLifetime.INSTANCE
+            and not isinstance(request, EnsureSession)
+        ):
+            return Unknown()
         if isinstance(request, DispatchTurn | ResumeSessionTurn) and self.outage:
             self.outage -= 1
             return Unknown()
@@ -213,11 +231,12 @@ class ResumeWorld:
         fault: Fault,
         at: int,
         boundary: Point = Point.COMMIT,
+        grace: int = 0,
     ) -> None:
         root.mkdir()
         (root / "candidate.py").write_text("VALUE = 1\n")
         self.git = FakeGitRepositories()
-        self.store = DurableStore(fault, at, boundary)
+        self.store = DurableStore(fault, at, boundary, grace)
         self.effects = Effects()
         self.delivery = FakePublicationDelivery()
         self.rounds = 1
@@ -262,6 +281,9 @@ class ResumeWorld:
         return OrchestrationDescriptor(id="dynamic", config_version=1, options=options)
 
     def open(self, *, resume: bool) -> ProjectRunResources:
+        if resume:
+            # The host that stopped is dead: its provider, and a signal it had not yet seen, with it.
+            self.store.wedged = self.store.stopping = False
         requested = (
             self.descriptor(self.rounds + self.extra, self.resume_width, self.resume_backlog)
             if resume
