@@ -1,7 +1,10 @@
 /** Held-reply scheduling shared by host-generation sequences and cross-process seam simulations. */
 import {Seeded} from '@vibesys/store/testing';
 
-/** A request stays owned by its caller even when a reply is delivered after cancellation. */
+/**
+ * A request's reply, held until the test releases it. As a real call does, it rejects with the
+ * signal's reason when the caller cancels, and an answer that comes after that is dropped.
+ */
 export class HeldReply<T> {
   readonly reply: Promise<T>;
   answered = false;
@@ -17,6 +20,11 @@ export class HeldReply<T> {
     });
     this.#resolve = resolve;
     this.#reject = reject;
+    const cancel = (): void => reject(signal.reason ?? new Error('cancelled'));
+    if (signal.aborted) cancel();
+    else signal.addEventListener('abort', cancel, {once: true});
+    // The caller owns the rejection; a reply nobody awaits must not fail the process.
+    this.reply.catch(() => {});
   }
 
   answer(value: T): void {

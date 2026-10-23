@@ -1,6 +1,6 @@
 import {expect, test} from 'bun:test';
 import {FakeClock} from '@vibesys/transport/testing';
-import {Schedule} from './schedule.js';
+import {HeldReply, Schedule} from './schedule.js';
 
 test('a world with nothing left to deliver or fire fails with its seed instead of waiting', async () => {
   const schedule = new Schedule(23);
@@ -37,4 +37,21 @@ test('a finite chain of deliveries and timers ends quiet, in every seeded order'
     expect(seen.at(-1)).toBe('timer');
     expect(seen).toHaveLength(4);
   }
+});
+
+test('a held reply rejects when its caller cancels, and a later answer is dropped', async () => {
+  const caller = new AbortController();
+  const held = new HeldReply<string>(caller.signal);
+  caller.abort(new Error('caller left'));
+  held.answer('too late');
+  await expect(held.reply).rejects.toThrow('caller left');
+  expect(held.answered).toBe(true);
+
+  const live = new HeldReply<string>(new AbortController().signal);
+  live.answer('in time');
+  expect(await live.reply).toBe('in time');
+
+  const already = new AbortController();
+  already.abort();
+  await expect(new HeldReply<string>(already.signal).reply).rejects.toBeInstanceOf(Error);
 });
