@@ -9,6 +9,7 @@ import {FileDescriptorSetSchema} from '@bufbuild/protobuf/wkt';
 import {sha256} from '@noble/hashes/sha2.js';
 import {bytesToHex} from '@noble/hashes/utils.js';
 import {
+  GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   HostService,
   KeyframeSchema,
@@ -68,6 +69,11 @@ export interface SimRun {
   readonly log?: 'present' | 'pending' | 'unindexed';
   /** Reply budget; the gateway's 1 MiB by default. */
   readonly replyBytes?: number;
+  /**
+   * The size of a Tail message; the service's 1 MiB by default. A test lowers it to make a small
+   * run arrive in several messages, which the service does for a large one.
+   */
+  readonly tailBytes?: number;
 }
 
 /** A fault the link injects into the n-th call of a method (0 is the first). */
@@ -256,12 +262,22 @@ export class SimGateway implements RunTransport {
     if (method === `${SERVICE}Skeleton`) {
       const asked = fromBinary(SkeletonRequestSchema, request);
       if (!asked.runId) throw new Error('run_id required');
+      // The service validates the request: at most 64 distinct names (InvalidArgument).
+      if (
+        asked.knownDescriptorsSha256.length > 64 ||
+        new Set(asked.knownDescriptorsSha256).size !== asked.knownDescriptorsSha256.length
+      )
+        throw new Refused('known_descriptors_sha256: at most 64 distinct names', 3);
       const skeleton = this.skeleton(new Set(asked.knownDescriptorsSha256));
       this.skeletons.push(skeleton);
       return toBinary(SkeletonResponseSchema, skeleton);
     }
-    if (method === `${SERVICE}GetBlobs`)
-      return toBinary(GetBlobsResponseSchema, create(GetBlobsResponseSchema, {}));
+    if (method === `${SERVICE}GetBlobs`) {
+      // The sim holds no blobs: each asked hash is answered missing, as the service answers it.
+      const asked = fromBinary(GetBlobsRequestSchema, request);
+      const blobs = asked.sha256.map(sha256 => ({sha256, errorCode: 5, errorMessage: 'Missing'}));
+      return toBinary(GetBlobsResponseSchema, create(GetBlobsResponseSchema, {blobs}));
+    }
     throw new Error(`Unknown unary method ${method}`);
   }
 
@@ -340,7 +356,11 @@ export class SimGateway implements RunTransport {
       let size = 16;
       for (const record of pending) {
         const bytes = toBinary(RecordSchema, record);
-        if (size + bytes.length + 11 > this.replyBytes && records.length > 0) break;
+        if (
+          size + bytes.length + 11 > (this.run.tailBytes ?? GATEWAY_REPLY_BYTES) &&
+          records.length > 0
+        )
+          break;
         records.push(bytes);
         size += bytes.length + 11;
       }

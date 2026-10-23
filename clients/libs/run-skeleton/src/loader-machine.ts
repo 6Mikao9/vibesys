@@ -17,6 +17,8 @@ export interface TailInput {
 }
 export type LoaderEvent =
   | {type: 'tail'; response: TailResponse}
+  /** A Tail message that only fed the record log reached `through`: a resume starts after it. */
+  | {type: 'window'; through: bigint}
   | {type: 'failed'; error: unknown}
   | {type: 'closed'};
 export type SkeletonLoadFailure =
@@ -135,6 +137,19 @@ export const skeletonLoaderMachine = setup({
             }),
             attempts: 0,
           })),
+        },
+        window: {
+          actions: assign(({context, event}) =>
+            context.load === undefined
+              ? {}
+              : {
+                  load: {
+                    ...context.load,
+                    windowFrom:
+                      event.through + 1n < context.load.nextSeq ? event.through + 1n : undefined,
+                  },
+                },
+          ),
         },
         failed: [
           {guard: 'refused', target: 'failed', actions: 'recordRefusal'},

@@ -62,6 +62,7 @@ export function skeletonLoaderMachineFor(
           const response = fromBinary(TailResponseSchema, bytes);
           records(response.records);
           const fresh = unseen(response, input.cursor);
+          if (fresh !== response) input.receive({type: 'window', through: response.throughSeq});
           if (fresh) input.receive({type: 'tail', response: fresh});
         }
       }),

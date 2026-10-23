@@ -222,9 +222,10 @@ test('a Tail cut mid-way resumes from its cursor and loses nothing', async () =>
   for (let seed = 1; seed <= CASES; seed += 1) {
     const {run, link} = generate(seed);
     const clean = seed % 2 === 0;
-    const {clock, gateway, actor} = open(run, link, (method, ordinal) =>
+    // Several messages (the service sends a large run so), and a cut after the first of them.
+    const {clock, gateway, actor} = open({...run, tailBytes: 16 * 1024}, link, (method, ordinal) =>
       method === `${SERVICE}Tail` && ordinal === 0
-        ? {kind: 'cut', afterMessages: 0, clean}
+        ? {kind: 'cut', afterMessages: 1, clean}
         : undefined,
     );
     await until(clock, () => false, MINUTE);
