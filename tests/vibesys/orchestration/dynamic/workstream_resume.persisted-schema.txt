@@ -180,6 +180,7 @@ InputReading.accuracy_passed optional {"anyOf":[{"type":"boolean"},{"type":"null
 InputReading.benchmark_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
 InputReading.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
 InputReading.partial optional {"anyOf":[{"$ref":"#/$defs/PartialRow"},{"type":"null"}],"default":null}
+InputReading.runs_stated optional {"default":false,"type":"boolean"}
 InputReading.samples optional {"default":1,"minimum":1,"type":"integer"}
 InvocationId {"additionalProperties":false,"type":"object"}
 InvocationId.kind optional {"const":"invocation","default":"invocation","type":"string"}

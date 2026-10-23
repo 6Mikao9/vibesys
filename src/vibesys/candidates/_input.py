@@ -159,16 +159,23 @@ class InputReading(Value):
     samples: int = Field(default=1, ge=1)
     """How many trusted benchmark readings of the input ``metrics`` is the mean of
     (`with_samples`); a record written before this was kept holds one."""
+    runs_stated: bool = Field(default=False, exclude_if=lambda value: not value)
+    """Whether each row of ``metrics`` states the runs it is the mean of (`with_samples`). False in
+    a record written before rows stated them, whose bar is the mean of ``samples`` readings."""
     partial: PartialRow | None = None
 
     def bar(self) -> tuple[MetricRow, ...]:
         """The rows a candidate is compared with: each states the runs it is the mean of.
 
-        A record written before rows stated their runs holds a bar that is the mean of
-        ``samples`` readings in rows that state one. The comparison rests a value on the runs
-        its row states (`MetricSpace.compare`), so those rows are read as what the record says
-        they are: no past decision is made again, and the bar keeps the weight it had.
+        A record written before rows stated their runs (``runs_stated`` is False) holds a bar
+        that is the mean of ``samples`` readings in rows that state one. The comparison rests a
+        value on the runs its row states (`MetricSpace.compare`), so those rows are read as what
+        the record says they are: no past decision is made again, and the bar keeps the weight it
+        had. A row of a bar that states its runs is read as it states them: an objective only some
+        of the samples reported is the mean of those, and rests on no more runs than they are.
         """
+        if self.runs_stated:
+            return self.metrics
         return tuple(
             row if row.runs >= self.samples else row.model_copy(update={"runs": self.samples})
             for row in self.metrics
@@ -338,7 +345,9 @@ def with_samples(baseline: Baseline, readings: tuple[AcceptedReading, ...]) -> B
     seen = reading(baseline)
     if not taken or seen is None or not input_metrics(baseline) or len(taken) <= seen.samples:
         return baseline
-    refined = seen.model_copy(update={"metrics": mean_metrics(taken), "samples": len(taken)})
+    refined = seen.model_copy(
+        update={"metrics": mean_metrics(taken), "samples": len(taken), "runs_stated": True}
+    )
     match baseline:
         case Measured() | Unmeasurable():
             return baseline.model_copy(update={"reading": refined})
