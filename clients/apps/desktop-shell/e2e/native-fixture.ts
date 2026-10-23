@@ -18,7 +18,7 @@ import type {RunFixture, StoreRunFixture} from '@vibesys/run-fixtures';
 import {gatewayScript, wire} from './fake-gateway.js';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const projector = join(root, 'tests/e2e/retained_client_fixture.py');
+const projector = join(root, 'tests/support/retained_client_fixture.py');
 const cache = join(
   tmpdir(),
   `vibesys-native-fixtures-${hash(

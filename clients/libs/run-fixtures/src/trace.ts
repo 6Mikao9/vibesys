@@ -338,6 +338,18 @@ function gateSpan(spec: IdeaSpec, parent: string, startsAt: number, endsAt: numb
 /** The stop of the idea's implementer turn on a provider's quota, when the spec has one. */
 function quotaStop(trace: Trace, spec: IdeaSpec): void {
   if (spec.pause === undefined) return;
+  // A run resumes only what it paused: the stop is recorded when it begins, then when it ends.
+  trace.event(
+    'quota_paused',
+    {
+      provider: 'claude',
+      condition: 'quota_exhausted',
+      detail: 'Waiting for provider quota',
+      policy: 'wait',
+    },
+    spec.pause.at - spec.pause.seconds,
+    {agent_kind: 'implementer', invocation_id: `inv-w${spec.n}`},
+  );
   trace.event(
     'quota_resumed',
     {
