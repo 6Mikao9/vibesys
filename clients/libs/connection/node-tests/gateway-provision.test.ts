@@ -364,3 +364,42 @@ test('the connect process stderr reaches the app log as a bounded tail when it e
     );
   }
 });
+
+test("a channel that dies silently logs its code, the link's cause and that ssh said nothing", {
+  timeout: 15000,
+}, async () => {
+  const clock = new FakeClock();
+  for (const code of [255, 1, null]) {
+    const child = pipeHeldProcess();
+    const lines: string[] = [];
+    let fail: (message: string) => void = () => {};
+    const errored = new Promise<string>(resolve => {
+      fail = resolve;
+    });
+    const logged = new Promise<void>(resolve => {
+      const duplex = gatewayProcess(
+        child.process,
+        clock.schedule,
+        line => {
+          lines.push(line);
+          resolve();
+        },
+        (exit, tail) => `link says ${exit} with ${tail.length} bytes`,
+      );
+      duplex.on('error', error => fail(error.message));
+      duplex.resume();
+    });
+    child.stderr.end();
+    child.stdout.end();
+    await once(child.stdout, 'end');
+    child.end(code);
+    await logged;
+    const [line = ''] = lines;
+    expect(line).toBe(
+      `gateway connect exited: ${code} (link says ${code} with 0 bytes)\nno output from ssh`,
+    );
+    expect(await errored).toBe(
+      `gateway connect exited: ${code}: link says ${code} with 0 bytes: no output from ssh`,
+    );
+  }
+});

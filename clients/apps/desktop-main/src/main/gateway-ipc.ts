@@ -141,6 +141,7 @@ function gatewayFor(
           lease.link.spawnCommand(`exec "$HOME/${GATEWAY_DIRECTORY}/vibesysd" connect`),
           schedule,
           log,
+          (code, tail) => lease.link.explain(code, tail, 'the gateway').message,
         );
         duplex.once('close', () => {
           void lease.release();

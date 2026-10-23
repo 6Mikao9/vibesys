@@ -82,6 +82,8 @@ export function gatewayProcess(
   process: SpawnedProcess,
   schedule: ScheduleTimeout,
   log: (line: string) => void,
+  /** The link's own words for how this exit failed (its host, and what ssh said). */
+  explain: (code: number | null, stderr: string) => string = () => '',
 ): Duplex {
   const duplex = Duplex.from({readable: process.stdout, writable: process.stdin});
   let stderr = '';
@@ -91,10 +93,13 @@ export function gatewayProcess(
   });
   void process.exit.then(code => {
     const tail = stderr.trim();
-    log(`gateway connect exited: ${code}${tail === '' ? '' : `\n${tail}`}`);
-    // The error reaches the one-line failure log, so it carries the stderr tail too.
+    const cause = explain(code, tail);
+    const said = tail === '' ? 'no output from ssh' : tail;
+    log(`gateway connect exited: ${code}${cause === '' ? '' : ` (${cause})`}\n${said}`);
+    // The error reaches the one-line failure log, so it carries the cause and the tail too.
     if (!duplex.destroyed) {
-      duplex.destroy(new Error(`gateway connect exited: ${code}${tail === '' ? '' : `: ${tail}`}`));
+      const words = [cause, said].filter(part => part !== '').join(': ');
+      duplex.destroy(new Error(`gateway connect exited: ${code}: ${words}`));
     }
   });
   duplex.once('close', () => {
