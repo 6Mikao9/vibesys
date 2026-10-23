@@ -3,8 +3,10 @@
 Core's evidence ledger is the authority. A strategy keeps only `EvidenceKey`s and
 accepts a measurement result's evidence only when it is trusted and belongs to exactly the
 measurement the strategy asked for: another scope, generation, candidate, purpose or request,
-or an untrusted record, is never offered to a decision. These functions are total and
-read only core values, so every strategy applies one rule.
+or an untrusted record, is never offered to a decision. A failed gate of a measurement that
+judged nothing about the candidate (`MeasurementFailure.charges_candidate`) is no verdict on
+it: the record says the gate did not pass, not that the candidate failed it (`judged_keys`).
+These functions are total and read only core values, so every strategy applies one rule.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from vs_core.types.attempts import CheckpointDecline
-from vs_core.types.common import RevisionRef, Value
+from vs_core.types.common import ObservationStatus, RevisionRef, Value
 
 if TYPE_CHECKING:
     from vs_core.types.common import (
@@ -45,6 +47,30 @@ def trusted_keys(
         and item.candidate == candidate
         and item.purpose == purpose
         and (event.source_request is None or item.source_request == event.source_request)
+    )
+
+
+def judged_keys(
+    event: MeasurementResult, *, scope: Scope, candidate: RevisionRef, purpose: str
+) -> tuple[EvidenceKey, ...]:
+    """The keys of `trusted_keys` that say something about the candidate itself.
+
+    When the result's failure is a verdict about the candidate (or it states none), all of
+    them. When it is not (the machinery's, an ambiguous or an unclassified one: the
+    measurement judged nothing), a record that did not succeed is the machinery's gate
+    failing. Reading it as the candidate failing the gate would reject, and lose, a candidate
+    nothing was proven against, so it is left out; the records that succeeded stay, for they
+    are facts. A strategy deciding on a candidate reads this; one that carries the blame
+    along with the failed record (the input's measurement) reads `trusted_keys`.
+    """
+    judged = event.failure is None or event.failure.charges_candidate
+    held = {
+        item.key: item for item in event.evidence if item.status is not ObservationStatus.SUCCEEDED
+    }
+    return tuple(
+        key
+        for key in trusted_keys(event, scope=scope, candidate=candidate, purpose=purpose)
+        if judged or key not in held
     )
 
 

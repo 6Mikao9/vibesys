@@ -32,7 +32,7 @@ from vs_core.api.search import (
     Value,
     Workspace,
     effect_resolution,
-    trusted_keys,
+    judged_keys,
 )
 
 
@@ -173,7 +173,7 @@ async def _gated(
 ) -> GateResult:
     if isinstance(found, Failed):
         return NotMeasured(feedback=f"the benchmark could not be measured ({found.reason.value})")
-    keys = trusted_keys(found, scope=found.scope, candidate=revision, purpose="official")
+    keys = judged_keys(found, scope=found.scope, candidate=revision, purpose="official")
     if not keys:
         reason = f"the benchmark could not be measured ({found.status.value})"
         return NotMeasured(feedback=f"{reason}: {found.diagnostic}" if found.diagnostic else reason)

@@ -40,10 +40,12 @@ if TYPE_CHECKING:
     from vs_runtime._polling_evaluation import PollingEvaluationExecutor
     from vs_runtime._profile_evaluation import CommandProfileCapture
     from vs_runtime._retrying_evaluation import (
+        ENVIRONMENT_WAIT_PREFIX,
         ClosableEvaluationExecutor,
         EvaluationRetries,
         RetryingEvaluationExecutor,
         TryHandles,
+        environment_refusal,
     )
     from vs_runtime._run_control import RunStopped
     from vs_runtime._runs import RunExecution
@@ -135,7 +137,10 @@ _MODULES: dict[str, str] = {
         ("vs_runtime._polling_evaluation", ("PollingEvaluationExecutor ")),
         (
             "vs_runtime._retrying_evaluation",
-            ("ClosableEvaluationExecutor EvaluationRetries RetryingEvaluationExecutor TryHandles "),
+            (
+                "ENVIRONMENT_WAIT_PREFIX ClosableEvaluationExecutor EvaluationRetries "
+                "RetryingEvaluationExecutor TryHandles environment_refusal "
+            ),
         ),
         ("vs_runtime._run_control", ("RunStopped ")),
         ("vs_runtime._runs", ("RunExecution ")),
@@ -185,6 +190,7 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "ENVIRONMENT_WAIT_PREFIX",
     "VALIDATION_RECIPE_ARTIFACT_DESCRIPTION",
     "AccuracyEvaluation",
     "AccuracyReceipt",
@@ -265,6 +271,7 @@ __all__ = [
     "WorkspaceSourceFact",
     "Workspaces",
     "boot_trace",
+    "environment_refusal",
     "member_workspace_id",
     "render_evaluation_failure",
     "render_stage_failure",

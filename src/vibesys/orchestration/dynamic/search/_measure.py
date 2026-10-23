@@ -73,7 +73,7 @@ from vs_core.api.search import (
     Value,
     Workspace,
     flow,
-    trusted_keys,
+    judged_keys,
 )
 
 PROFILE_STAGE = "profile"
@@ -342,7 +342,7 @@ async def evidence_of(
     ctx.channel(REPORTS).send(Released(key=w.key))
     found = composed.decisive
     purpose = purpose_of(w)
-    keys = trusted_keys(found, scope=found.scope, candidate=revision, purpose=purpose)
+    keys = judged_keys(found, scope=found.scope, candidate=revision, purpose=purpose)
     decisive = tuple(item for item in found.evidence if item.key in keys)
     shown = decisive + _shown(
         composed.unverified, found=found, revision=revision, decisive=decisive

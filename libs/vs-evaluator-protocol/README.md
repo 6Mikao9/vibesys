@@ -32,6 +32,15 @@ An `error` record may carry an `ErrorKind`: `TRANSIENT` (the default, and what
 every record without the key reads as) or `REQUIREMENT_NOT_MET`, with the
 `requirement` it names. A `Measurement` of a failure reports both.
 
+A task's own evaluator command (accuracy, benchmark, profile) declares that its host
+refuses to take the measurement, before anything of the candidate is judged, by exiting
+with `ENVIRONMENT_REFUSED_EXIT_STATUS` (75, sysexits' `EX_TEMPFAIL`): the free disk is
+below what the task needs, a device is absent, a lock it admits work under is held. The
+status is the whole declaration, never the words printed beside it. The framework does not
+read such a run as a result or a failure: it holds the measurement, reported as queued with
+the last line the command printed as the reason, and runs it again after a backoff until the
+host takes it. A candidate's build exiting 75 is an ordinary failed build.
+
 Every rejection raises `ProtocolError` with a `ReasonCode` and a message
 naming the offending record and key. Record models reject unknown keys and
 type coercion.

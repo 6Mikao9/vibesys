@@ -294,14 +294,22 @@ async def test_pause_drain_lets_every_stage_of_an_executing_job_finish() -> None
 @given(count=st.integers(min_value=1, max_value=5))
 async def test_fresh_process_executor_recovers_all_submitted_measurements(count: int) -> None:
     namespace = InMemoryEvaluationNamespace()
-    retries = EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=1)
+    retries = EvaluationRetries(
+        infrastructure_attempts=1,
+        ambiguous_attempts=1,
+        environment_backoff=30.0,
+        environment_backoff_cap=300.0,
+    )
     workspaces = FakeWorkspaces(
         FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
     )
     before = FakeEvaluation()
     gates = [before.gate("accuracy", index) for index in range(count)]
     first = RetryingEvaluationExecutor(
-        PollingEvaluationExecutor(before, workspaces, clock=ManualClock()), retries, namespace
+        PollingEvaluationExecutor(before, workspaces, clock=ManualClock()),
+        retries,
+        namespace,
+        clock=ManualClock(),
     )
     snapshot = await workspaces.root.snapshot("candidate")
     try:
@@ -324,7 +332,10 @@ async def test_fresh_process_executor_recovers_all_submitted_measurements(count:
         await first.close()
     after = FakeEvaluation()
     resumed = RetryingEvaluationExecutor(
-        PollingEvaluationExecutor(after, workspaces, clock=ManualClock()), retries, namespace
+        PollingEvaluationExecutor(after, workspaces, clock=ManualClock()),
+        retries,
+        namespace,
+        clock=ManualClock(),
     )
     try:
         for index in range(count):
