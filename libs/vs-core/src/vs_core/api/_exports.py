@@ -268,15 +268,15 @@ def _load_run_park() -> dict[str, object]:
 
 def _load_turn_permit() -> dict[str, object]:
     from vs_core._turn_permit import (
-        AttemptPermit,
         DrainPermit,
+        ScopePermit,
         TurnPermit,
         admitted_work_remains,
         permit_for_request,
     )
 
     return {
-        "AttemptPermit": AttemptPermit,
+        "ScopePermit": ScopePermit,
         "DrainPermit": DrainPermit,
         "TurnPermit": TurnPermit,
         "admitted_work_remains": admitted_work_remains,

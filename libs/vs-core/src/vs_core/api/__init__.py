@@ -165,8 +165,8 @@ if TYPE_CHECKING:
     from vs_core._turn_chain import TurnChain
     from vs_core._turn_holds import held_limit
     from vs_core._turn_permit import (
-        AttemptPermit,
         DrainPermit,
+        ScopePermit,
         TurnPermit,
         admitted_work_remains,
         permit_for_request,
@@ -869,7 +869,7 @@ _MODULES: dict[str, str] = {
         ("vs_core._run_park", "pause_withdraws "),
         (
             "vs_core._turn_permit",
-            "AttemptPermit DrainPermit TurnPermit admitted_work_remains permit_for_request ",
+            "ScopePermit DrainPermit TurnPermit admitted_work_remains permit_for_request ",
         ),
         (
             "vs_core._run_pause",
@@ -1242,7 +1242,6 @@ __all__ = [
     "AttemptExhausted",
     "AttemptId",
     "AttemptOutcome",
-    "AttemptPermit",
     "AttemptPhase",
     "AttemptReacquireRequested",
     "AttemptReady",
@@ -1649,6 +1648,7 @@ __all__ = [
     "Scope",
     "ScopeAdmissionReopened",
     "ScopeInputTarget",
+    "ScopePermit",
     "ScopeReopenAdmitted",
     "ScopeReopenNormalization",
     "ScopeReopenRequested",
