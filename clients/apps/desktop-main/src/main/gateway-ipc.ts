@@ -26,6 +26,7 @@ export function createGatewayCalls(
   settings: SettingsStore,
   resources: string,
   schedule: ScheduleTimeout,
+  log: (message: string) => void,
 ): GatewayCalls {
   const calls = new GatewayCalls(
     async key => {
@@ -34,6 +35,7 @@ export function createGatewayCalls(
     },
     key => gatewayFor(key, manager, resources, schedule),
     schedule,
+    (host, diagnostic) => log(`${host} answered a failed call: ${diagnostic}`),
   );
   manager.onDisposing(() => calls.close());
   return calls;
