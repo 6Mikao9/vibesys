@@ -9,7 +9,7 @@ shell's new Run screen composition, beside the Run screen rather than inside
   In the current shell, `page.state.record.run.projectRoot` is available when
   the record is `live` or `ended`. Pass that host path without expanding it on
   the laptop.
-- `enabled`: the host's `runTransportV2` setting.
+- `enabled`: whether the controls are active; the shell always passes true.
 - `schedule`: the shell's injected timeout scheduler.
 
 The component makes no calls and renders nothing while disabled. Electron main

@@ -16,7 +16,7 @@ import {intentsActor} from './effects/controls.js';
 import {useRelaunch, useWriterRecovery} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
 
-/** Mount with a key of host/runId. enabled is the host's runTransportV2 setting. */
+/** Mount with a key of host/runId. enabled says whether the controls are active. */
 export function useRunIntents(props: {
   readonly bridge: GatewayBridge;
   readonly host: HostKey;
