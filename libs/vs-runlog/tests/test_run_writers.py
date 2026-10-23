@@ -162,7 +162,7 @@ def test_record_bound_and_recovery_preserve_immutable_checkpoints(count: int) ->
     park=st.booleans(),
 )
 def test_a_finished_run_ends_on_a_keyframe_so_its_reply_needs_no_catch_up(
-    tail: int, commit_every: int, park: bool
+    tail: int, commit_every: int, *, park: bool
 ) -> None:
     """Records after the last boundary, in any batching, are covered once the writer closes."""
     with TemporaryDirectory() as temporary:

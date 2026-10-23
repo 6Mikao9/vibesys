@@ -15,6 +15,7 @@ import type {GatewayBridge, WelcomeBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import {
   observeRun,
+  type RecordsFanout,
   type RecordsListener,
   recordsFanout,
   type Skeleton,
