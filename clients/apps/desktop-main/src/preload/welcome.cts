@@ -248,7 +248,7 @@ function createGatewayPreload(
 ): import('@vibesys/ipc').GatewayPreload {
   function openCall(
     kind: 'unary' | 'stream',
-    host: import('@vibesys/hosts').HostKey,
+    host: import('@vibesys/ipc').GatewayRequest['host'],
     method: string,
     bytes: Uint8Array,
     receive: (bytes: Uint8Array) => void,
