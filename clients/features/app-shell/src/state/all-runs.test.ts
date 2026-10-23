@@ -501,3 +501,110 @@ test('property: reordered project failures remain visible and retry to a complet
     );
   }
 });
+
+/** A host whose link drops and returns while the dashboard reads; every request settles. */
+class FlakyHost {
+  up = true;
+  pending: SidebarRequest[] = [];
+  step: SidebarStep;
+
+  constructor(
+    readonly hostRuns: ReadonlyMap<string, readonly ListedRun[]>,
+    host: 'ssh:host-a',
+  ) {
+    this.step = sidebarStep(SIDEBAR_EMPTY, {
+      type: 'overview',
+      listings: [listed(host)],
+      recent: [...hostRuns.keys()].map(project => opened(host, project, 'remembered')),
+      skippedRecent: [],
+    });
+    this.pending = [...this.step.requests];
+  }
+
+  #dispatch(action: SidebarAction): void {
+    this.step = sidebarStep(this.step.state, action);
+    this.pending.push(...this.step.requests);
+  }
+
+  answer(at: number): void {
+    const request = this.pending.splice(at, 1)[0];
+    if (!request) return;
+    if (request.kind === 'list-project-runs') {
+      const runs = this.up ? (this.hostRuns.get(request.project) ?? []) : null;
+      this.#dispatch({
+        type: 'project-runs-listed',
+        token: request.token,
+        host: request.host,
+        project: request.project,
+        runs,
+        ...(runs === null ? {error: 'host read deadline exceeded'} : {}),
+      });
+    } else {
+      const found = new Map(request.runIds.map(id => [id, read()] as const));
+      this.#dispatch({
+        type: 'digests-read',
+        token: request.token,
+        reply: this.up ? {kind: 'digests', runs: found} : null,
+      });
+    }
+  }
+
+  link(up: boolean): void {
+    this.up = up;
+    this.#dispatch({
+      type: 'listing',
+      listing: up
+        ? listed('ssh:host-a')
+        : {kind: 'unavailable', host: 'ssh:host-a', connection: {kind: 'reconnecting', attempt: 1}},
+    });
+  }
+
+  tick(): void {
+    this.#dispatch({type: 'refresh-live-digests'});
+  }
+
+  /** One of: an answer (a failure while the link is down), a drop or return, a refresh tick. */
+  randomly(random: Seeded): void {
+    const choice = random.int(6);
+    if (choice < 3 && this.pending.length > 0) this.answer(random.int(this.pending.length));
+    else if (choice === 3) this.link(!this.up);
+    else if (choice === 4) this.tick();
+  }
+
+  /** The link is back for good: each refresh and each answer is now a success. */
+  returnForGood(): void {
+    if (!this.up) this.link(true);
+    for (let round = 0; round < 4; round++) {
+      while (this.pending.length > 0) this.answer(0);
+      this.tick();
+    }
+    while (this.pending.length > 0) this.answer(0);
+  }
+}
+
+test('property: a link dropped at any point while reading converges to the host once it returns', () => {
+  for (const seed of SEEDS) {
+    const random = new Seeded(seed);
+    const projects = Array.from({length: 1 + random.int(4)}, (_, index) => `/project-${index}`);
+    const hostRuns = new Map(
+      projects.map((project, index) => [
+        project,
+        Array.from({length: 1 + random.int(4)}, (_, id) => run(`${index}-${id}`, id)),
+      ]),
+    );
+    const world = new FlakyHost(hostRuns, 'ssh:host-a');
+    for (let step = 0; step < 40; step++) world.randomly(random);
+    world.returnForGood();
+    const state = world.step.state;
+    expect(projectRunGaps(state.allRuns)).toEqual([]);
+    expect(visibleRunIds(state)).toEqual(
+      new Set([...hostRuns.values()].flat().map(row => row.runId)),
+    );
+    // No card says "can't read run state" or "reading" once the host answers.
+    const rows = dashboardRows(state, CLOCK);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(
+      rows.filter(each => each.row.problem !== null || each.row.result === 'reading…'),
+    ).toEqual([]);
+  }
+});

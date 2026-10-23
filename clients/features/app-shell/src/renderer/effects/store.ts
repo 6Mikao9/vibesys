@@ -85,8 +85,11 @@ export function createSidebarStore(
   let refreshing = false;
   const keepLiveDigestsFresh = (): void => {
     const state = store.getState();
-    if (refreshing || (liveRows(state).length === 0 && projectRunGaps(state.allRuns).length === 0))
-      return;
+    const waiting =
+      liveRows(state).length > 0 ||
+      projectRunGaps(state.allRuns).length > 0 ||
+      Object.values(state.digests).some(slot => slot.kind === 'failed');
+    if (refreshing || !waiting) return;
     refreshing = true;
     schedule(() => {
       refreshing = false;

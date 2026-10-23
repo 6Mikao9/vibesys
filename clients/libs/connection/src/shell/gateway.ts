@@ -96,6 +96,11 @@ export class GatewayConnection {
     this.#actor.start();
   }
 
+  /** Whether the session ended for good (closed, or offline after its recovery budget). */
+  get ended(): boolean {
+    return this.#closed || this.#actor.getSnapshot().status === 'done';
+  }
+
   unary(method: string, bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array> {
     let response: Uint8Array | undefined;
     return this.#call(

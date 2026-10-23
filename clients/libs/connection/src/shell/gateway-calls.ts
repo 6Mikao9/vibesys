@@ -127,7 +127,7 @@ export class GatewayCalls {
       if (this.#closed || abort.signal.aborted || this.#generations.get(host) !== generation)
         throw new Error('gateway caller cancelled');
       let managed = this.#hosts.get(host);
-      if (managed === undefined) {
+      if (managed === undefined || managed.connection.ended) {
         managed = {connection: new GatewayConnection(this.dialer(host), this.schedule), users: 0};
         this.#hosts.set(host, managed);
       }

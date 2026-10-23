@@ -253,8 +253,10 @@ export function digestKey(run: RunRef): string {
 /** The next state for `action`, and the requests it makes. */
 export function sidebarStep(state: SidebarState, action: SidebarAction): SidebarStep {
   const step = baseStep(state, action);
-  const listed = askAllRuns(step.state, action.type === 'refresh-live-digests');
-  const asked = askDigests(listed.state);
+  // A failed read is asked again on each refresh, and at once when its host comes back.
+  const retry = action.type === 'refresh-live-digests' || reconnected(state, step.state);
+  const listed = askAllRuns(step.state, retry);
+  const asked = askDigests(listed.state, retry);
   const live = askLiveDigests(asked.state, action.type === 'refresh-live-digests');
   return {
     state: live.state,
@@ -343,11 +345,15 @@ function digestRequests(
  * so it is read afresh when it ends. A live run is never asked for here: its row reads its digest
  * through `askLiveDigests`, and asking for it here would be forgotten again by this very step.
  */
-function askDigests(state: SidebarState): SidebarStep {
+function askDigests(state: SidebarState, retryFailed = false): SidebarStep {
   const live = liveRows(state);
+  const reachable = new Set(
+    state.listings.filter(listing => listing.kind === 'listed').map(listing => listing.host),
+  );
   const digests: Record<string, DigestSlot> = {};
   for (const [key, slot] of Object.entries(state.digests)) {
-    if (!live.some(row => digestKey(row.run) === key)) digests[key] = slot;
+    const forgotten = retryFailed && slot.kind === 'failed' && reachable.has(hostOfKey(key));
+    if (!forgotten && !live.some(row => digestKey(row.run) === key)) digests[key] = slot;
   }
   const wanted = shownRuns(state).filter(run => {
     const key = digestKey({host: run.host, runId: run.runId});
@@ -399,6 +405,19 @@ function askLiveDigests(state: SidebarState, refresh: boolean): SidebarStep {
     }
   }
   return {state: {...state, live, lastDigestToken: token}, requests};
+}
+
+/** The host a `digestKey` names. */
+function hostOfKey(key: string): HostKey {
+  return key.slice(0, key.indexOf(' ')) as HostKey;
+}
+
+/** Whether a host answers in `next` that did not in `before`: reads it failed may now succeed. */
+function reconnected(before: SidebarState, next: SidebarState): boolean {
+  const was = new Set(
+    before.listings.filter(listing => listing.kind === 'listed').map(listing => listing.host),
+  );
+  return next.listings.some(listing => listing.kind === 'listed' && !was.has(listing.host));
 }
 
 /** The project listings the dashboard still needs: every known project's runs, on every screen. */
