@@ -10,49 +10,71 @@ export interface WriterFacts {
   readonly liveness: RelaunchLiveness;
   /** The newest epoch in committed history, which can lead the lifecycle stream. */
   readonly historyEpoch: bigint;
+  readonly acknowledgedEpoch?: bigint;
 }
 
-export interface WriterControls {
-  /** The newest epoch any fact names; rows from earlier epochs are history, not current. */
-  readonly epoch: bigint;
-  readonly actions: readonly RunIntentAction[];
-  readonly relaunch: RelaunchTarget | null;
-}
+export type WriterControls = {readonly epoch: bigint} & (
+  | {
+      readonly status: 'ready';
+      readonly actions: readonly [RunIntentAction, ...RunIntentAction[]];
+      readonly relaunch: null;
+    }
+  | {
+      readonly status: 'ready';
+      readonly actions: readonly RunIntentAction[];
+      readonly relaunch: RelaunchTarget;
+    }
+  | {
+      readonly status: 'catching-up' | 'unknown';
+      readonly actions: readonly RunIntentAction[];
+      readonly relaunch: null;
+    }
+);
 
 /**
- * The one projection of what the user may do to the writer. A fact older than the newest epoch
- * is stale and offers nothing until the stream for that epoch catches up, whatever order the
- * lifecycle, history and liveness streams deliver in. A dead writer (interrupted) accepts no
- * live action. Relaunch follows the host's admission, which accepts every ending, so the
- * ended flag the host keeps for older readers does not narrow it here.
+ * Facts are epoch-fenced: lifecycle is known only at its recorded epoch; history and launch
+ * acknowledgements can prove a successor exists before lifecycle catches up. WatchRuns is
+ * known until its subscription ends or its 30-second lease expires, then unknown (never alive).
+ * The total projection yields actions, Resume, or a visible catching-up/unknown reason.
+ * The liveness watch resubscribes within 31 seconds; an epoch gap asks the owning page to
+ * re-read lifecycle within 30 seconds, repeatedly while the gap persists. Machine/DOM properties
+ * enforce these bounds. Resume follows the host contract: every ending is eligible.
  */
 export function writerControls(facts: WriterFacts): WriterControls {
-  const {observation, liveness, historyEpoch} = facts;
+  const {observation, liveness, historyEpoch, acknowledgedEpoch = 0n} = facts;
   const observed = observation?.epoch ?? 0n;
-  const epoch = [observed, liveness.epoch, historyEpoch].reduce((a, b) => (a > b ? a : b));
-  if (!observation || observed < 1n || observed !== epoch)
-    return {epoch, actions: [], relaunch: null};
+  const epoch = [observed, liveness.epoch, historyEpoch, acknowledgedEpoch].reduce((a, b) =>
+    a > b ? a : b,
+  );
+  const waiting = (status: 'catching-up' | 'unknown'): WriterControls => ({
+    epoch,
+    actions: [],
+    relaunch: null,
+    status,
+  });
+  if (!observation || observed < 1n || observed !== epoch) return waiting('catching-up');
   const live = liveness.epoch === observed ? liveness.value : RunLiveness.UNSPECIFIED;
   const state = observation.lifecycle?.state;
-  if (live === RunLiveness.ALIVE) return {epoch, actions: liveActions(observation), relaunch: null};
-  if (live === RunLiveness.INTERRUPTED)
+  if (live === RunLiveness.ALIVE) {
+    const actions = liveActions(observation);
+    return actions ? {epoch, actions, relaunch: null, status: 'ready'} : waiting('catching-up');
+  }
+  if (live === RunLiveness.INTERRUPTED || state?.case === 'parked' || state?.case === 'ended')
     return {
       epoch,
       actions: [],
+      status: 'ready',
       relaunch: {
         epoch,
         state: state?.case === 'parked' || state?.case === 'ended' ? state.case : 'interrupted',
       },
     };
-  return {
-    epoch,
-    actions: liveActions(observation),
-    relaunch:
-      state?.case === 'parked' || state?.case === 'ended' ? {epoch, state: state.case} : null,
-  };
+  return waiting(live === RunLiveness.ENDED ? 'catching-up' : 'unknown');
 }
 
-function liveActions(observation: RelaunchObservation): readonly RunIntentAction[] {
+function liveActions(
+  observation: RelaunchObservation,
+): readonly [RunIntentAction, ...RunIntentAction[]] | null {
   const state = observation.lifecycle?.state;
   switch (state?.case) {
     case 'starting':
@@ -64,7 +86,7 @@ function liveActions(observation: RelaunchObservation): readonly RunIntentAction
     case 'draining':
       return ['pauseNow'];
     default:
-      return [];
+      return null;
   }
 }
 

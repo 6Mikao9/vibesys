@@ -27,6 +27,7 @@ export interface GatewayRecordsInput {
   readonly receive: (event: GatewayEvent) => void;
 }
 export type GatewayEvent =
+  | {type: 'refresh-writer'}
   | {type: 'setting-changed'}
   | {type: 'toggle'; enabled: boolean}
   | {type: 'ui'; action: RunPageAction}
@@ -213,12 +214,6 @@ export const gatewayRunMachine = setup({
         ui: ({context}) => ({...context.ui, selected: null, views: {}}),
       }),
       type: 'parallel',
-      invoke: {
-        id: 'loader',
-        src: 'loader',
-        input: ({context}) => ({runId: context.seed.identity.runId}),
-        onError: {actions: assign({error: 'Unavailable'})},
-      },
       on: {
         loaded: {
           actions: assign({
@@ -235,6 +230,20 @@ export const gatewayRunMachine = setup({
         ui: {actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)})},
       },
       states: {
+        writer: {
+          initial: 'following',
+          on: {'refresh-writer': {target: '.following', reenter: true}},
+          states: {
+            following: {
+              invoke: {
+                id: 'loader',
+                src: 'loader',
+                input: ({context}) => ({runId: context.seed.identity.runId}),
+                onError: {actions: assign({error: 'Unavailable'})},
+              },
+            },
+          },
+        },
         records: {
           initial: 'reading',
           states: {

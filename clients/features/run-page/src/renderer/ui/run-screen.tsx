@@ -272,45 +272,35 @@ function EndedBanner(props: {
 }): JSX.Element | null {
   const {state, dispatch} = props;
   const ended = endedView(state);
-  // The header already says Finished. Logs and Run again remain in the run controls.
-  if (ended === null || ended.title === 'Finished') return null;
+  if (ended === null) return null;
   if (state.readOnly === true) {
     const reason = state.record.kind === 'ended' ? state.record.run.reason : null;
     return reason ? (
       <Banner tone={ended.tone} title={state.lifecycleWord ?? ended.title} body={reason} />
     ) : null;
   }
-  return (
-    <Banner
-      tone={ended.tone}
-      title={ended.title}
-      body={ended.reason}
-      actions={
-        <>
-          {ended.resume === null ? null : (
-            <Button
-              variant="primary"
-              text={ended.resume}
-              press={() => dispatch({type: 'resume-ended'})}
-            />
-          )}
-          <Button
-            variant="secondary"
-            text="View logs"
-            press={() => {
-              dispatch({type: 'view-logs'});
-              props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
-            }}
-          />
-          <Button
-            variant="secondary"
-            text="Run again"
-            press={() => dispatch({type: 'run-again'})}
-          />
-        </>
-      }
-    />
+  const actions = (
+    <>
+      {ended.resume === null ? null : (
+        <Button
+          variant="primary"
+          text={ended.resume}
+          press={() => dispatch({type: 'resume-ended'})}
+        />
+      )}
+      <Button
+        variant="secondary"
+        text="View logs"
+        press={() => {
+          dispatch({type: 'view-logs'});
+          props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
+        }}
+      />
+      <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
+    </>
   );
+  if (ended.title === 'Finished') return <Row gap="space-2">{actions}</Row>;
+  return <Banner tone={ended.tone} title={ended.title} body={ended.reason} actions={actions} />;
 }
 
 function Startup(props: {readonly state: RunPageState}): JSX.Element | null {

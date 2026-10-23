@@ -212,6 +212,18 @@ async function verifyHistory(input: Input, availabilityOnly = false) {
   try {
     if (availabilityOnly) {
       await render();
+      await act(async () =>
+        bridge.streams
+          .find(s => s.method.endsWith('/WatchRuns'))
+          ?.receive(
+            livenessPacket(
+              input.epoch,
+              ['starting', 'running', 'draining'].includes(input.state)
+                ? RunLiveness.ALIVE
+                : RunLiveness.ENDED,
+            ),
+          ),
+      );
       verifyPermissions(container, input);
       return;
     }
@@ -355,7 +367,7 @@ function expectedButtons(facts: {
   const value = facts.liveness.epoch === newest ? facts.liveness.value : RunLiveness.UNSPECIFIED;
   const live = ['starting', 'running', 'operatorHold', 'draining'].includes(facts.kind);
   const buttons: string[] = [];
-  if (live && value !== RunLiveness.INTERRUPTED) {
+  if (live && value === RunLiveness.ALIVE) {
     if (facts.kind === 'starting' || facts.kind === 'running') buttons.push('Pause');
     buttons.push('Pause now');
     if (facts.kind === 'running' || facts.kind === 'operatorHold') buttons.push('Guidance');

@@ -13,7 +13,7 @@ import {type JSX, useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
 import {historyEpoch, intentRows, type runIntentsMachine} from '../state/index.js';
 import {intentsActor} from './effects/controls.js';
-import {useRelaunch} from './relaunch.js';
+import {useRelaunch, useWriterRecovery} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
 
 /** Mount with a key of host/runId. enabled is the host's runTransportV2 setting. */
@@ -25,6 +25,7 @@ export function useRunIntents(props: {
   readonly enabled: boolean;
   readonly schedule: ScheduleTimeout;
   readonly relaunch?: RelaunchObservation;
+  readonly refreshWriter?: () => void;
 }) {
   const [snapshot, setSnapshot] = useState<SnapshotFrom<typeof runIntentsMachine> | null>(null);
   const [text, setText] = useState('');
@@ -60,15 +61,21 @@ export function useRunIntents(props: {
   const sendRequest = (
     request: Parameters<NonNullable<typeof current.current>['send']>[0] & {type: 'send'},
   ) => current.current?.send(request);
-  if (!props.enabled || !snapshot || projectRoot === undefined)
-    return {controls: null, busy, sendRequest};
-  // Committed history can name a newer epoch than the lifecycle stream has reached; until that
-  // stream catches up the lifecycle describes a writer that no longer exists, so it offers nothing.
+  const committed = snapshot ? historyEpoch(snapshot.context) : 0n;
+  const acknowledged = machineRelaunch?.appliedEpoch ?? 0n;
   const writer = writerControls({
     observation: props.relaunch,
     liveness,
-    historyEpoch: snapshot ? historyEpoch(snapshot.context) : 0n,
+    historyEpoch: committed,
+    acknowledgedEpoch: acknowledged,
   });
+  useWriterRecovery(
+    props.schedule,
+    props.enabled && writer.status === 'catching-up',
+    props.refreshWriter,
+  );
+  if (!props.enabled || !snapshot || projectRoot === undefined)
+    return {controls: null, busy, sendRequest};
   const relaunch = machineRelaunch && {
     ...machineRelaunch,
     available: machineRelaunch.available && writer.relaunch !== null,
@@ -94,6 +101,7 @@ export function useRunIntents(props: {
     <IntentControls
       {...(relaunch ? {relaunch} : {})}
       actions={actions}
+      status={writer.status}
       epoch={epoch}
       busy={snapshot.matches({active: 'sending'})}
       entries={intentRows(snapshot.context, epoch)}

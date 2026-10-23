@@ -41,6 +41,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
     host: seed.identity.host,
     runId: seed.identity.runId,
     projectRoot,
+    refreshWriter: page.refreshWriter,
     ...(observation ? {relaunch: observation} : {}),
     enabled: snapshot.context.enabled,
     schedule,

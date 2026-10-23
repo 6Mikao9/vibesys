@@ -11,6 +11,7 @@ import type {RunEvent} from '@vibesys/contracts';
 import type {HostRun} from '@vibesys/hosts';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {Seeded} from '@vibesys/store/testing';
+import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -173,7 +174,8 @@ test('the last page settles the screen: the run, final, with no loading left', a
   expect(text).not.toContain('Reading the run’s history…');
   expect(text).not.toMatch(/[1-9]\d* running/);
   expect(text).not.toContain('Adopted the candidate');
-  expect(text).not.toContain('View logs');
+  expect(text).toContain('Resume');
+  expect(text).toContain('View logs');
 });
 
 test('the loading screen counts events of the total once the host says it, else events so far', async () => {
@@ -228,4 +230,27 @@ test('a saved run whose record expired reads as ended on the timeline, never Liv
   const text = await screenText(state);
   expect(text).toContain('Saved run');
   expect(text).not.toContain('Live');
+});
+
+test('property: every legacy ending renders the host-admitted Resume, regardless of compatibility flags', async () => {
+  const loaded = replay(FIXTURE.events.length, undefined).at(-1) as RunPageState;
+  await fc.assert(
+    fc.asyncProperty(
+      fc.constantFrom('completed', 'failed', 'stopped'),
+      fc.boolean(),
+      async (status, resumable) => {
+        const run: HostRun = {
+          ...ENDED,
+          status,
+          phase: status,
+          end: {outcome: status === 'completed' ? 'adopted' : status, reason: '', resumable},
+        };
+        const state = runPageStep(loaded, {type: 'record', record: {kind: 'ended', run}}).state;
+        const text = await screenText(state);
+        expect(text).toContain('Resume');
+        expect(text).toContain('View logs');
+      },
+    ),
+    {numRuns: 12, seed: 3436, examples: [['completed', false]]},
+  );
 });

@@ -10,7 +10,9 @@ import {
   type Lifecycle,
   LifecycleSchema,
   RecordSchema,
+  RunLiveness,
   TailResponseSchema,
+  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
@@ -39,6 +41,7 @@ afterAll(async () => {
 /** The byte transport holds admissions until the simulated host acknowledges them. */
 class FakeBridge implements GatewayBridge {
   readonly calls: Array<{bytes: Uint8Array; admit: (bytes: Uint8Array) => void}> = [];
+  readonly liveness = new Set<(bytes: Uint8Array) => void>();
   readonly listeners = new Set<(bytes: Uint8Array) => void>();
   get watching() {
     return this.listeners.size > 0;
@@ -55,11 +58,27 @@ class FakeBridge implements GatewayBridge {
     receive: (bytes: Uint8Array) => void,
   ) {
     if (method.endsWith('/Tail')) this.listeners.add(receive);
+    if (method.endsWith('/WatchRuns')) {
+      this.liveness.add(receive);
+      this.alive(1n, true);
+    }
     return {
       cancel: () => {
         this.listeners.delete(receive);
+        this.liveness.delete(receive);
       },
     };
+  }
+  alive(epoch: bigint, live: boolean) {
+    const bytes = toBinary(
+      WatchRunsResponseSchema,
+      create(WatchRunsResponseSchema, {
+        runId: 'run-1',
+        head: {epoch: Number(epoch)},
+        liveness: live ? RunLiveness.ALIVE : RunLiveness.ENDED,
+      }),
+    );
+    for (const receive of this.liveness) receive(bytes);
   }
   outcomes(controlId: string, action: IntentAction) {
     const bytes = toBinary(
@@ -145,8 +164,8 @@ test('live, draining, parked, resumed and finished observations keep the right c
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const render = (epoch: bigint, lifecycle: Lifecycle) =>
-    act(async () =>
+  const render = async (epoch: bigint, lifecycle: Lifecycle) => {
+    await act(async () =>
       root.render(
         <RunIntents
           bridge={bridge}
@@ -159,6 +178,10 @@ test('live, draining, parked, resumed and finished observations keep the right c
         />,
       ),
     );
+    await act(async () =>
+      bridge.alive(epoch, !['parked', 'ended'].includes(lifecycle.state.case ?? '')),
+    );
+  };
   const labels = () => [...container.querySelectorAll('button')].map(button => button.textContent);
   try {
     await render(1n, create(LifecycleSchema, {state: {case: 'running', value: {}}}));

@@ -1,6 +1,6 @@
 import type {HostKey} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
-import type {ScheduleTimeout} from '@vibesys/machine';
+import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {
   type RelaunchLiveness,
   type RelaunchObservation,
@@ -10,8 +10,8 @@ import {
   relaunchTarget,
 } from '@vibesys/runs/intents';
 import {useEffect, useRef, useState} from 'react';
-import type {SnapshotFrom} from 'xstate';
-import type {relaunchMachine} from '../state/index.js';
+import {createActor, type SnapshotFrom} from 'xstate';
+import {type relaunchMachine, writerRecoveryMachine} from '../state/index.js';
 import {relaunchActor} from './effects/relaunch.js';
 import type {RelaunchView} from './ui/relaunch.js';
 
@@ -77,4 +77,34 @@ export function useRelaunch(props: {
     launch: () => current.current?.send({type: 'relaunch'}),
   };
   return {view, liveness};
+}
+
+/** The page owns the lifecycle reader; this hook only translates the machine's refresh request. */
+export function useWriterRecovery(
+  schedule: ScheduleTimeout,
+  waiting: boolean,
+  refresh: (() => void) | undefined,
+) {
+  const latest = useRef({refresh, waiting});
+  latest.current = {refresh, waiting};
+  const current = useRef<ReturnType<typeof createActor<typeof writerRecoveryMachine>> | null>(null);
+  useEffect(() => {
+    const actor = createActor(
+      writerRecoveryMachine.provide({
+        actions: {
+          refresh: () => latest.current.refresh?.(),
+        },
+      }),
+      {clock: clockFrom(schedule)},
+    ).start();
+    current.current = actor;
+    actor.send({type: 'observe', waiting: latest.current.waiting});
+    return () => {
+      current.current = null;
+      actor.stop();
+    };
+  }, [schedule]);
+  useEffect(() => {
+    current.current?.send({type: 'observe', waiting});
+  }, [waiting]);
 }

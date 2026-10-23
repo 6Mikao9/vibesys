@@ -107,3 +107,52 @@ export const relaunchMachine = setup({
     uncertain: {always: {guard: 'nextEpoch', target: 'ready'}},
   },
 });
+
+/** A quiet or broken WatchRuns is re-read; silence cannot renew permission to act. */
+export const livenessWatchMachine = setup({
+  types: {events: {} as {type: 'ended'} | {type: 'liveness'; value: RelaunchLiveness}},
+  actions: {observed: () => {}, unknown: () => {}},
+  actors: {
+    read: fromCallback(() => {
+      throw new Error('liveness read was not provided');
+    }),
+  },
+  delays: {lease: 30_000, retry: 1000},
+}).createMachine({
+  id: 'livenessWatch',
+  initial: 'watching',
+  states: {
+    watching: {
+      invoke: {id: 'read', src: 'read', onError: 'recovering'},
+      initial: 'fresh',
+      states: {fresh: {after: {lease: '#livenessWatch.recovering'}}},
+      on: {
+        ended: 'recovering',
+        liveness: {target: '.fresh', actions: 'observed'},
+      },
+    },
+    recovering: {entry: 'unknown', after: {retry: 'watching'}},
+  },
+});
+
+/** Epoch gaps trigger a re-read without discarding the page's last usable snapshot. */
+export const writerRecoveryMachine = setup({
+  types: {events: {} as {type: 'observe'; waiting: boolean}},
+  actions: {
+    refresh: () => {
+      throw new Error('writer refresh was not provided');
+    },
+  },
+  delays: {deadline: 30_000},
+}).createMachine({
+  initial: 'current',
+  on: {observe: {guard: ({event}) => !event.waiting, target: '.current'}},
+  states: {
+    current: {on: {observe: {guard: ({event}) => event.waiting, target: 'waiting'}}},
+    waiting: {after: {deadline: 'refreshing'}},
+    refreshing: {
+      entry: 'refresh',
+      always: 'waiting',
+    },
+  },
+});

@@ -86,6 +86,7 @@ export function useGatewayRun(options: {
   }, [actor, follow]);
   return {
     snapshot,
+    refreshWriter: () => actor?.send({type: 'refresh-writer'}),
     projectionError,
     route,
     zoom,

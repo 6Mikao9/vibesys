@@ -31,6 +31,7 @@ const STATUS_LABELS: Record<IntentRow['status'], string> = {
 };
 
 export function IntentControls(props: {
+  readonly status?: 'ready' | 'catching-up' | 'unknown';
   readonly busy: boolean;
   readonly actions: readonly RunIntentAction[];
   readonly epoch: bigint;
@@ -47,6 +48,7 @@ export function IntentControls(props: {
 }): JSX.Element {
   return (
     <Stack gap="space-1">
+      <WriterStatus status={props.status ?? 'ready'} />
       <Row gap="space-2" wrap>
         {props.actions
           .filter(action => action !== 'steer')
@@ -139,4 +141,13 @@ export function IntentControls(props: {
       </Dialog>
     </Stack>
   );
+}
+
+function WriterStatus({status}: {readonly status: 'ready' | 'catching-up' | 'unknown'}) {
+  const words = {
+    ready: null,
+    'catching-up': 'Catching up with the run… Reconnecting automatically.',
+    unknown: 'Writer status unknown. Reconnecting automatically.',
+  };
+  return words[status] ? <Text tone="muted">{words[status]}</Text> : null;
 }
