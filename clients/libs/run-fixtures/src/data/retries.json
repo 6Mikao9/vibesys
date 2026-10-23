@@ -77,9 +77,32 @@
       }
     },
     {
+      "type": "span_ended",
+      "timestamp": "2026-10-15T16:30:53+00:00",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:input-measurement",
+          "parent": "flow:root#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 3,
+          "ended_at": 4,
+          "label": {
+            "kind": "gate",
+            "title": "input benchmark",
+            "verdict": "passed",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":10000000,\"vs_baseline\":1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":10000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}"
+          }
+        }
+      },
+      "sequence": 4
+    },
+    {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 4,
+      "sequence": 5,
       "timestamp": "2026-10-15T16:31:01+00:00",
       "type": "span_started",
       "data": {
@@ -103,7 +126,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 5,
+      "sequence": 6,
       "timestamp": "2026-10-15T16:31:41+00:00",
       "type": "span_ended",
       "data": {
@@ -127,7 +150,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 6,
+      "sequence": 7,
       "timestamp": "2026-10-15T16:32:31+00:00",
       "type": "span_started",
       "data": {
@@ -151,7 +174,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 7,
+      "sequence": 8,
       "timestamp": "2026-10-15T16:32:32+00:00",
       "type": "span_started",
       "data": {
@@ -182,14 +205,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w1-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 8,
+      "sequence": 9,
       "timestamp": "2026-10-15T16:33:02+00:00",
       "type": "span_updated",
       "data": {
@@ -220,14 +244,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w1-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 9,
+      "sequence": 10,
       "timestamp": "2026-10-15T16:38:32+00:00",
       "type": "span_ended",
       "data": {
@@ -261,14 +286,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w1-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 10,
+      "sequence": 11,
       "timestamp": "2026-10-15T16:38:33+00:00",
       "type": "span_started",
       "data": {
@@ -284,7 +310,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":13000000,\"vs_baseline\":1.3}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":13000000,\"vs_baseline\":1.3,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":13000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           }
         }
@@ -293,7 +319,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 11,
+      "sequence": 12,
       "timestamp": "2026-10-15T16:42:30+00:00",
       "type": "span_ended",
       "data": {
@@ -309,7 +335,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":13000000,\"vs_baseline\":1.3}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":13000000,\"vs_baseline\":1.3,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":13000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           }
         }
@@ -318,7 +344,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 12,
+      "sequence": 13,
       "timestamp": "2026-10-15T16:42:31+00:00",
       "type": "span_ended",
       "data": {
@@ -344,7 +370,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 13,
+      "sequence": 14,
       "timestamp": "2026-10-15T16:32:41+00:00",
       "type": "span_started",
       "data": {
@@ -368,7 +394,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 14,
+      "sequence": 15,
       "timestamp": "2026-10-15T16:32:42+00:00",
       "type": "span_started",
       "data": {
@@ -407,14 +433,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w2-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 15,
+      "sequence": 16,
       "timestamp": "2026-10-15T16:33:42+00:00",
       "type": "span_updated",
       "data": {
@@ -453,14 +480,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w2-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 16,
+      "sequence": 17,
       "timestamp": "2026-10-15T16:38:42+00:00",
       "type": "span_ended",
       "data": {
@@ -502,14 +530,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w2-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 17,
+      "sequence": 18,
       "timestamp": "2026-10-15T16:38:43+00:00",
       "type": "span_started",
       "data": {
@@ -525,7 +554,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":9000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "slower"
           }
         }
@@ -534,7 +563,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 18,
+      "sequence": 19,
       "timestamp": "2026-10-15T16:42:40+00:00",
       "type": "span_ended",
       "data": {
@@ -550,7 +579,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":9000000,\"vs_baseline\":0.9,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":9000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "slower"
           }
         }
@@ -559,7 +588,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 19,
+      "sequence": 20,
       "timestamp": "2026-10-15T16:42:41+00:00",
       "type": "span_ended",
       "data": {
@@ -586,7 +615,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 20,
+      "sequence": 21,
       "timestamp": "2026-10-15T16:32:51+00:00",
       "type": "span_started",
       "data": {
@@ -610,7 +639,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 21,
+      "sequence": 22,
       "timestamp": "2026-10-15T16:32:52+00:00",
       "type": "span_started",
       "data": {
@@ -665,14 +694,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w3-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 22,
+      "sequence": 23,
       "timestamp": "2026-10-15T16:34:52+00:00",
       "type": "span_updated",
       "data": {
@@ -727,14 +757,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w3-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 23,
+      "sequence": 24,
       "timestamp": "2026-10-15T16:38:52+00:00",
       "type": "span_ended",
       "data": {
@@ -792,14 +823,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w3-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 24,
+      "sequence": 25,
       "timestamp": "2026-10-15T16:42:51+00:00",
       "type": "span_ended",
       "data": {
@@ -830,7 +862,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 25,
+      "sequence": 26,
       "timestamp": "2026-10-15T16:33:01+00:00",
       "type": "span_started",
       "data": {
@@ -854,7 +886,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 26,
+      "sequence": 27,
       "timestamp": "2026-10-15T16:33:02+00:00",
       "type": "span_started",
       "data": {
@@ -893,14 +925,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w4-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 27,
+      "sequence": 28,
       "timestamp": "2026-10-15T16:34:02+00:00",
       "type": "span_updated",
       "data": {
@@ -939,14 +972,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w4-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 28,
+      "sequence": 29,
       "timestamp": "2026-10-15T16:33:11+00:00",
       "type": "span_started",
       "data": {
@@ -970,7 +1004,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 29,
+      "sequence": 30,
       "timestamp": "2026-10-15T16:33:12+00:00",
       "type": "span_started",
       "data": {
@@ -1025,14 +1059,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w5-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 30,
+      "sequence": 31,
       "timestamp": "2026-10-15T16:35:12+00:00",
       "type": "span_updated",
       "data": {
@@ -1087,14 +1122,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w5-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 31,
+      "sequence": 32,
       "timestamp": "2026-10-15T16:39:12+00:00",
       "type": "span_ended",
       "data": {
@@ -1152,14 +1188,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w5-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 32,
+      "sequence": 33,
       "timestamp": "2026-10-15T16:39:13+00:00",
       "type": "span_started",
       "data": {
@@ -1175,7 +1212,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":16000000,\"vs_baseline\":1.6}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":16000000,\"vs_baseline\":1.6,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":16000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           }
         }
@@ -1184,7 +1221,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 33,
+      "sequence": 34,
       "timestamp": "2026-10-15T16:43:10+00:00",
       "type": "span_ended",
       "data": {
@@ -1200,7 +1237,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":16000000,\"vs_baseline\":1.6}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":16000000,\"vs_baseline\":1.6,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":16000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           }
         }
@@ -1209,7 +1246,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 34,
+      "sequence": 35,
       "timestamp": "2026-10-15T16:43:11+00:00",
       "type": "span_ended",
       "data": {
@@ -1235,7 +1272,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-180000",
-      "sequence": 35,
+      "sequence": 36,
       "timestamp": "2026-10-15T16:45:51+00:00",
       "type": "span_started",
       "data": {

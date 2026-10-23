@@ -77,9 +77,32 @@
       }
     },
     {
+      "type": "span_ended",
+      "timestamp": "2026-10-15T16:30:53+00:00",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:input-measurement",
+          "parent": "flow:root#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 3,
+          "ended_at": 4,
+          "label": {
+            "kind": "gate",
+            "title": "input benchmark",
+            "verdict": "passed",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":10000000,\"vs_baseline\":1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":10000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}"
+          }
+        }
+      },
+      "sequence": 4
+    },
+    {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 4,
+      "sequence": 5,
       "timestamp": "2026-10-15T16:31:01+00:00",
       "type": "span_started",
       "data": {
@@ -103,7 +126,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 5,
+      "sequence": 6,
       "timestamp": "2026-10-15T16:31:41+00:00",
       "type": "span_ended",
       "data": {
@@ -127,7 +150,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 6,
+      "sequence": 7,
       "timestamp": "2026-10-15T16:32:46+00:00",
       "type": "span_started",
       "data": {
@@ -151,7 +174,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 7,
+      "sequence": 8,
       "timestamp": "2026-10-15T16:32:47+00:00",
       "type": "span_started",
       "data": {
@@ -167,14 +190,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w1-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 8,
+      "sequence": 9,
       "timestamp": "2026-10-15T16:34:47+00:00",
       "type": "span_ended",
       "data": {
@@ -191,14 +215,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w1-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 9,
+      "sequence": 10,
       "timestamp": "2026-10-15T16:36:06+00:00",
       "type": "span_ended",
       "data": {
@@ -229,7 +254,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 10,
+      "sequence": 11,
       "timestamp": "2026-10-15T16:33:01+00:00",
       "type": "span_started",
       "data": {
@@ -253,7 +278,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 11,
+      "sequence": 12,
       "timestamp": "2026-10-15T16:33:02+00:00",
       "type": "span_started",
       "data": {
@@ -269,14 +294,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w2-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 12,
+      "sequence": 13,
       "timestamp": "2026-10-15T16:35:02+00:00",
       "type": "span_ended",
       "data": {
@@ -293,14 +319,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w2-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 13,
+      "sequence": 14,
       "timestamp": "2026-10-15T16:36:21+00:00",
       "type": "span_ended",
       "data": {
@@ -331,7 +358,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 14,
+      "sequence": 15,
       "timestamp": "2026-10-15T16:33:16+00:00",
       "type": "span_started",
       "data": {
@@ -355,7 +382,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 15,
+      "sequence": 16,
       "timestamp": "2026-10-15T16:33:17+00:00",
       "type": "span_started",
       "data": {
@@ -371,14 +398,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w3-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 16,
+      "sequence": 17,
       "timestamp": "2026-10-15T16:35:17+00:00",
       "type": "span_ended",
       "data": {
@@ -395,14 +423,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-3\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w3-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 17,
+      "sequence": 18,
       "timestamp": "2026-10-15T16:36:36+00:00",
       "type": "span_ended",
       "data": {
@@ -433,7 +462,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 18,
+      "sequence": 19,
       "timestamp": "2026-10-15T16:33:31+00:00",
       "type": "span_started",
       "data": {
@@ -457,7 +486,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 19,
+      "sequence": 20,
       "timestamp": "2026-10-15T16:33:32+00:00",
       "type": "span_started",
       "data": {
@@ -473,14 +502,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w4-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 20,
+      "sequence": 21,
       "timestamp": "2026-10-15T16:35:32+00:00",
       "type": "span_ended",
       "data": {
@@ -497,14 +527,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-4\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w4-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 21,
+      "sequence": 22,
       "timestamp": "2026-10-15T16:36:51+00:00",
       "type": "span_ended",
       "data": {
@@ -535,7 +566,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 22,
+      "sequence": 23,
       "timestamp": "2026-10-15T16:33:46+00:00",
       "type": "span_started",
       "data": {
@@ -559,7 +590,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 23,
+      "sequence": 24,
       "timestamp": "2026-10-15T16:33:47+00:00",
       "type": "span_started",
       "data": {
@@ -575,14 +606,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w5-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 24,
+      "sequence": 25,
       "timestamp": "2026-10-15T16:35:47+00:00",
       "type": "span_ended",
       "data": {
@@ -599,14 +631,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-5\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w5-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 25,
+      "sequence": 26,
       "timestamp": "2026-10-15T16:37:06+00:00",
       "type": "span_ended",
       "data": {
@@ -637,7 +670,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 26,
+      "sequence": 27,
       "timestamp": "2026-10-15T16:34:01+00:00",
       "type": "span_started",
       "data": {
@@ -661,7 +694,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 27,
+      "sequence": 28,
       "timestamp": "2026-10-15T16:34:02+00:00",
       "type": "span_started",
       "data": {
@@ -677,14 +710,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-6\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w6-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 28,
+      "sequence": 29,
       "timestamp": "2026-10-15T16:36:02+00:00",
       "type": "span_ended",
       "data": {
@@ -701,14 +735,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-6\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w6-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 29,
+      "sequence": 30,
       "timestamp": "2026-10-15T16:37:21+00:00",
       "type": "span_ended",
       "data": {
@@ -739,7 +774,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 30,
+      "sequence": 31,
       "timestamp": "2026-10-15T16:34:16+00:00",
       "type": "span_started",
       "data": {
@@ -763,7 +798,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 31,
+      "sequence": 32,
       "timestamp": "2026-10-15T16:34:17+00:00",
       "type": "span_started",
       "data": {
@@ -779,14 +814,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-7\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w7-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 32,
+      "sequence": 33,
       "timestamp": "2026-10-15T16:36:17+00:00",
       "type": "span_ended",
       "data": {
@@ -803,14 +839,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-7\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w7-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 33,
+      "sequence": 34,
       "timestamp": "2026-10-15T16:37:36+00:00",
       "type": "span_ended",
       "data": {
@@ -841,7 +878,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 34,
+      "sequence": 35,
       "timestamp": "2026-10-15T16:34:31+00:00",
       "type": "span_started",
       "data": {
@@ -865,7 +902,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 35,
+      "sequence": 36,
       "timestamp": "2026-10-15T16:34:32+00:00",
       "type": "span_started",
       "data": {
@@ -881,14 +918,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-8\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w8-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 36,
+      "sequence": 37,
       "timestamp": "2026-10-15T16:36:32+00:00",
       "type": "span_ended",
       "data": {
@@ -905,14 +943,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-8\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w8-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 37,
+      "sequence": 38,
       "timestamp": "2026-10-15T16:37:51+00:00",
       "type": "span_ended",
       "data": {
@@ -943,7 +982,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 38,
+      "sequence": 39,
       "timestamp": "2026-10-15T16:34:46+00:00",
       "type": "span_started",
       "data": {
@@ -967,7 +1006,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 39,
+      "sequence": 40,
       "timestamp": "2026-10-15T16:34:47+00:00",
       "type": "span_started",
       "data": {
@@ -983,14 +1022,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-9\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w9-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 40,
+      "sequence": 41,
       "timestamp": "2026-10-15T16:36:47+00:00",
       "type": "span_ended",
       "data": {
@@ -1007,14 +1047,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-9\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w9-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 41,
+      "sequence": 42,
       "timestamp": "2026-10-15T16:38:06+00:00",
       "type": "span_ended",
       "data": {
@@ -1045,7 +1086,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 42,
+      "sequence": 43,
       "timestamp": "2026-10-15T16:35:01+00:00",
       "type": "span_started",
       "data": {
@@ -1069,7 +1110,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 43,
+      "sequence": 44,
       "timestamp": "2026-10-15T16:35:02+00:00",
       "type": "span_started",
       "data": {
@@ -1085,14 +1126,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-10\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w10-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 44,
+      "sequence": 45,
       "timestamp": "2026-10-15T16:37:02+00:00",
       "type": "span_ended",
       "data": {
@@ -1109,14 +1151,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-10\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w10-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 45,
+      "sequence": 46,
       "timestamp": "2026-10-15T16:38:21+00:00",
       "type": "span_ended",
       "data": {
@@ -1147,7 +1190,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 46,
+      "sequence": 47,
       "timestamp": "2026-10-15T16:35:16+00:00",
       "type": "span_started",
       "data": {
@@ -1171,7 +1214,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 47,
+      "sequence": 48,
       "timestamp": "2026-10-15T16:35:17+00:00",
       "type": "span_started",
       "data": {
@@ -1187,14 +1230,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-11\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w11-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 48,
+      "sequence": 49,
       "timestamp": "2026-10-15T16:37:17+00:00",
       "type": "span_ended",
       "data": {
@@ -1211,14 +1255,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-11\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w11-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 49,
+      "sequence": 50,
       "timestamp": "2026-10-15T16:38:36+00:00",
       "type": "span_ended",
       "data": {
@@ -1249,7 +1294,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 50,
+      "sequence": 51,
       "timestamp": "2026-10-15T16:35:31+00:00",
       "type": "span_started",
       "data": {
@@ -1273,7 +1318,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 51,
+      "sequence": 52,
       "timestamp": "2026-10-15T16:35:32+00:00",
       "type": "span_started",
       "data": {
@@ -1289,14 +1334,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-12\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w12-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 52,
+      "sequence": 53,
       "timestamp": "2026-10-15T16:37:32+00:00",
       "type": "span_ended",
       "data": {
@@ -1313,14 +1359,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-12\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w12-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 53,
+      "sequence": 54,
       "timestamp": "2026-10-15T16:38:51+00:00",
       "type": "span_ended",
       "data": {
@@ -1351,7 +1398,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 54,
+      "sequence": 55,
       "timestamp": "2026-10-15T16:35:46+00:00",
       "type": "span_started",
       "data": {
@@ -1375,7 +1422,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 55,
+      "sequence": 56,
       "timestamp": "2026-10-15T16:35:47+00:00",
       "type": "span_started",
       "data": {
@@ -1391,14 +1438,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-13\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w13-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 56,
+      "sequence": 57,
       "timestamp": "2026-10-15T16:37:47+00:00",
       "type": "span_ended",
       "data": {
@@ -1415,14 +1463,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-13\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w13-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 57,
+      "sequence": 58,
       "timestamp": "2026-10-15T16:39:06+00:00",
       "type": "span_ended",
       "data": {
@@ -1453,7 +1502,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 58,
+      "sequence": 59,
       "timestamp": "2026-10-15T16:36:01+00:00",
       "type": "span_started",
       "data": {
@@ -1477,7 +1526,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 59,
+      "sequence": 60,
       "timestamp": "2026-10-15T16:36:02+00:00",
       "type": "span_started",
       "data": {
@@ -1493,14 +1542,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-14\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w14-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 60,
+      "sequence": 61,
       "timestamp": "2026-10-15T16:38:02+00:00",
       "type": "span_ended",
       "data": {
@@ -1517,14 +1567,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-14\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w14-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 61,
+      "sequence": 62,
       "timestamp": "2026-10-15T16:39:21+00:00",
       "type": "span_ended",
       "data": {
@@ -1555,7 +1606,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 62,
+      "sequence": 63,
       "timestamp": "2026-10-15T16:36:16+00:00",
       "type": "span_started",
       "data": {
@@ -1579,7 +1630,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 63,
+      "sequence": 64,
       "timestamp": "2026-10-15T16:36:17+00:00",
       "type": "span_started",
       "data": {
@@ -1595,14 +1646,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-15\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w15-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 64,
+      "sequence": 65,
       "timestamp": "2026-10-15T16:38:17+00:00",
       "type": "span_ended",
       "data": {
@@ -1619,14 +1671,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-15\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w15-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 65,
+      "sequence": 66,
       "timestamp": "2026-10-15T16:39:36+00:00",
       "type": "span_ended",
       "data": {
@@ -1657,7 +1710,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 66,
+      "sequence": 67,
       "timestamp": "2026-10-15T16:36:31+00:00",
       "type": "span_started",
       "data": {
@@ -1681,7 +1734,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 67,
+      "sequence": 68,
       "timestamp": "2026-10-15T16:36:32+00:00",
       "type": "span_started",
       "data": {
@@ -1697,14 +1750,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-16\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-w16"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 68,
+      "sequence": 69,
       "timestamp": "2026-10-15T16:38:32+00:00",
       "type": "span_ended",
       "data": {
@@ -1721,14 +1775,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-16\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-w16"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 69,
+      "sequence": 70,
       "timestamp": "2026-10-15T16:39:51+00:00",
       "type": "span_ended",
       "data": {
@@ -1759,7 +1814,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 70,
+      "sequence": 71,
       "timestamp": "2026-10-15T16:36:46+00:00",
       "type": "span_started",
       "data": {
@@ -1783,7 +1838,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 71,
+      "sequence": 72,
       "timestamp": "2026-10-15T16:36:47+00:00",
       "type": "span_started",
       "data": {
@@ -1799,14 +1854,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-17\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w17-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 72,
+      "sequence": 73,
       "timestamp": "2026-10-15T16:38:47+00:00",
       "type": "span_ended",
       "data": {
@@ -1823,14 +1879,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-17\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w17-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 73,
+      "sequence": 74,
       "timestamp": "2026-10-15T16:40:06+00:00",
       "type": "span_ended",
       "data": {
@@ -1861,7 +1918,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 74,
+      "sequence": 75,
       "timestamp": "2026-10-15T16:37:01+00:00",
       "type": "span_started",
       "data": {
@@ -1885,7 +1942,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 75,
+      "sequence": 76,
       "timestamp": "2026-10-15T16:37:02+00:00",
       "type": "span_started",
       "data": {
@@ -1901,14 +1958,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-18\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w18-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 76,
+      "sequence": 77,
       "timestamp": "2026-10-15T16:39:02+00:00",
       "type": "span_ended",
       "data": {
@@ -1925,14 +1983,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-18\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w18-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 77,
+      "sequence": 78,
       "timestamp": "2026-10-15T16:40:21+00:00",
       "type": "span_ended",
       "data": {
@@ -1963,7 +2022,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 78,
+      "sequence": 79,
       "timestamp": "2026-10-15T16:37:16+00:00",
       "type": "span_started",
       "data": {
@@ -1987,7 +2046,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 79,
+      "sequence": 80,
       "timestamp": "2026-10-15T16:37:17+00:00",
       "type": "span_started",
       "data": {
@@ -2003,14 +2062,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-19\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w19-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 80,
+      "sequence": 81,
       "timestamp": "2026-10-15T16:39:17+00:00",
       "type": "span_ended",
       "data": {
@@ -2027,14 +2087,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-19\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w19-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 81,
+      "sequence": 82,
       "timestamp": "2026-10-15T16:40:36+00:00",
       "type": "span_ended",
       "data": {
@@ -2065,7 +2126,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 82,
+      "sequence": 83,
       "timestamp": "2026-10-15T16:37:31+00:00",
       "type": "span_started",
       "data": {
@@ -2089,7 +2150,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 83,
+      "sequence": 84,
       "timestamp": "2026-10-15T16:37:32+00:00",
       "type": "span_started",
       "data": {
@@ -2105,14 +2166,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-20\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w20-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 84,
+      "sequence": 85,
       "timestamp": "2026-10-15T16:39:32+00:00",
       "type": "span_ended",
       "data": {
@@ -2129,14 +2191,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-20\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w20-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 85,
+      "sequence": 86,
       "timestamp": "2026-10-15T16:40:51+00:00",
       "type": "span_ended",
       "data": {
@@ -2167,7 +2230,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 86,
+      "sequence": 87,
       "timestamp": "2026-10-15T16:37:46+00:00",
       "type": "span_started",
       "data": {
@@ -2191,7 +2254,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 87,
+      "sequence": 88,
       "timestamp": "2026-10-15T16:37:47+00:00",
       "type": "span_started",
       "data": {
@@ -2207,14 +2270,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-21\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w21-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 88,
+      "sequence": 89,
       "timestamp": "2026-10-15T16:39:47+00:00",
       "type": "span_ended",
       "data": {
@@ -2231,14 +2295,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-21\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w21-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 89,
+      "sequence": 90,
       "timestamp": "2026-10-15T16:41:06+00:00",
       "type": "span_ended",
       "data": {
@@ -2269,7 +2334,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 90,
+      "sequence": 91,
       "timestamp": "2026-10-15T16:38:01+00:00",
       "type": "span_started",
       "data": {
@@ -2293,7 +2358,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 91,
+      "sequence": 92,
       "timestamp": "2026-10-15T16:38:02+00:00",
       "type": "span_started",
       "data": {
@@ -2309,14 +2374,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-22\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w22-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 92,
+      "sequence": 93,
       "timestamp": "2026-10-15T16:40:02+00:00",
       "type": "span_ended",
       "data": {
@@ -2333,14 +2399,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-22\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w22-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 93,
+      "sequence": 94,
       "timestamp": "2026-10-15T16:41:21+00:00",
       "type": "span_ended",
       "data": {
@@ -2371,7 +2438,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 94,
+      "sequence": 95,
       "timestamp": "2026-10-15T16:38:16+00:00",
       "type": "span_started",
       "data": {
@@ -2395,7 +2462,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 95,
+      "sequence": 96,
       "timestamp": "2026-10-15T16:38:17+00:00",
       "type": "span_started",
       "data": {
@@ -2411,14 +2478,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-23\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w23-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 96,
+      "sequence": 97,
       "timestamp": "2026-10-15T16:40:17+00:00",
       "type": "span_ended",
       "data": {
@@ -2435,14 +2503,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-23\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w23-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 97,
+      "sequence": 98,
       "timestamp": "2026-10-15T16:41:36+00:00",
       "type": "span_ended",
       "data": {
@@ -2473,7 +2542,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 98,
+      "sequence": 99,
       "timestamp": "2026-10-15T16:38:31+00:00",
       "type": "span_started",
       "data": {
@@ -2497,7 +2566,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 99,
+      "sequence": 100,
       "timestamp": "2026-10-15T16:38:32+00:00",
       "type": "span_started",
       "data": {
@@ -2513,14 +2582,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-24\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w24-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 100,
+      "sequence": 101,
       "timestamp": "2026-10-15T16:40:32+00:00",
       "type": "span_ended",
       "data": {
@@ -2537,14 +2607,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-24\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w24-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 101,
+      "sequence": 102,
       "timestamp": "2026-10-15T16:41:51+00:00",
       "type": "span_ended",
       "data": {
@@ -2575,7 +2646,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 102,
+      "sequence": 103,
       "timestamp": "2026-10-15T16:38:46+00:00",
       "type": "span_started",
       "data": {
@@ -2599,7 +2670,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 103,
+      "sequence": 104,
       "timestamp": "2026-10-15T16:38:47+00:00",
       "type": "span_started",
       "data": {
@@ -2615,14 +2686,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-25\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w25-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 104,
+      "sequence": 105,
       "timestamp": "2026-10-15T16:40:47+00:00",
       "type": "span_ended",
       "data": {
@@ -2639,14 +2711,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-25\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w25-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 105,
+      "sequence": 106,
       "timestamp": "2026-10-15T16:42:06+00:00",
       "type": "span_ended",
       "data": {
@@ -2677,7 +2750,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 106,
+      "sequence": 107,
       "timestamp": "2026-10-15T16:39:01+00:00",
       "type": "span_started",
       "data": {
@@ -2701,7 +2774,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 107,
+      "sequence": 108,
       "timestamp": "2026-10-15T16:39:02+00:00",
       "type": "span_started",
       "data": {
@@ -2717,14 +2790,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-26\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w26-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 108,
+      "sequence": 109,
       "timestamp": "2026-10-15T16:41:02+00:00",
       "type": "span_ended",
       "data": {
@@ -2741,14 +2815,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-26\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w26-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 109,
+      "sequence": 110,
       "timestamp": "2026-10-15T16:42:21+00:00",
       "type": "span_ended",
       "data": {
@@ -2779,7 +2854,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 110,
+      "sequence": 111,
       "timestamp": "2026-10-15T16:39:16+00:00",
       "type": "span_started",
       "data": {
@@ -2803,7 +2878,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 111,
+      "sequence": 112,
       "timestamp": "2026-10-15T16:39:17+00:00",
       "type": "span_started",
       "data": {
@@ -2819,14 +2894,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-27\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w27-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 112,
+      "sequence": 113,
       "timestamp": "2026-10-15T16:41:17+00:00",
       "type": "span_ended",
       "data": {
@@ -2843,14 +2919,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-27\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w27-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 113,
+      "sequence": 114,
       "timestamp": "2026-10-15T16:41:18+00:00",
       "type": "span_started",
       "data": {
@@ -2875,7 +2952,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 114,
+      "sequence": 115,
       "timestamp": "2026-10-15T16:42:35+00:00",
       "type": "span_ended",
       "data": {
@@ -2900,7 +2977,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 115,
+      "sequence": 116,
       "timestamp": "2026-10-15T16:42:36+00:00",
       "type": "span_ended",
       "data": {
@@ -2927,7 +3004,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 116,
+      "sequence": 117,
       "timestamp": "2026-10-15T16:39:31+00:00",
       "type": "span_started",
       "data": {
@@ -2951,7 +3028,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 117,
+      "sequence": 118,
       "timestamp": "2026-10-15T16:39:32+00:00",
       "type": "span_started",
       "data": {
@@ -2967,14 +3044,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-28\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w28-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 118,
+      "sequence": 119,
       "timestamp": "2026-10-15T16:41:32+00:00",
       "type": "span_ended",
       "data": {
@@ -2991,14 +3069,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-28\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w28-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 119,
+      "sequence": 120,
       "timestamp": "2026-10-15T16:41:33+00:00",
       "type": "span_started",
       "data": {
@@ -3023,7 +3102,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 120,
+      "sequence": 121,
       "timestamp": "2026-10-15T16:42:50+00:00",
       "type": "span_ended",
       "data": {
@@ -3048,7 +3127,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 121,
+      "sequence": 122,
       "timestamp": "2026-10-15T16:42:51+00:00",
       "type": "span_ended",
       "data": {
@@ -3075,7 +3154,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 122,
+      "sequence": 123,
       "timestamp": "2026-10-15T16:39:46+00:00",
       "type": "span_started",
       "data": {
@@ -3099,7 +3178,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 123,
+      "sequence": 124,
       "timestamp": "2026-10-15T16:39:47+00:00",
       "type": "span_started",
       "data": {
@@ -3115,14 +3194,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-29\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w29-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 124,
+      "sequence": 125,
       "timestamp": "2026-10-15T16:41:47+00:00",
       "type": "span_ended",
       "data": {
@@ -3139,14 +3219,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-29\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w29-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 125,
+      "sequence": 126,
       "timestamp": "2026-10-15T16:41:48+00:00",
       "type": "span_started",
       "data": {
@@ -3171,7 +3252,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 126,
+      "sequence": 127,
       "timestamp": "2026-10-15T16:43:05+00:00",
       "type": "span_ended",
       "data": {
@@ -3196,7 +3277,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 127,
+      "sequence": 128,
       "timestamp": "2026-10-15T16:43:06+00:00",
       "type": "span_ended",
       "data": {
@@ -3223,7 +3304,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 128,
+      "sequence": 129,
       "timestamp": "2026-10-15T16:40:01+00:00",
       "type": "span_started",
       "data": {
@@ -3247,7 +3328,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 129,
+      "sequence": 130,
       "timestamp": "2026-10-15T16:40:02+00:00",
       "type": "span_started",
       "data": {
@@ -3263,14 +3344,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-30\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w30-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 130,
+      "sequence": 131,
       "timestamp": "2026-10-15T16:42:02+00:00",
       "type": "span_ended",
       "data": {
@@ -3287,14 +3369,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-30\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w30-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 131,
+      "sequence": 132,
       "timestamp": "2026-10-15T16:42:03+00:00",
       "type": "span_started",
       "data": {
@@ -3310,7 +3393,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":8000000,\"vs_baseline\":0.8}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":8000000,\"vs_baseline\":0.8,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":8000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "slower"
           }
         }
@@ -3319,7 +3402,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 132,
+      "sequence": 133,
       "timestamp": "2026-10-15T16:43:20+00:00",
       "type": "span_ended",
       "data": {
@@ -3335,7 +3418,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":8000000,\"vs_baseline\":0.8}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":8000000,\"vs_baseline\":0.8,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":8000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "slower"
           }
         }
@@ -3344,7 +3427,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 133,
+      "sequence": 134,
       "timestamp": "2026-10-15T16:43:21+00:00",
       "type": "span_ended",
       "data": {
@@ -3371,7 +3454,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 134,
+      "sequence": 135,
       "timestamp": "2026-10-15T16:40:16+00:00",
       "type": "span_started",
       "data": {
@@ -3395,7 +3478,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 135,
+      "sequence": 136,
       "timestamp": "2026-10-15T16:40:17+00:00",
       "type": "span_started",
       "data": {
@@ -3411,14 +3494,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-31\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w31-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 136,
+      "sequence": 137,
       "timestamp": "2026-10-15T16:42:17+00:00",
       "type": "span_ended",
       "data": {
@@ -3435,14 +3519,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-31\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w31-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 137,
+      "sequence": 138,
       "timestamp": "2026-10-15T16:42:18+00:00",
       "type": "span_started",
       "data": {
@@ -3458,7 +3543,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":14000000,\"vs_baseline\":1.4}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":14000000,\"vs_baseline\":1.4,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":14000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           }
         }
@@ -3467,7 +3552,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 138,
+      "sequence": 139,
       "timestamp": "2026-10-15T16:43:35+00:00",
       "type": "span_ended",
       "data": {
@@ -3483,7 +3568,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":14000000,\"vs_baseline\":1.4}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":14000000,\"vs_baseline\":1.4,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":14000000,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           }
         }
@@ -3492,7 +3577,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 139,
+      "sequence": 140,
       "timestamp": "2026-10-15T16:43:36+00:00",
       "type": "span_ended",
       "data": {
@@ -3518,7 +3603,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-171200",
-      "sequence": 140,
+      "sequence": 141,
       "timestamp": "2026-10-15T16:45:51+00:00",
       "type": "agent_execution_finished",
       "status": "completed",
@@ -3555,7 +3640,8 @@
             "outcome": "implementation_failed"
           }
         }
-      }
+      },
+      "execution_id": "inv-w16"
     }
   ]
 }

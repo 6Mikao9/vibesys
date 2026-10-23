@@ -15,7 +15,7 @@ import {
   type Record as StoreRecord,
   TailResponseSchema,
 } from '@vibesys/proto';
-import type {RunFixture, StoreRunFixture} from '@vibesys/run-fixtures';
+import {parseFixture, type RunFixture, type StoreRunFixture} from '@vibesys/run-fixtures';
 import {gatewayScript, wire} from './fake-gateway.js';
 
 export interface NativeFixtureOptions {
@@ -60,25 +60,36 @@ function ensure(fixtures: readonly RunFixture[]): void {
     timeout: 120000,
   });
 }
-/** Every record the shipping projection makes of the fixture's run, in log order. */
-export function nativeRecords(fixture: RunFixture): StoreRecord[] {
+/** Canonical scenarios use checked native goldens; custom variants use the same real projector. */
+function replayFor(fixture: RunFixture) {
+  const base = join(root, 'clients/libs/run-fixtures/src');
+  const declaration = join(base, 'data', `${fixture.name}.json`);
+  const golden = join(base, 'native', `${fixture.name}.pb`);
+  if (
+    existsSync(declaration) &&
+    existsSync(golden) &&
+    JSON.stringify(fixture) ===
+      JSON.stringify(parseFixture(JSON.parse(readFileSync(declaration, 'utf8'))))
+  ) {
+    return fromBinary(ClientReplaySchema, readFileSync(golden));
+  }
   ensure([fixture]);
-  const replay = fromBinary(
+  return fromBinary(
     ClientReplaySchema,
     readFileSync(join(cache, hash(JSON.stringify(fixture)), 'replay.pb')),
   );
-  return replay.batches
-    .flatMap(batch => batch.records.map(bytes => fromBinary(RecordSchema, bytes)))
+}
+/** Every record the shipping projection makes of the fixture's run, in log order. */
+export function nativeRecords(fixture: RunFixture): StoreRecord[] {
+  return replayFor(fixture)
+    .batches.flatMap(batch => batch.records.map(bytes => fromBinary(RecordSchema, bytes)))
     .sort((a, b) => Number(a.seq - b.seq));
 }
 export function nativeFixtureScript(
   fixture: RunFixture,
   options: NativeFixtureOptions = {},
 ): string {
-  ensure([fixture]);
-  const directory = join(cache, hash(JSON.stringify(fixture)));
-  const replay = fromBinary(ClientReplaySchema, readFileSync(join(directory, 'replay.pb')));
-  return nativeReplayScript(fixture, replay, options);
+  return nativeReplayScript(fixture, replayFor(fixture), options);
 }
 
 /** Serve Python-produced records through the same gateway for recorded and declarative fixtures. */

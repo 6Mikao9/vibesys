@@ -1,8 +1,4 @@
-/**
- * The committed fixtures (`data/*.json`), validated on first use, and the one fixture too large to
- * commit. `pnpm --filter @vibesys/app-desktop-shell fixtures` rewrites the data files; a test holds
- * the synthetic ones equal to their scenarios.
- */
+/** Canonical scenario declarations, validated on first use. Python pins their native output. */
 import basesAndEffects from './data/bases-and-effects.json' with {type: 'json'};
 import comparisonBaselines from './data/comparison-baselines.json' with {type: 'json'};
 import continuation from './data/continuation-rounds.json' with {type: 'json'};
