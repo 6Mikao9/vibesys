@@ -24,9 +24,7 @@ from vs_core.api import (
     ControlInput,
     DiscardWorkspace,
     DispatchTurn,
-    EnsureSession,
     EnsureWorkspace,
-    ExecutorLifetime,
     ResumeSessionTurn,
     RetainRevision,
     RevisionRef,
@@ -34,7 +32,6 @@ from vs_core.api import (
     SnapshotAndRetain,
     StopMode,
     SubmitMeasurement,
-    executor_lifetime,
 )
 from vs_core.api.testing import Failed, Succeeded, Unknown
 from vs_dst.api import Effects, RecoverableExecutors
@@ -85,10 +82,6 @@ class Fault(StrEnum):
     INFRASTRUCTURE = "infrastructure"
     PROVIDER = "provider"
     """The agent provider errors: the next turns never answer and the first cancel of one hangs."""
-    WEDGED_STOP = "wedged-stop"
-    """The agent provider wedges: every turn, cancel and close stays unanswered. The operator
-    stops the host ``delay`` durable points later, after the turns outlasted their limits, and
-    kills it ``grace`` points after that, so what it left in flight is begun and never sealed."""
 
 
 PROVIDER_OUTAGE = 2
@@ -103,10 +96,9 @@ class Point(StrEnum):
 class DurableStore(FakeStateStore):
     """Commit faults use the common FaultPlan; stalls advance only virtual time."""
 
-    def __init__(self, fault: Fault, at: int, boundary: Point, delay: int, grace: int) -> None:
+    def __init__(self, fault: Fault, at: int, boundary: Point) -> None:
         super().__init__()
         self.at = at
-        self.delay = delay
         self.boundary = boundary
         self.receipts = 0
         self.fault = fault
@@ -117,7 +109,6 @@ class DurableStore(FakeStateStore):
         self.refusing = False
         self.outage = 0
         self.hung_cancels = 0
-        self.wedged = False
         self.gate = FaultGate(
             FaultPlan(
                 seed=at,
@@ -125,13 +116,11 @@ class DurableStore(FakeStateStore):
                     FaultRule(
                         boundary=Boundary.DURABLE_WRITE,
                         target=boundary.value,
-                        # A stopped host that the provider wedged is killed ``grace`` durable
-                        # points after its stop, as an operator kills one that outlasts its grace.
-                        at=at + delay + grace if fault is Fault.WEDGED_STOP else at,
+                        at=at,
                         fault=HostFault.CRASH_AFTER,
                     ),
                 )
-                if fault in (Fault.CRASH, Fault.ROLLBACK, Fault.WEDGED_STOP)
+                if fault in (Fault.CRASH, Fault.ROLLBACK)
                 else (),
             )
         )
@@ -155,12 +144,7 @@ class DurableStore(FakeStateStore):
 
     def crossing(self, boundary: Point, ordinal: int) -> None:
         """Fault decisions use durable ordinals, never scheduler timing."""
-        if boundary is not self.boundary:
-            return
-        if self.fault is Fault.WEDGED_STOP:
-            self.wedge(ordinal)
-            return
-        if ordinal != self.at:
+        if boundary is not self.boundary or ordinal != self.at:
             return
         if self.fault is Fault.STALL:
             assert self.clock is not None
@@ -172,25 +156,12 @@ class DurableStore(FakeStateStore):
         elif self.fault is Fault.PROVIDER:
             self.outage, self.hung_cancels = PROVIDER_OUTAGE, 1
 
-    def wedge(self, ordinal: int) -> None:
-        """The provider wedges, and the operator stops the host once the turns outlasted it."""
-        if ordinal == self.at:
-            self.wedged = True
-        elif ordinal == self.at + self.delay:
-            self.stopping = True
-
     def provider_silence(self, request: Request) -> Unknown | None:
         """Silence for an agent call the outage swallows: no reply ever arrives.
 
         Core ends a swallowed turn at its limit, cancels it and asks again as the role says;
         the same outage hangs the first cancellation of a lost turn.
         """
-        if (
-            self.wedged
-            and executor_lifetime(request) is ExecutorLifetime.INSTANCE
-            and not isinstance(request, EnsureSession)
-        ):
-            return Unknown()
         if isinstance(request, DispatchTurn | ResumeSessionTurn) and self.outage:
             self.outage -= 1
             return Unknown()
@@ -233,10 +204,6 @@ class ResumeWorld:
     resume_width: ClassVar[int] = 1
     backlog: ClassVar[int | None] = None
     resume_backlog: ClassVar[int | None] = None
-    delay: int = 0
-    """Durable points between the provider wedging and the stop (`Fault.WEDGED_STOP`)."""
-    grace: int = 0
-    """Durable points between the stop and the kill of the host (`Fault.WEDGED_STOP`)."""
 
     def __init__(
         self,
@@ -250,7 +217,7 @@ class ResumeWorld:
         root.mkdir()
         (root / "candidate.py").write_text("VALUE = 1\n")
         self.git = FakeGitRepositories()
-        self.store = DurableStore(fault, at, boundary, self.delay, self.grace)
+        self.store = DurableStore(fault, at, boundary)
         self.effects = Effects()
         self.delivery = FakePublicationDelivery()
         self.rounds = 1
@@ -295,9 +262,6 @@ class ResumeWorld:
         return OrchestrationDescriptor(id="dynamic", config_version=1, options=options)
 
     def open(self, *, resume: bool) -> ProjectRunResources:
-        if resume:
-            # The host that stopped is dead: its provider, and a signal it had not yet seen, with it.
-            self.store.wedged = self.store.stopping = False
         requested = (
             self.descriptor(self.rounds + self.extra, self.resume_width, self.resume_backlog)
             if resume
@@ -427,14 +391,6 @@ class ResumeWorld:
             resources.remove_leftover(member_workspace_id(request.scope.owner.root))
             self.workspaces.pop(member_workspace_id(request.scope.owner.root), None)
         return self.script(request, core)
-
-
-class WedgedStopWorld(ResumeWorld):
-    """A run whose provider wedges, then is stopped, and is killed after its grace."""
-
-    def __init__(self, root: Path, *, at: int, boundary: Point, delay: int, grace: int) -> None:
-        self.delay, self.grace = delay, grace
-        super().__init__(root, extra=0, fault=Fault.WEDGED_STOP, at=at, boundary=boundary)
 
 
 class WideWorld(ResumeWorld):

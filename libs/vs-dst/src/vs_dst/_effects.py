@@ -107,8 +107,8 @@ class RecoverableExecutors(ScriptedExecutors):
             self._effects.begun.add(identity)  # durable before the effect
             self._effects.executed.append(identity)
         result = await self._enacted(request, await super().execute(request, context))
-        if executor_lifetime(request) is ExecutorLifetime.DURABLE or isinstance(
-            settle(result), Settled
+        if executor_lifetime(request) is ExecutorLifetime.DURABLE or (
+            result.observation.observation.terminal and isinstance(settle(result), Settled)
         ):
             self._effects.sealed[identity] = result
         return result

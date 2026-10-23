@@ -90,6 +90,7 @@ from .types.sessions import (
     CloseSession,
     DispatchTurn,
     EnsureSession,
+    InspectTurn,
     ResumeSessionTurn,
 )
 from .types.until import FailureReason
@@ -640,6 +641,14 @@ def _waiting_on(
             _child_inspection(record, child.resource_id, epoch).request_id for child in children
         ]
     expected += [row.request_id for row in state.inspections_of(check.target)]
+    if record is not None and record.lifecycle == LifecycleClass.SESSION_TURN:
+        # The session's own inspection of the turn reads its journal, which may hold the reply
+        # the dead host never sealed: a turn is lost only once that inquiry has ended too.
+        expected += [
+            row.request_id
+            for row in state.records
+            if isinstance(row.request, InspectTurn) and row.request.dispatch == check.target
+        ]
     requests = tuple(
         dict.fromkeys(
             request

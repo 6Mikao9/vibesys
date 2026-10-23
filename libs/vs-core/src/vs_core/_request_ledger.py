@@ -480,7 +480,9 @@ def _apply(
         return _answered_after_close(state, context, record, facts)
     fresh = fresh_observation(() if previous is None else (previous,), observation, complete=True)
     if isinstance(fresh, Mismatch) and fresh.field == ProofField.SEQUENCE:
-        if previous is not None and observation.sequence < previous.sequence:
+        if previous is not None and (
+            observation.sequence < previous.sequence or _says_nothing_of(previous, observation)
+        ):
             return AreaChange(state=state)
         raise ContractError(("observation", "sequence"), "conflicts with the accepted observation")
     if not isinstance(fresh, Proven):
@@ -571,6 +573,17 @@ def _recorded(state: RecordsState, observation: Observation) -> Observation | No
 _DID_NOT_SUCCEED = frozenset(
     {ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED}
 )
+
+
+def _says_nothing_of(closed: Observation, later: Observation) -> bool:
+    """Whether a late answer that shares the closed record's number only says it cannot tell.
+
+    A release closes a turn's dispatch with the cancellation's own number, and the executor
+    numbers its next answer about the dispatch the same. Such an answer that is unknown (and
+    not terminal) claims no outcome, so it conflicts with no disposition: it is dropped, as any
+    older answer is.
+    """
+    return closed.terminal and later.status == ObservationStatus.UNKNOWN and not later.terminal
 
 
 def _claims_nothing(closed: Observation, later: Observation) -> bool:
