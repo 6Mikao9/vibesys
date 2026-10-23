@@ -15,4 +15,10 @@ export {
   type RunLivenessHint,
   type SkeletonLoad,
 } from './loading.js';
-export {foldSkeleton, type Skeleton, seedSkeleton, seekSkeleton} from './model.js';
+export {
+  foldSkeleton,
+  type Skeleton,
+  seedSkeleton,
+  seekSkeleton,
+  transcriptStreamFor,
+} from './model.js';

@@ -14,6 +14,7 @@ export {
   type GatewayLogInput,
   type GatewayRecordsInput,
   type GatewayRunContext,
+  type GatewayTranscriptInput,
   gatewayRunMachine,
 } from './gateway-machine.js';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';

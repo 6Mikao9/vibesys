@@ -1,7 +1,7 @@
 {
   "format": 1,
   "name": "queue-rs-live",
-  "description": "The desktop shell fake run: a dynamic search over two planning calls, seven ideas, W5 with a turn and a judge.",
+  "description": "A dynamic search over two planning calls, seven ideas, W5 with a turn and a judge.",
   "runId": "20261015-163047",
   "state": "live",
   "objective": {
@@ -12,9 +12,33 @@
   },
   "events": [
     {
+      "timestamp": "2026-10-15T16:30:51Z",
+      "type": "run_started",
+      "data": {
+        "kind": "run_started",
+        "overview": {
+          "objective": {
+            "text": "Maximize trusted end-to-end throughput of the MPMC queue.",
+            "metric": "total_ops_per_sec",
+            "unit": "ops/s",
+            "direction": "max",
+            "correctness_check": []
+          }
+        },
+        "outer_loop": "dynamic",
+        "input": "objective.md",
+        "expected_roles": [
+          "orchestrator",
+          "implementer",
+          "judge"
+        ]
+      },
+      "sequence": 1
+    },
+    {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 1,
+      "sequence": 2,
       "timestamp": "2026-10-15T16:30:51+00:00",
       "type": "span_started",
       "data": {
@@ -32,7 +56,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 2,
+      "sequence": 3,
       "timestamp": "2026-10-15T16:36:21+00:00",
       "type": "span_started",
       "data": {
@@ -43,14 +67,20 @@
           "type": "flow",
           "name": "measure the input",
           "status": "running",
-          "started_at": 330
+          "started_at": 330,
+          "label": {
+            "kind": "gate",
+            "title": "Input",
+            "verdict": "passed",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":41.2,\"vs_baseline\":1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":41.2,\"unit\":\"ops/s\",\"direction\":\"max\"}]}"
+          }
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 3,
+      "sequence": 4,
       "timestamp": "2026-10-15T16:37:01+00:00",
       "type": "span_ended",
       "data": {
@@ -63,14 +93,20 @@
           "status": "done",
           "started_at": 330,
           "ended_at": 370,
-          "waiting_on": []
+          "waiting_on": [],
+          "label": {
+            "kind": "gate",
+            "title": "Input",
+            "verdict": "passed",
+            "attrs_json": "{\"stage\":\"benchmark\",\"metric_value\":41.2,\"vs_baseline\":1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":41.2,\"unit\":\"ops/s\",\"direction\":\"max\"}]}"
+          }
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 4,
+      "sequence": 5,
       "timestamp": "2026-10-15T16:37:05+00:00",
       "type": "span_started",
       "data": {
@@ -93,7 +129,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 5,
+      "sequence": 6,
       "timestamp": "2026-10-15T16:37:06+00:00",
       "type": "span_started",
       "data": {
@@ -109,14 +145,15 @@
             "kind": "agent_turn",
             "title": "orchestrator",
             "attrs_json": "{\"role\":\"orchestrator\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-1\",\"started_by\":[]}"
-          }
+          },
+          "invocation": "op:plan1-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 6,
+      "sequence": 7,
       "timestamp": "2026-10-15T16:37:36+00:00",
       "type": "span_ended",
       "data": {
@@ -134,14 +171,15 @@
             "attrs_json": "{\"role\":\"orchestrator\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-1\",\"started_by\":[]}"
           },
           "ended_at": 405,
-          "waiting_on": []
+          "waiting_on": [],
+          "invocation": "op:plan1-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 7,
+      "sequence": 8,
       "timestamp": "2026-10-15T16:37:40+00:00",
       "type": "span_ended",
       "data": {
@@ -166,7 +204,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 8,
+      "sequence": 9,
       "timestamp": "2026-10-15T16:37:41+00:00",
       "type": "span_started",
       "data": {
@@ -190,7 +228,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 9,
+      "sequence": 10,
       "timestamp": "2026-10-15T16:37:42+00:00",
       "type": "span_started",
       "data": {
@@ -219,7 +257,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 10,
+      "sequence": 11,
       "timestamp": "2026-10-15T16:37:43+00:00",
       "type": "span_started",
       "data": {
@@ -243,7 +281,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 11,
+      "sequence": 12,
       "timestamp": "2026-10-15T16:37:44+00:00",
       "type": "span_started",
       "data": {
@@ -267,7 +305,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 12,
+      "sequence": 13,
       "timestamp": "2026-10-15T16:37:44+00:00",
       "type": "span_started",
       "data": {
@@ -283,14 +321,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-w1\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "op:w1-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 13,
+      "sequence": 14,
       "timestamp": "2026-10-15T16:41:32+00:00",
       "type": "span_updated",
       "data": {
@@ -321,14 +360,15 @@
               "of": 3,
               "started_at": 641
             }
-          ]
+          ],
+          "invocation": "op:w1-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 14,
+      "sequence": 15,
       "timestamp": "2026-10-15T16:45:41+00:00",
       "type": "span_ended",
       "data": {
@@ -363,14 +403,15 @@
               "ended_at": 890,
               "outcome": "done"
             }
-          ]
+          ],
+          "invocation": "op:w1-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 15,
+      "sequence": 16,
       "timestamp": "2026-10-15T16:45:51+00:00",
       "type": "span_started",
       "data": {
@@ -393,7 +434,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 16,
+      "sequence": 17,
       "timestamp": "2026-10-15T16:49:11+00:00",
       "type": "span_ended",
       "data": {
@@ -408,7 +449,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":48.6,\"vs_baseline\":1.18}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":48.6,\"vs_baseline\":1.18,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":48.6,\"unit\":\"ops/s\",\"direction\":\"max\"}],\"input_metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":41.186440677966104,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           },
           "ended_at": 1100,
@@ -419,7 +460,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 17,
+      "sequence": 18,
       "timestamp": "2026-10-15T16:49:11+00:00",
       "type": "span_started",
       "data": {
@@ -442,7 +483,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 18,
+      "sequence": 19,
       "timestamp": "2026-10-15T16:49:51+00:00",
       "type": "span_ended",
       "data": {
@@ -457,7 +498,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":44,\"vs_baseline\":1.07}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":44,\"vs_baseline\":1.07,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":44,\"unit\":\"ops/s\",\"direction\":\"max\"}],\"input_metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":41.1214953271028,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           },
           "ended_at": 1140,
@@ -468,7 +509,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 19,
+      "sequence": 20,
       "timestamp": "2026-10-15T16:49:51+00:00",
       "type": "span_started",
       "data": {
@@ -491,7 +532,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 20,
+      "sequence": 21,
       "timestamp": "2026-10-15T16:50:46+00:00",
       "type": "span_ended",
       "data": {
@@ -506,7 +547,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":31.5,\"vs_baseline\":0.76}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":31.5,\"vs_baseline\":0.76,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":31.5,\"unit\":\"ops/s\",\"direction\":\"max\"}],\"input_metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":41.44736842105263,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "failed"
           },
           "ended_at": 1195,
@@ -517,7 +558,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 21,
+      "sequence": 22,
       "timestamp": "2026-10-15T16:50:46+00:00",
       "type": "span_started",
       "data": {
@@ -532,7 +573,7 @@
           "label": {
             "kind": "adoption",
             "title": "r1",
-            "attrs_json": "{\"candidate\":\"r1\",\"metric_value\":48.6,\"vs_baseline\":1.18}"
+            "attrs_json": "{\"candidate\":\"r1\"}"
           }
         }
       }
@@ -540,7 +581,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 22,
+      "sequence": 23,
       "timestamp": "2026-10-15T16:50:46+00:00",
       "type": "span_ended",
       "data": {
@@ -567,7 +608,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 23,
+      "sequence": 24,
       "timestamp": "2026-10-15T16:50:46+00:00",
       "type": "span_ended",
       "data": {
@@ -599,7 +640,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 24,
+      "sequence": 25,
       "timestamp": "2026-10-15T16:50:46+00:00",
       "type": "span_ended",
       "data": {
@@ -627,7 +668,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 25,
+      "sequence": 26,
       "timestamp": "2026-10-15T16:50:51+00:00",
       "type": "span_ended",
       "data": {
@@ -659,7 +700,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 26,
+      "sequence": 27,
       "timestamp": "2026-10-15T16:51:02+00:00",
       "type": "span_started",
       "data": {
@@ -682,7 +723,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 27,
+      "sequence": 28,
       "timestamp": "2026-10-15T16:51:03+00:00",
       "type": "span_started",
       "data": {
@@ -698,14 +739,15 @@
             "kind": "agent_turn",
             "title": "orchestrator",
             "attrs_json": "{\"role\":\"orchestrator\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-2\",\"started_by\":[]}"
-          }
+          },
+          "invocation": "op:plan2-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 28,
+      "sequence": 29,
       "timestamp": "2026-10-15T16:51:27+00:00",
       "type": "span_ended",
       "data": {
@@ -723,14 +765,15 @@
             "attrs_json": "{\"role\":\"orchestrator\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-2\",\"started_by\":[]}"
           },
           "ended_at": 1236,
-          "waiting_on": []
+          "waiting_on": [],
+          "invocation": "op:plan2-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 29,
+      "sequence": 30,
       "timestamp": "2026-10-15T16:51:29+00:00",
       "type": "span_ended",
       "data": {
@@ -755,7 +798,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 30,
+      "sequence": 31,
       "timestamp": "2026-10-15T16:51:30+00:00",
       "type": "span_started",
       "data": {
@@ -784,7 +827,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 31,
+      "sequence": 32,
       "timestamp": "2026-10-15T16:51:31+00:00",
       "type": "span_started",
       "data": {
@@ -813,7 +856,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 32,
+      "sequence": 33,
       "timestamp": "2026-10-15T16:51:32+00:00",
       "type": "span_started",
       "data": {
@@ -849,7 +892,7 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 33,
+      "sequence": 34,
       "timestamp": "2026-10-15T16:51:32+00:00",
       "type": "span_started",
       "data": {
@@ -865,14 +908,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-w5\",\"started_by\":[\"planner-2\"]}"
-          }
+          },
+          "invocation": "op:w5-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 34,
+      "sequence": 35,
       "timestamp": "2026-10-15T16:51:32+00:00",
       "type": "span_started",
       "data": {
@@ -888,14 +932,15 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-w6\",\"started_by\":[\"planner-2\"]}"
-          }
+          },
+          "invocation": "op:w6-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 35,
+      "sequence": 36,
       "timestamp": "2026-10-15T16:51:53+00:00",
       "type": "span_started",
       "data": {
@@ -913,31 +958,6 @@
             "title": "Warm the build cache",
             "attrs_json": "{\"entries\":412}"
           }
-        }
-      }
-    },
-    {
-      "protocol_version": 1,
-      "run_id": "20261015-163047",
-      "sequence": 36,
-      "timestamp": "2026-10-15T16:58:01+00:00",
-      "type": "span_ended",
-      "data": {
-        "kind": "span_ended",
-        "span": {
-          "id": "op:w5-turn",
-          "parent": "flow:root/ws-5#1",
-          "type": "operation",
-          "name": "agent.turn",
-          "status": "done",
-          "started_at": 1240,
-          "label": {
-            "kind": "agent_turn",
-            "title": "implementer",
-            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-w5\",\"started_by\":[\"planner-2\"]}"
-          },
-          "ended_at": 1630,
-          "waiting_on": []
         }
       }
     },
@@ -983,7 +1003,8 @@
             "kind": "agent_turn",
             "title": "judge",
             "attrs_json": "{\"role\":\"judge\",\"model\":\"claude-sonnet-5\",\"agent\":\"judge-w5\",\"started_by\":[\"planner-2\",\"impl-w5\"]}"
-          }
+          },
+          "invocation": "op:w5-judge"
         }
       }
     },
@@ -991,31 +1012,6 @@
       "protocol_version": 1,
       "run_id": "20261015-163047",
       "sequence": 39,
-      "timestamp": "2026-10-15T16:59:11+00:00",
-      "type": "span_ended",
-      "data": {
-        "kind": "span_ended",
-        "span": {
-          "id": "op:w5-judge",
-          "parent": "flow:root/ws-5#1",
-          "type": "operation",
-          "name": "agent.turn",
-          "status": "done",
-          "started_at": 1640,
-          "label": {
-            "kind": "agent_turn",
-            "title": "judge",
-            "attrs_json": "{\"role\":\"judge\",\"model\":\"claude-sonnet-5\",\"agent\":\"judge-w5\",\"started_by\":[\"planner-2\",\"impl-w5\"]}"
-          },
-          "ended_at": 1700,
-          "waiting_on": []
-        }
-      }
-    },
-    {
-      "protocol_version": 1,
-      "run_id": "20261015-163047",
-      "sequence": 40,
       "timestamp": "2026-10-15T16:59:11+00:00",
       "type": "span_updated",
       "data": {
@@ -1046,17 +1042,18 @@
               "of": 3,
               "started_at": 1501
             }
-          ]
+          ],
+          "invocation": "op:w6-turn"
         }
       }
     },
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 41,
+      "sequence": 40,
       "timestamp": "2026-10-15T16:59:11+00:00",
       "type": "agent_output_chunk",
-      "invocation_id": "inv-w5",
+      "invocation_id": "op:w5-turn",
       "agent_kind": "implementer",
       "span_id": "op:w5-turn",
       "data": {
@@ -1068,10 +1065,10 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 42,
+      "sequence": 41,
       "timestamp": "2026-10-15T16:59:11+00:00",
       "type": "agent_output_chunk",
-      "invocation_id": "inv-w5",
+      "invocation_id": "op:w5-turn",
       "agent_kind": "implementer",
       "span_id": "op:w5-turn",
       "data": {
@@ -1083,10 +1080,10 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 43,
+      "sequence": 42,
       "timestamp": "2026-10-15T16:59:11+00:00",
       "type": "tool_call",
-      "invocation_id": "inv-w5",
+      "invocation_id": "op:w5-turn",
       "agent_kind": "implementer",
       "span_id": "op:w5-turn",
       "data": {
@@ -1101,10 +1098,10 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
-      "sequence": 44,
+      "sequence": 43,
       "timestamp": "2026-10-15T16:59:11+00:00",
       "type": "tool_result",
-      "invocation_id": "inv-w5",
+      "invocation_id": "op:w5-turn",
       "agent_kind": "implementer",
       "span_id": "op:w5-turn",
       "data": {
@@ -1118,8 +1115,34 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
+      "sequence": 44,
+      "timestamp": "2026-10-15T16:58:01+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w5-turn",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 1240,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-sonnet-5\",\"agent\":\"impl-w5\",\"started_by\":[\"planner-2\"]}"
+          },
+          "ended_at": 1630,
+          "waiting_on": [],
+          "invocation": "op:w5-turn"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
       "timestamp": "2026-10-15T17:00:01+00:00",
-      "invocation_id": "inv-w5-judge",
+      "invocation_id": "op:w5-judge",
       "agent_kind": "judge",
       "span_id": "op:w5-judge",
       "sequence": 45,
@@ -1133,11 +1156,37 @@
     {
       "protocol_version": 1,
       "run_id": "20261015-163047",
+      "sequence": 46,
+      "timestamp": "2026-10-15T16:59:11+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w5-judge",
+          "parent": "flow:root/ws-5#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 1640,
+          "label": {
+            "kind": "agent_turn",
+            "title": "judge",
+            "attrs_json": "{\"role\":\"judge\",\"model\":\"claude-sonnet-5\",\"agent\":\"judge-w5\",\"started_by\":[\"planner-2\",\"impl-w5\"]}"
+          },
+          "ended_at": 1700,
+          "waiting_on": [],
+          "invocation": "op:w5-judge"
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261015-163047",
       "timestamp": "2026-10-15T17:00:01+00:00",
-      "invocation_id": "inv-w5-judge",
+      "invocation_id": "op:w5-judge",
       "agent_kind": "judge",
       "span_id": "op:w5-judge",
-      "sequence": 46,
+      "sequence": 47,
       "type": "agent_execution_finished",
       "status": "completed",
       "data": {
@@ -1187,6 +1236,31 @@
           }
         }
       }
+    },
+    {
+      "type": "subprocess_output",
+      "timestamp": "2026-10-15T17:00:00Z",
+      "data": {
+        "kind": "subprocess_output",
+        "process_id": "run",
+        "process_kind": "run_narration",
+        "stream": "stdout",
+        "content": "{\"at\":\"2026-10-15T16:00:01+00:00\",\"level\":\"info\",\"message\":\"round 2 started\"}\n"
+      },
+      "sequence": 48
+    },
+    {
+      "type": "subprocess_output",
+      "timestamp": "2026-10-15T17:00:00Z",
+      "data": {
+        "kind": "subprocess_output",
+        "process_id": "benchmark",
+        "process_kind": "benchmark",
+        "stream": "stdout",
+        "span_id": "op:w5-gate",
+        "content": "vibesys-queue benchmark, 3 repetitions\nrepetition 1: 41.2 Mops/s\n"
+      },
+      "sequence": 49
     }
   ]
 }

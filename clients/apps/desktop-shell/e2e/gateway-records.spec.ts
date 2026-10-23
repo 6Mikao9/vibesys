@@ -83,7 +83,7 @@ test('native history opens without legacy history and usage retains its model an
 }) => {
   await page.setViewportSize({width: 1440, height: 900});
   await installGateway(page, wire(storeRunFixture('short')));
-  await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'}, {summary: 'gone'});
+  await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
   await expect(page.getByRole('switch', {name: 'Run transport v2'})).toHaveCount(0);
   await page.getByRole('radio', {name: 'Usage', exact: true}).click();
   await page.getByRole('radio', {name: 'Model', exact: true}).click();

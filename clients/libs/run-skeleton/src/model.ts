@@ -10,6 +10,7 @@ import {
   SpanHistorySchema,
   SpanVersionSchema,
   type Record as StoreRecord,
+  StreamKind,
 } from '@vibesys/proto';
 import {validateKeyframe} from './keyframe.js';
 
@@ -141,4 +142,16 @@ function validateSequence(previous: bigint | undefined, record: StoreRecord): vo
       `record.seq: expected ${legacy ? 'an increasing phase 1 sequence' : expected}, got ${record.seq}`,
     );
   }
+}
+
+/** The transcript stream the run recorded for this span, if it has produced content. */
+export function transcriptStreamFor(
+  skeleton: Skeleton | undefined,
+  span: string | null,
+): string | null {
+  if (span === null) return null;
+  return (
+    skeleton?.streams.find(stream => stream.kind === StreamKind.TRANSCRIPT && stream.span === span)
+      ?.id ?? null
+  );
 }

@@ -4,6 +4,11 @@ import {unprovided} from '@vibesys/machine';
 import type {RunLivenessHint, SkeletonLoad} from '@vibesys/run-skeleton';
 import {type RecordRow, recordRows} from '@vibesys/run-state/records';
 import type {SkeletonContent} from '@vibesys/run-state/skeleton';
+import {
+  emptyNativeTranscript,
+  type NativeTranscript,
+  nativeTranscriptHashes,
+} from '@vibesys/run-state/transcript';
 import {assign, fromCallback, setup} from 'xstate';
 import {
   type RunPageAction,
@@ -21,12 +26,20 @@ export interface GatewayLogInput {
   readonly streamId: string;
   readonly receive: (event: GatewayEvent) => void;
 }
+export interface GatewayTranscriptInput {
+  readonly runId: string;
+  readonly spanId: string;
+  readonly streamId: string;
+  readonly receive: (event: GatewayEvent) => void;
+}
 export interface GatewayRecordsInput {
   readonly runId: string;
   readonly fromSeq: bigint;
   readonly receive: (event: GatewayEvent) => void;
 }
 export type GatewayEvent =
+  | {type: 'follow-transcript'; selection: {spanId: string; streamId: string} | null}
+  | {type: 'transcript'; spanId: string; transcript: NativeTranscript}
   | {type: 'ui'; action: RunPageAction}
   | {type: 'log'; streamId: string; text: string; offset: number; next: number}
   | {type: 'log-failed'}
@@ -42,6 +55,8 @@ export interface GatewayRunContext extends GatewayInput {
   replies: NonNullable<SkeletonContent['replies']>;
   error: string | null;
   recordsNextSeq: bigint;
+  selectedTranscript: {spanId: string; streamId: string} | null;
+  transcripts: Readonly<Record<string, NativeTranscript>>;
 }
 
 function nextContentHash(context: GatewayRunContext): string {
@@ -52,8 +67,13 @@ function nextContentHash(context: GatewayRunContext): string {
       return hash;
   }
   return (
-    Object.values(context.replies)
-      .flat()
+    [
+      ...Object.values(context.transcripts).flatMap(nativeTranscriptHashes),
+      ...Object.values(context.replies)
+        .flat()
+        .map(ref => ref.hash),
+    ]
+      .map(hash => ({hash}))
       .map(ref => ref.hash)
       .find(hash => context.text[hash] === undefined && !context.attemptedContent.has(hash)) ?? ''
   );
@@ -127,6 +147,7 @@ export const gatewayRunMachine = setup({
     ),
     log: unprovided<void, GatewayLogInput>('log transport'),
     records: unprovided<void, GatewayRecordsInput>('run records'),
+    transcript: unprovided<void, GatewayTranscriptInput>('transcript transport'),
   },
   guards: {
     needsContent: ({context}) => nextContentHash(context) !== '',
@@ -157,6 +178,8 @@ export const gatewayRunMachine = setup({
     replies: {},
     error: null,
     recordsNextSeq: 0n,
+    selectedTranscript: null,
+    transcripts: {},
   }),
   initial: 'active',
   states: {
@@ -267,6 +290,79 @@ export const gatewayRunMachine = setup({
                 onError: {target: 'idle', actions: assign({error: 'Content unavailable'})},
               },
               after: {30000: {target: 'idle', actions: assign({error: 'Content timeout'})}},
+            },
+          },
+        },
+        transcript: {
+          initial: 'idle',
+          on: {
+            'follow-transcript': {
+              guard: ({context, event}) =>
+                event.selection?.streamId !== context.selectedTranscript?.streamId,
+              target: '.choose',
+              actions: assign(({context, event}) => ({
+                selectedTranscript: event.selection,
+                transcripts: event.selection
+                  ? {...context.transcripts, [event.selection.spanId]: emptyNativeTranscript()}
+                  : context.transcripts,
+              })),
+            },
+          },
+          states: {
+            idle: {},
+            choose: {
+              always: [
+                {guard: ({context}) => context.selectedTranscript !== null, target: 'reading'},
+                {target: 'idle'},
+              ],
+            },
+            reading: {
+              invoke: {
+                id: 'transcript',
+                src: 'transcript',
+                input: ({context, self}) => ({
+                  runId: context.seed.identity.runId,
+                  spanId: context.selectedTranscript?.spanId ?? '',
+                  streamId: context.selectedTranscript?.streamId ?? '',
+                  receive: event => self.send(event),
+                }),
+                onError: {target: 'idle', actions: assign({error: 'Transcript unavailable'})},
+                onDone: {target: 'idle'},
+              },
+              initial: 'waiting',
+              states: {
+                waiting: {
+                  after: {
+                    30000: {
+                      target: '#gatewayRun.active.transcript.idle',
+                      actions: assign({error: 'Transcript timeout'}),
+                    },
+                  },
+                  on: {
+                    transcript: {
+                      guard: ({event}) => event.transcript.entries.length > 0,
+                      target: 'live',
+                      actions: assign(({context, event}) => ({
+                        transcripts: {
+                          ...context.transcripts,
+                          [event.spanId]: event.transcript,
+                        },
+                      })),
+                    },
+                  },
+                },
+                live: {},
+              },
+              on: {
+                transcript: {
+                  actions: assign(({context, event}) => ({
+                    transcripts: {
+                      ...context.transcripts,
+                      [event.spanId]: event.transcript,
+                    },
+                  })),
+                },
+              },
             },
           },
         },

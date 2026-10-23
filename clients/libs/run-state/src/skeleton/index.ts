@@ -167,7 +167,11 @@ export function readSkeleton(
       (last, time) => (last === null ? time : Math.max(last, time)),
       null,
     ),
-    core: skeletonCore(view, content),
+    // Transcript frames have no journal cursor; only the current view can include their bytes.
+    core: skeletonCore(view, {
+      ...content,
+      transcripts: view.seq === skeleton.throughSeq ? (content?.transcripts ?? {}) : {},
+    }),
     phase: lifecycleStatus(view.lifecycle),
     streams: skeleton.streams
       .filter(stream => stream.kind === StreamKind.LOG)

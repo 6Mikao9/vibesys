@@ -7,9 +7,9 @@ import {
   installFakeNewRun,
   installFakeProjectRuns,
 } from './fake-bridge.js';
-import {type FakeRunSeed, installFakeRun} from './fake-run.js';
-import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {journeyScript} from './journey-world.js';
+import {installGatewayOnly} from './retired-run-bridge.js';
 import {STARTED_AT} from './started-at.js';
 
 /** The Run screen starts, drains, cancels, and resumes through its shipping bridge. */
@@ -40,19 +40,6 @@ function listed(live: unknown[], ended: unknown[]): Record<string, unknown> {
   return {kind: 'listed', host: 'ssh:host-b', live, ended, unreadable: [], unverified: []};
 }
 
-function stream(id: string, owner: Record<string, unknown>, outcome: string | null) {
-  return {id, owner, command: 'docker build .', retained_start: 0, size: 0, outcome};
-}
-
-const NARRATION = [
-  {at: '2026-10-15T16:30:51+00:00', message: 'run started (2 rounds)'},
-  {at: '2026-10-15T16:36:20+00:00', message: 'container ready'},
-]
-  .map(({at, message}) =>
-    JSON.stringify({at, level: 'INFO', logger: 'vibesys', thread: 'main', message}),
-  )
-  .join('\n');
-
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
   chromeInset: {width: 84, height: 40},
@@ -73,45 +60,20 @@ const SEED: FakeBridgeSeed = {
 };
 
 /** The live run's server: a session that opens and answers, with no events to show yet. */
-const SERVER: FakeServerSeed = {
-  runId: RUN_ID,
-  batch: {
-    type: 'event_batch',
-    events: [{timestamp: '2026-10-15T16:30:51Z', type: 'server_ready', sequence: 1}],
-    through_sequence: 1,
-    store_id: 'store-1',
-    history_after_sequence: 0,
-  },
-  snapshot: {run_id: RUN_ID, sequence: 1, status: 'starting'},
-};
-
-const RUN: FakeRunSeed = {
-  streams: [
-    stream('s1', {kind: 'startup_step', stage: 'building_image'}, 'ended'),
-    stream('s2', {kind: 'startup_step', stage: 'starting_container'}, null),
-    stream('s6', {kind: 'gate_stage', execution_id: 'w5', gate: 'build', attempt: 1}, 'ended'),
-    stream('s3', {kind: 'gate_stage', execution_id: 'w5', gate: 'benchmark', attempt: 1}, null),
-    stream('s4', {kind: 'tool_build', name: 'perf'}, 'ended'),
-    stream('s5', {kind: 'run_narration'}, null),
-  ],
-  text: {
-    s1: '#8 [7/8] WORKDIR /workspace\n#8 DONE 0.0s\n#9 exporting to image\n',
-    s2: '[docker] starting container\n[readiness] claude: binary ok\n',
-    s3: 'vibesys-queue benchmark, 3 repetitions\nrepetition 1: 41.2 Mops/s\n',
-    s4: 'perf: cached\n',
-    s6: 'cargo build --release --locked\nFinished release profile\n',
-    s5: `${NARRATION}\n`,
-  },
-};
-
 async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
   await addInitScripts(page, [
     initScript(installFakeBridge, seed),
     initScript(installFakeMachines, seed),
     initScript(installFakeNewRun, seed),
     initScript(installFakeProjectRuns, seed),
-    initScript(installFakeRun, RUN),
-    initScript(installFakeServer, SERVER),
+    initScript(installGatewayOnly, undefined),
+    journeyScript(
+      (seed.listings?.[0] as {ended?: unknown[]})?.ended?.length
+        ? 'stopped-empty'
+        : (seed.listings?.[0] as {live?: {phase: string}[]})?.live?.[0]?.phase === 'starting'
+          ? 'startup'
+          : 'empty',
+    ),
   ]);
   await page.goto('./shell.html');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink');

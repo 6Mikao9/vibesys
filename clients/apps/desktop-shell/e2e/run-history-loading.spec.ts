@@ -24,6 +24,7 @@ if (shots !== undefined) mkdirSync(shots, {recursive: true});
 async function headerPlace(page: Page) {
   return Promise.all(
     HEADER.map(async selector => {
+      await expect(page.locator(selector).first()).toBeVisible();
       const box = await page.locator(selector).first().boundingBox();
       return box === null ? null : {x: box.x, y: box.y, width: box.width};
     }),
@@ -31,23 +32,18 @@ async function headerPlace(page: Page) {
 }
 
 for (const width of [1000, 1440]) {
-  for (const total of [true, false]) {
-    const name = `finished-run/history-loading/${total ? 'determinate' : 'indeterminate'}/${width}`;
+  for (const prefix of [1, 20]) {
+    const name = `finished-run/history-loading/${prefix}-records/${width}`;
     test(name, async ({page}) => {
       await page.setViewportSize({width, height: 900});
       await openFixture(page, fixture, {
-        historyServing: {pageSize: 10, hold: 2, total},
+        historyPrefix: prefix,
       });
       const main = page.getByRole('main');
-      await expect(main).toContainText(
-        total ? `20 of ${fixture.events.length} events` : '20 events',
-      );
-      if (total) {
-        await expect(main.getByRole('img', {name: 'Share of the run’s events read'})).toBeVisible();
-      } else {
-        await expect(main.getByRole('img')).toHaveCount(0);
-        await expect(main).toContainText('read so far');
-      }
+      // Skeleton/Tail has record cursors, not the old helper's event/byte totals. The page keeps
+      // the whole run unprojected until the held tail reaches the committed cursor.
+      await expect(main.getByText('Loading', {exact: true})).toBeVisible();
+      await expect(main.getByRole('img')).toHaveCount(0);
       await expect(main).not.toContainText(/running|\bnow\b/i);
       await expect(page.getByRole('listbox', {name: 'Ideas'})).toHaveCount(0);
       await expect(page.getByRole('slider', {name: 'Run position'})).toHaveCount(0);

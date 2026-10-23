@@ -5,6 +5,7 @@
  */
 import type {FakeBridgeSeed} from './fake-bridge.js';
 import {FAKE_OFFER} from './fake-offer.js';
+import {journeyFixture} from './journey-world.js';
 import {PROJECT, SEED} from './world.js';
 
 const HOST = 'ssh:host-b';
@@ -206,4 +207,10 @@ export function seedFor(usage: UsageCase): FakeBridgeSeed {
     usage: {[KEY]: usage.answer},
     newRun: {...FAKE_OFFER, projects: {[PROJECT]: ['mpmc']}},
   };
+}
+
+/** The listed run reached from Usage uses the same native gateway as every run journey. */
+export function runFixtureFor(usage: UsageCase) {
+  const fixture = journeyFixture('empty');
+  return {...fixture, runId: runsOf(usage.runs)[0]?.runId ?? fixture.runId};
 }

@@ -1,5 +1,5 @@
 import {expect, test} from 'bun:test';
-import {create, fromBinary} from '@bufbuild/protobuf';
+import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {checkMachine} from '@vibesys/machine/testing';
 import {
   NoticeCode,
@@ -7,6 +7,8 @@ import {
   RunLiveness,
   Severity,
   TailRequestSchema,
+  TranscriptChannel,
+  TranscriptEntrySchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
@@ -67,6 +69,10 @@ test('model: every content and log operation belongs to its active state', () =>
           failed: false,
         },
         {type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}},
+        {
+          type: 'follow-transcript',
+          selection: random.pick([null, {spanId: 'turn-0', streamId: 'native-stream'}]),
+        },
         ...live.operations.flatMap(id => [
           live.error(id, new Error('Fault')),
           ...(id === 'content' ? [live.done(id, {hash: 'hash', text: 'Content'})] : []),
@@ -505,4 +511,128 @@ test('reply attachments load through the same verified content owner as objectiv
       .filter(call => !call.method.endsWith('Skeleton') && !call.method.endsWith('GetBlobs'))
       .every(call => call.signal.aborted),
   ).toBe(true);
+});
+
+test('regression: native turn content crosses the real reader for every stream split, and leaving releases it', async () => {
+  const payload = toBinary(
+    TranscriptEntrySchema,
+    create(TranscriptEntrySchema, {
+      entry: {
+        case: 'text',
+        value: {
+          channel: TranscriptChannel.ANALYSIS,
+          content: {value: {case: 'inline', value: 'Thinking 🦊 before acting'}},
+        },
+      },
+    }),
+  );
+  expect(payload.length).toBeLessThan(128);
+  const wire = new Uint8Array([payload.length, ...payload]);
+  for (const streamChunkBytes of [1, 2, 5, 13, 127]) {
+    const fixture = storeRunFixture();
+    const transport = new FakeRunTransport({
+      ...fixture,
+      streams: {...fixture.streams, 'native-stream': wire},
+      streamChunkBytes,
+    });
+    const clock = new FakeClock();
+    const actor = startGatewayRun(
+      {reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule)},
+      clock.schedule,
+      {seed: SEED},
+    );
+    actor.send({
+      type: 'follow-transcript',
+      selection: {spanId: 'turn-0', streamId: 'native-stream'},
+    });
+    expect(actor.getSnapshot().context.selectedTranscript).toEqual({
+      spanId: 'turn-0',
+      streamId: 'native-stream',
+    });
+    await reached(
+      actor,
+      snapshot => (snapshot.context.transcripts['turn-0']?.entries.length ?? 0) === 1,
+    );
+    const context = actor.getSnapshot().context;
+    const skeleton = foldSkeleton(seedSkeleton(), fixture.records);
+    const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, '', {
+      content: {transcripts: context.transcripts},
+    });
+    const screen = skeletonScreenState(SEED, skeleton, model, context.ui, undefined, {
+      transcripts: context.transcripts,
+    });
+    expect(screen.run.core?.transcript).toContainEqual(
+      expect.objectContaining({
+        spanId: 'turn-0',
+        kind: 'analysis',
+        content: 'Thinking 🦊 before acting',
+      }),
+    );
+    for (const record of fixture.records.filter(
+      record => record.seq < (skeleton.throughSeq ?? 0n),
+    )) {
+      const earlier = skeletonScreenState(
+        SEED,
+        skeleton,
+        model,
+        {...context.ui, view: {...context.ui.view, at: Number(record.seq)}},
+        undefined,
+        {transcripts: context.transcripts},
+      );
+      expect(
+        earlier.run.core?.transcript.some(entry => entry.content.includes('Thinking 🦊')),
+      ).toBe(false);
+    }
+    const stream = transport.calls.find(call => call.method === `${SERVICE}TailStream`);
+    expect(stream?.signal.aborted).toBe(false);
+    actor.send({type: 'follow-transcript', selection: null});
+    expect(stream?.signal.aborted).toBe(true);
+    actor.stop();
+    expect(clock.pending).toBe(0);
+  }
+});
+
+test('an incomplete native transcript releases its reader on close or the first-entry deadline', async () => {
+  for (const end of ['close', 'deadline']) {
+    const fixture = storeRunFixture();
+    const transport = new FakeRunTransport({
+      ...fixture,
+      streams: {'native-stream': new Uint8Array([128])},
+    });
+    const clock = new FakeClock();
+    const actor = startGatewayRun(
+      {reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule)},
+      clock.schedule,
+      {seed: SEED},
+    );
+    actor.send({
+      type: 'follow-transcript',
+      selection: {spanId: 'turn-0', streamId: 'native-stream'},
+    });
+    await reached(
+      actor,
+      snapshot => (snapshot.context.transcripts['turn-0']?.pending.length ?? 0) > 0,
+    );
+    await reached(
+      actor,
+      snapshot =>
+        snapshot.context.load?.complete === true &&
+        Object.keys(snapshot.context.text).length === Object.keys(fixture.blobs).length,
+    );
+    if (end === 'close') transport.close(`${SERVICE}TailStream`);
+    else {
+      clock.advanceBy(30000);
+      expect(actor.getSnapshot().context.error).toBe('Transcript timeout');
+    }
+    await reached(
+      actor,
+      snapshot =>
+        snapshot.context.error ===
+        (end === 'close' ? 'Transcript unavailable' : 'Transcript timeout'),
+    );
+    actor.stop();
+    await transport.whenIdle();
+    expect(transport.activeStreams).toBe(0);
+    expect(clock.pending).toBe(0);
+  }
 });

@@ -47,5 +47,10 @@
         "resets_at": 1760580000
       }
     }
+  ],
+  "nativeLifecycles": [
+    {
+      "running": {}
+    }
   ]
 }

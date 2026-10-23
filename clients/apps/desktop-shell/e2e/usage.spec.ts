@@ -10,7 +10,8 @@ import {
   installFakeUsage,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
-import {seedFor, USAGE_CASES, type UsageCase} from './usage-world.js';
+import {nativeFixtureScript} from './native-fixture.js';
+import {runFixtureFor, seedFor, USAGE_CASES, type UsageCase} from './usage-world.js';
 
 /**
  * The Usage page, reached by the rail over a Fake of the bridge, at the three widths the shell is
@@ -36,6 +37,7 @@ async function open(page: Page, usage: UsageCase, width: number): Promise<void> 
     initScript(installFakeProjectRuns, seed),
     initScript(installFakeNewRun, seed),
     initScript(installFakeUsage, seed),
+    nativeFixtureScript(runFixtureFor(usage)),
   ]);
   await page.goto('./shell.html');
   await page

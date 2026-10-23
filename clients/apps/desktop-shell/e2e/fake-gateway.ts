@@ -27,12 +27,23 @@ export interface WireFixture {
   chatRequest: number[];
   chat: number[];
   watchRuns: number[];
+  behavior?: GatewayBehavior;
+}
+
+/** The delivery seam shared with the native gateway world in desktop-main. */
+interface GatewayBehavior {
+  readonly holdTail?: boolean;
+  readonly skeleton?: {readonly status: number; readonly message: string};
+  readonly refuseActions?: readonly string[];
 }
 const encode = <S extends DescMessage>(schema: S, init: MessageInitShape<S>): number[] => [
   ...toBinary(schema, create(schema, init)),
 ];
 
 export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixture {
+  const epochRecord = fixture.records.find(record => record.body.case === 'epochStarted');
+  if (epochRecord?.body.case !== 'epochStarted') throw new Error('Fixture has no native epoch');
+  const runId = epochRecord.body.value.runId;
   const encoded = fixture.records.map(record => toBinary(RecordSchema, record));
   const prefix = fixture.records.slice(0, fixture.initialCount);
   const method = (name: keyof typeof HostService.method): string =>
@@ -45,7 +56,7 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
     encode(TailStreamResponseSchema, {data, nextOffset: BigInt(data.length)});
   return {
     watchRuns: encode(WatchRunsResponseSchema, {
-      runId: 'run-a',
+      runId,
       liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
       head: {
         strategy: 'fixture',
@@ -71,7 +82,7 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
     tail: encode(TailResponseSchema, {records: encoded.slice(fixture.initialCount), throughSeq}),
     blobs: Object.fromEntries(
       Object.entries(fixture.blobs).map(([sha256, data]) => [
-        encode(GetBlobsRequestSchema, {runId: 'run-a', sha256: [sha256]}).join(','),
+        encode(GetBlobsRequestSchema, {runId, sha256: [sha256]}).join(','),
         encode(GetBlobsResponseSchema, {blobs: [{sha256, data}]}),
       ]),
     ),
