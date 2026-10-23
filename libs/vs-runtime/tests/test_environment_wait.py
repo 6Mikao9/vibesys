@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from pydantic import BaseModel, ConfigDict
 
 from vs_core.api import MAX_SUBMISSIONS_PER_MEASUREMENT
 from vs_evaluation.api import (
@@ -402,6 +403,36 @@ def test_the_backoff_grows_from_its_first_wait_to_its_cap_and_stays_finite(
     assert retries.environment_delay(1) == _BACKOFF
     assert _BACKOFF <= delay <= _CAP
     assert delay <= retries.environment_delay(refusals + 1)
+
+
+class _TriesBeforeTheWait(BaseModel):
+    """A measurement's try record as a build wrote it before a host's refusal was a wait."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request: EvaluationRequest
+    attempt: int
+    cancelled: bool
+
+
+@given(attempt=st.integers(min_value=1, max_value=MAX_SUBMISSIONS_PER_MEASUREMENT))
+def test_a_run_resumed_from_a_record_written_before_the_wait_measures_on(attempt: int) -> None:
+    """Resume: the persisted try record gained fields with a default, so an earlier one loads."""
+    clock = ManualClock()
+    inner = ScriptedExecutor((Run.SUCCEEDED,), clock)
+    namespace = InMemoryEvaluationNamespace()
+    # test-isolation: the record's path and shape are what a resumed run finds on disk
+    namespace.save(
+        f"evaluation-tries/{_HANDLE}.json",
+        _TriesBeforeTheWait(request=_request(), attempt=attempt, cancelled=False),
+    )
+    executor = RetryingEvaluationExecutor(inner, _retries(2, 1), namespace, clock=clock)
+
+    polled = asyncio.run(executor.poll(_HANDLE))
+
+    # the inner executor holds nothing of that try yet: it is replayed without charging a retry
+    assert polled.phase is PollPhase.QUEUED
+    assert len(inner.started) == 1
 
 
 # -- the same through the product's executors --------------------------------------------------

@@ -56,6 +56,7 @@ if TYPE_CHECKING:
         TurnCandidateFailed,
         TurnCandidatePending,
         TurnCandidateRetained,
+        judged_keys,
         ledger_refs,
         trusted_keys,
         turn_candidate,
@@ -828,7 +829,7 @@ _MODULES: dict[str, str] = {
             "vs_core._evidence_views",
             (
                 "TurnCandidate TurnCandidateFailed TurnCandidatePending TurnCandidateRetained "
-                "ledger_refs trusted_keys turn_candidate "
+                "judged_keys ledger_refs trusted_keys turn_candidate "
             ),
         ),
         ("vs_core._executor_lifetime", ("ExecutorLifetime executor_lifetime ")),
@@ -1835,6 +1836,7 @@ __all__ = [
     "item_cancellation",
     "item_id",
     "judge",
+    "judged_keys",
     "latest_comparisons",
     "ledger_refs",
     "markdown_prose",
