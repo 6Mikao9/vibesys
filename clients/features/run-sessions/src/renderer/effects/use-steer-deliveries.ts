@@ -1,28 +1,24 @@
 import type {SteerDeliveryFact} from '@vibesys/run-state';
+import {decodeRecords} from '@vibesys/runs/chat';
 import {useEffect, useState} from 'react';
-import {steerDeliveries} from '../../state/index.js';
-import {type SteerPorts, steerActor} from './steer.js';
+import {emptySteerFold, foldSteer, steerDeliveries} from '../../state/index.js';
+
+/** The run's one reader hands every consumer its batches of records, and none reads the log itself. */
+export type RunRecords = (listener: (records: readonly Uint8Array[]) => void) => () => void;
 
 /** The steer delivery steps the run's records report; empty until a record arrives. */
 export function useSteerDeliveries(
-  ports: SteerPorts,
+  records: RunRecords,
   enabled: boolean,
 ): readonly SteerDeliveryFact[] {
   const [facts, setFacts] = useState<readonly SteerDeliveryFact[]>([]);
   useEffect(() => {
     if (!enabled) return;
-    const actor = steerActor(ports);
-    let known = actor.getSnapshot().context.fold;
-    const subscription = actor.subscribe(snapshot => {
-      if (snapshot.context.fold === known) return;
-      known = snapshot.context.fold;
-      setFacts(steerDeliveries(known));
+    let fold = emptySteerFold;
+    return records(batch => {
+      fold = foldSteer(fold, decodeRecords(batch));
+      setFacts(steerDeliveries(fold));
     });
-    actor.start();
-    return () => {
-      subscription.unsubscribe();
-      actor.stop();
-    };
-  }, [ports, enabled]);
+  }, [records, enabled]);
   return facts;
 }

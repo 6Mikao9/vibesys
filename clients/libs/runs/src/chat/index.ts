@@ -154,6 +154,10 @@ export function hostChatResponse(
 export function chatTailRequest(runId: string, sessionId: string, fromSeq: bigint): Uint8Array {
   return toBinary(TailRequestSchema, create(TailRequestSchema, {runId, sessionId, fromSeq}));
 }
+/** Encoded records, as a run's one reader hands them out. */
+export function decodeRecords(batch: readonly Uint8Array[]): readonly Record[] {
+  return batch.map(bytes => fromBinary(RecordSchema, bytes));
+}
 export function chatTailResponse(bytes: Uint8Array): readonly Record[] {
   return fromBinary(TailResponseSchema, bytes).records.map(record =>
     fromBinary(RecordSchema, record),

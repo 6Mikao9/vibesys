@@ -57,6 +57,7 @@ export function GatewayRun(props: {
     runId: seed.identity.runId,
     projectRoot: projectRoot ?? '',
     schedule,
+    records: fanout.subscribe,
     core: page.state?.run.core ?? null,
     epoch: observation?.epoch ?? 0n,
     readOnly: observation?.lifecycle?.state.case === 'ended',

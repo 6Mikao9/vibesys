@@ -2,5 +2,4 @@ export {type ChatBatch, type ChatHistory, type ChatTurn, emptyHistory, foldChat}
 export {type ChatContext, type ChatEvent, type ChatInput, runSessionsMachine} from './machine.js';
 export {sessionCore} from './projection.js';
 export {emptySteerFold, foldSteer, type SteerFold, steerDeliveries} from './steer.js';
-export {type SteerWatchContext, type SteerWatchEvent, steerWatchMachine} from './steer-watch.js';
 export {knownSessions, type ThreadsContext, type ThreadsEvent, threadsMachine} from './threads.js';

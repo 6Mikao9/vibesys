@@ -65,6 +65,12 @@ class Peer {
   readonly controls = new Map<string, {text: string; mode: SteerMode}>();
   readonly withdrawals: Array<{control: string; withdraws: string}> = [];
   readonly answered = new Set<Call>();
+  /** The run's one reader: batches of the run log's records, as the page's fanout hands them out. */
+  readonly runListeners = new Set<(records: readonly Uint8Array[]) => void>();
+  readonly subscribeRun = (listener: (records: readonly Uint8Array[]) => void) => {
+    this.runListeners.add(listener);
+    return () => this.runListeners.delete(listener);
+  };
 
   pending(): Call[] {
     return this.bridge.calls.filter(call => !this.answered.has(call) && !call.cancelled);
@@ -91,6 +97,10 @@ class Peer {
 
   /** Every live tail of that log gets the record, as the gateway's follow does. */
   private publish(sessionId: string, record: StoreRecord): void {
+    if (sessionId === '') {
+      for (const listener of [...this.runListeners]) listener([toBinary(RecordSchema, record)]);
+      return;
+    }
     for (const stream of this.bridge.streams) {
       if (stream.cancelled) continue;
       const request = fromBinary(TailRequestSchema, stream.bytes);
@@ -115,8 +125,8 @@ class Peer {
       if (stream.cancelled || (stream as {replayed?: boolean}).replayed) continue;
       (stream as {replayed?: boolean}).replayed = true;
       const request = fromBinary(TailRequestSchema, stream.bytes);
-      const log =
-        request.sessionId === '' ? this.run : (this.sessions.get(request.sessionId) ?? []);
+      if (request.sessionId === '') continue;
+      const log = this.sessions.get(request.sessionId) ?? [];
       const rows = log.filter(row => row.seq >= request.fromSeq);
       if (rows.length > 0) stream.receive(this.tail(rows));
     }
@@ -291,6 +301,7 @@ class Screen {
         runId: 'run-a',
         projectRoot: '/project',
         schedule: screen.clock.schedule,
+        records: screen.peer.subscribeRun,
         core: initialCoreState(),
         epoch: 1n,
         readOnly: false,

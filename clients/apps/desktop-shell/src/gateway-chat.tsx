@@ -3,6 +3,7 @@ import {runHarness} from '@vibesys/feature-run-chat/state';
 import {
   type ChatServicePorts,
   chatService,
+  type RunRecords,
   useChatThreads,
   useSteerDeliveries,
 } from '@vibesys/feature-run-sessions/renderer';
@@ -39,7 +40,12 @@ function useLifetime(owner: object): AbortController {
 
 /** The chat's state over the gateway: the panel's host, and what its thread history says. */
 export function useGatewayChatState(
-  input: ChatServicePorts & {core: CoreState | null; epoch: bigint; readOnly: boolean},
+  input: ChatServicePorts & {
+    core: CoreState | null;
+    epoch: bigint;
+    readOnly: boolean;
+    records: RunRecords;
+  },
 ) {
   const ports = useMemo<ChatServicePorts>(
     () => ({
@@ -53,7 +59,7 @@ export function useGatewayChatState(
   );
   const service = useMemo(() => chatService(ports), [ports]);
   const threads = useChatThreads(ports, input.projectRoot !== '');
-  const steers = useSteerDeliveries(ports, input.projectRoot !== '');
+  const steers = useSteerDeliveries(input.records, input.projectRoot !== '');
   const lifetime = useLifetime(ports);
   const chatPorts: RunChatPorts = {
     harnesses: async () => ({
@@ -126,9 +132,7 @@ export function useGatewayChatState(
 }
 
 /** Compose the existing chat UI with protobuf gateway operations and session records. */
-export function useGatewayChat(
-  input: ChatServicePorts & {core: CoreState | null; epoch: bigint; readOnly: boolean},
-) {
+export function useGatewayChat(input: Parameters<typeof useGatewayChatState>[0]) {
   const {chat, error, reload} = useGatewayChatState(input);
   return {
     ...chat,
