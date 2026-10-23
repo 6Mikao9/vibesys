@@ -11,6 +11,7 @@ raising ``ENVELOPE_SCHEMA_VERSION`` without them fails (`vs_core._envelope_migra
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Literal
@@ -236,6 +237,40 @@ def test_a_json_document_embedded_in_the_envelope_is_rewritten_like_the_value_it
             migrated["structured"], separators=(",", ":"), ensure_ascii=False, sort_keys=True
         )
         assert embedded[key] == canonical
+
+
+def _fingerprint(value: Json) -> str:
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+@pytest.mark.regression
+@given(
+    document=_DOCUMENTS,
+    covered=st.sampled_from(("decision", "request")),
+    damaged=st.booleans(),
+)
+def test_a_digest_is_rebound_to_the_value_the_migration_rewrote_and_to_no_other(
+    document: Json, covered: str, *, damaged: bool
+) -> None:
+    """Regression: a receipt keeps the digest of the decision it accepted, a record that of its
+    request, and core proves the decoded value against it on resume. A value the migration
+    rewrote has another canonical text, so its old digest could never be proved again and the run
+    refused to resume ("accepted decision integrity failed after decoding"). Only a digest that
+    was the old value's own is rebound: a damaged one is left for the proof to refuse."""
+    stored = json.loads((_FIXTURES / "v42-floor.json").read_text(encoding="utf-8"))
+    digest = "0" * 64 if damaged else _fingerprint(document)
+    stored["held"] = [{covered: document, "payload_digest": digest}]
+
+    (held,) = _upgraded(json.dumps(stored))["held"]
+
+    assert isinstance(held, dict)
+    rewritten = held[covered]
+    if damaged:
+        assert held["payload_digest"] == digest
+    else:
+        assert held["payload_digest"] == _fingerprint(rewritten)
+        assert (held["payload_digest"] == digest) == (rewritten == document)
 
 
 def test_a_version_42_request_payload_holds_readings_after_the_migration() -> None:

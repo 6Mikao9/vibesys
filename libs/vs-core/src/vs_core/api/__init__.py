@@ -100,6 +100,7 @@ if TYPE_CHECKING:
         decode_stored,
         operation_result,
         upgrade_envelope,
+        upgrade_persisted_shapes,
         validate_startup,
     )
     from vs_core._run_park import pause_withdraws
@@ -854,7 +855,7 @@ _MODULES: dict[str, str] = {
             (
                 "ENVELOPE_SCHEMA_VERSION ClosedRecordContradictionError ContractError "
                 "OperationMigration OperationRegistration OperationRegistry UnexpectedEvent "
-                "decode_stored operation_result upgrade_envelope validate_startup "
+                "decode_stored operation_result upgrade_envelope upgrade_persisted_shapes validate_startup "
             ),
         ),
         ("vs_core._run_park", "pause_withdraws "),
@@ -1881,6 +1882,7 @@ __all__ = [
     "turn_reply",
     "unreleased_records",
     "upgrade_envelope",
+    "upgrade_persisted_shapes",
     "validate_startup",
     "validate_terminal_inputs",
     "verify_encoding",

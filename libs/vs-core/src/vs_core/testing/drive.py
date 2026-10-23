@@ -77,6 +77,7 @@ from vs_core.api import (
     RevisionRef,
     RunEnvelope,
     RunFacts,
+    RunId,
     SearchDriver,
     SearchHost,
     SessionObserved,
@@ -961,6 +962,9 @@ class Harness:
     requirements: EvidenceRequirements = field(default_factory=EvidenceRequirements)
     reducers: CoreReducers | None = None
     """Sibling implementations core's step uses (see ``CoreReducers``); production when None."""
+    run_id: RunId | None = None
+    """The run's identity, when it is not the sample run's: a host that resumes a stored run
+    plans it under the id it stored."""
 
 
 def new_run[S: StrategyState](search: SearchDriver[S, Any], harness: Harness) -> CoreState:
@@ -975,6 +979,7 @@ def new_run[S: StrategyState](search: SearchDriver[S, Any], harness: Harness) ->
             "registry": registry.descriptors,
             "run": base.run.model_copy(
                 update={
+                    **({} if harness.run_id is None else {"run_id": harness.run_id}),
                     "facts": harness.facts,
                     "declaration": declaration,
                     "capabilities": capabilities,

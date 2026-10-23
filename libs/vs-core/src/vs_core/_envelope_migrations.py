@@ -25,6 +25,7 @@ was told and done, as it was).
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import TYPE_CHECKING, Final
 
@@ -199,7 +200,50 @@ def _rewritten(value: JsonValue) -> JsonValue:
     elif {"candidate_input", "base_input", "candidate_value", "metric"} <= node.keys():
         objective = {key: node.pop(key) for key in _OBJECTIVE_FIELDS if key in node}
         node["objectives"] = [{**objective, "verdict": node["verdict"]}]
-    return node
+    return _rebound(value, node)
+
+
+_COVERED_BY_DIGEST: Final = ("decision", "request")
+"""The values a stored ``payload_digest`` is the fingerprint of: an accepted decision (a receipt)
+and a request (a record)."""
+
+
+def _fingerprint(value: JsonValue) -> str:
+    """What core stores of a value it accepted: the digest of its canonical text."""
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _rebound(before: dict[str, JsonValue], after: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """``after``, with the digest of the value it covers made that of the value as rewritten.
+
+    A receipt or a record stores the digest of the decision or request it accepted, and core
+    proves the decoded value against it on resume. A value this migration rewrote has another
+    canonical text, so the digest it was accepted under is the digest of its old text, which no
+    code can recompute any more. Only a digest that was the old value's own is rebound: any
+    other is left for the proof to refuse, as a damaged document.
+    """
+    digest = before.get("payload_digest")
+    for key in _COVERED_BY_DIGEST:
+        if (
+            isinstance(digest, str)
+            and key in before
+            and before[key] != after[key]
+            and _fingerprint(before[key]) == digest
+        ):
+            return {**after, "payload_digest": _fingerprint(after[key])}
+    return after
+
+
+def upgrade_document_shapes(source: str) -> str:
+    """``source``, a persisted JSON document, with the shapes of version 43 in it.
+
+    Its samples, evidence records and comparisons are rewritten as the migration to 43 does; the
+    same text is returned when it holds none or is no JSON document. The envelope is not the only
+    document a run keeps those in (the publication journal holds its events), and none of the
+    others carries a version, so the rewrite leaves a document that is already in the shapes alone.
+    """
+    return _embedded(source, canonical=False)
 
 
 def _embedded(text: str, *, canonical: bool) -> str:

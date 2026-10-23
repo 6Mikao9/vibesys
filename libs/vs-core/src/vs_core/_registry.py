@@ -10,6 +10,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from ._envelope_migrations import (
     OLDEST_SUPPORTED_ENVELOPE_VERSION,
+    upgrade_document_shapes,
     upgrade_envelope_document,
 )
 from ._outcomes import prove_outcome
@@ -479,6 +480,32 @@ def decode_stored[M: BaseModel](
             f"this VibeSys does not know {places} in an envelope of its own version "
             f"{stored}: it was written by a newer VibeSys; resume it with that version",
         ) from error
+
+
+@overload
+def upgrade_persisted_shapes(source: str) -> str: ...
+
+
+@overload
+def upgrade_persisted_shapes(source: bytes) -> bytes: ...
+
+
+def upgrade_persisted_shapes(source: str | bytes) -> str | bytes:
+    """``source``, a persisted JSON document that is no envelope, in the current shapes.
+
+    The samples, evidence records and comparisons in it are in the shapes the current version
+    writes (`upgrade_envelope` does the same for an envelope, and its version says what to
+    rewrite; these documents carry none). Bytes that are no text come back as they are: the
+    caller's decoder reports them.
+    """
+    if isinstance(source, str):
+        return upgrade_document_shapes(source)
+    try:
+        text = source.decode()
+    except UnicodeDecodeError:
+        return source
+    upgraded = upgrade_document_shapes(text)
+    return source if upgraded == text else upgraded.encode()
 
 
 def upgrade_envelope(source: str | bytes, at: tuple[str, ...]) -> str:

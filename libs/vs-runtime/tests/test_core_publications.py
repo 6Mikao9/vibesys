@@ -3,15 +3,30 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_core.api import ClockAdvanced, ContractError, OperationRegistry
+from vs_core.api import (
+    ClockAdvanced,
+    ContractError,
+    EvidenceId,
+    EvidenceKind,
+    EvidenceRef,
+    MeasurementResult,
+    ObservationStatus,
+    OperationRegistry,
+    Reading,
+    RequestId,
+    RevisionRef,
+    RunId,
+    Scope,
+)
 from vs_project.api import (
     FakeStateStore,
     Project,
@@ -308,6 +323,62 @@ async def test_a_damaged_journal_is_a_typed_error_that_does_not_echo_it(
     with pytest.raises(StateDocumentDamagedError, match=expected) as failure:
         delivery.read()
     assert "secret-journal-bytes" not in str(failure.value)
+
+
+def _legacy(document: object) -> object:
+    """``document`` with every evidence record's ``readings`` as the single ``reading`` of version 42."""
+    if isinstance(document, list):
+        return [_legacy(item) for item in document]
+    if not isinstance(document, dict):
+        return document
+    node = {key: _legacy(item) for key, item in document.items()}
+    readings = node.get("readings")
+    if "evidence_id" in node and isinstance(readings, list) and len(readings) == 1:
+        node["reading"] = node.pop("readings")[0]
+    return node
+
+
+@pytest.mark.regression
+@given(
+    values=st.lists(st.floats(min_value=0.1, max_value=1e6), min_size=1, max_size=3),
+    direction=st.sampled_from(["max", "min"]),
+)
+async def test_a_journal_written_when_a_record_held_one_reading_reads_as_the_current_shape(
+    tmp_path_factory: pytest.TempPathFactory, values: list[float], direction: Literal["max", "min"]
+) -> None:
+    """Regression: the publication journal carries no version of its own, so one a run wrote
+    before an evidence record held every objective's reading (`readings`) could not be read, and
+    the resumed run stopped at its first publication."""
+    scope = Scope(owner=RunId(root="run"), generation=0)
+    digest = "a" * 64
+    records = tuple(
+        EvidenceRef(
+            evidence_id=EvidenceId(root=f"evidence-{index}"),
+            kind=EvidenceKind.BENCHMARK,
+            purpose="official",
+            scope=scope,
+            source_request=RequestId(root="request"),
+            candidate=RevisionRef.of_git_commit("a" * 40),
+            observation_sequence=0,
+            evaluator_digest=digest,
+            workload_digest=digest,
+            environment_digest=digest,
+            provenance="trusted",
+            status=ObservationStatus.SUCCEEDED,
+            readings=(Reading(metric="throughput", value=value, direction=direction),),
+        )
+        for index, value in enumerate(values)
+    )
+    event = MeasurementResult(scope=scope, evidence=records, status=ObservationStatus.SUCCEEDED)
+    publication = Publication(publication_id="run:1", sequence=1, event=event)
+    current = {"schema_version": 1, "publications": [publication.model_dump(mode="json")]}
+    namespace = Project.open(tmp_path_factory.mktemp("legacy")).state.state_store_namespace("run")
+    namespace.write_bytes("publications.json", json.dumps(_legacy(current)).encode())
+    assert "reading" in json.dumps(_legacy(current))  # a version 42 document, as written then
+
+    delivery = JournalPublicationDelivery(namespace, OperationRegistry())
+
+    assert delivery.read() == (publication,)
 
 
 async def test_the_journal_decodes_a_document_once_however_often_it_is_read_or_replayed(

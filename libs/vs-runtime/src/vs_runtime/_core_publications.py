@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_core.api import ContractError, OperationRegistry
+from vs_core.api import ContractError, OperationRegistry, upgrade_persisted_shapes
 from vs_project.api import DecodeMemo, decode_state_document
 from vs_runtime._core_record import (
     PUBLICATION_SCHEMA_VERSION,
@@ -45,9 +45,11 @@ class JournalPublicationDelivery:
         self._decoded = DecodeMemo(self._decode, on_decode)
 
     def _decode(self, source: bytes) -> PublicationHistory:
+        # a journal written before the shapes of samples, evidence and comparisons grew carries
+        # none of the new ones, and no version that says so
         return decode_state_document(
             PublicationHistory,
-            source,
+            upgrade_persisted_shapes(source),
             source="publications.json",
             context={"operation_registry": self._registry},
             versioned_by=("schema_version", PUBLICATION_SCHEMA_VERSION),

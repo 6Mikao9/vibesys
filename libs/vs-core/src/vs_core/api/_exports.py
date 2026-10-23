@@ -234,6 +234,7 @@ def _load_registry() -> dict[str, object]:
         decode_stored,
         operation_result,
         upgrade_envelope,
+        upgrade_persisted_shapes,
         validate_startup,
     )
 
@@ -248,6 +249,7 @@ def _load_registry() -> dict[str, object]:
         "decode_stored": decode_stored,
         "operation_result": operation_result,
         "upgrade_envelope": upgrade_envelope,
+        "upgrade_persisted_shapes": upgrade_persisted_shapes,
         "validate_startup": validate_startup,
     }
 
