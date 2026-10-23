@@ -239,26 +239,35 @@ agent gains nothing. The strategy's official measurement of an input the attempt
 already measured is answered from those samples, whatever the comparison with the
 base says: a trusted run of a revision is that revision's measurement, one per
 submitted commit. A close call earns the base and the candidate more runs of their own
-(see below), which join the same measurement. The official result's headline objective states the mean of the samples of the
-input held when the result is stored, the value its comparison states then, and
-that mean is the candidate's headline value in ranking. A task's other objectives
-(for example p99 latency beside throughput) are the answering run's own values: a
-sample holds only the headline reading.
+(see below), which join the same measurement. The official result's every objective (the headline, and for example p99 latency beside
+throughput) states the mean of the samples of the input held when the result is stored,
+the value its comparison states then, and that mean is the candidate's value in ranking.
 
-Dynamic search compares all declared objectives for promotion, merge eligibility
-and adoption, using Pareto dominance: at least one objective must improve beyond
-`abs(baseline value) * relative_noise`, and none may regress beyond its own
-tolerance. Objective order selects the display headline, not optimization priority.
-Missing objectives and material tradeoffs do not establish improvement. A merged
-commit must have every objective and regress none beyond tolerance. Among eligible
-candidates, adoption chooses the earliest member of the non-dominated frontier.
-These checks use the input or main's metric row under the task's declared
-`relative_noise`, not the statistical comparison's verdict. An absent `[pareto]`
-table means zero tolerance for promotion; a prose estimate of noise does not
-configure it. A run can also record versioned per-objective tolerances with
-calibration observations and provenance. Repeated baseline receipts supply the
-observed relative spread when available; a declared floor remains the minimum.
-These explicit policy migrations preserve original measurements and receipts.
+Every search decides better, worse and within noise by one rule, the statistical
+comparison's (`vs_core._dominance`): promotion, merge eligibility, regression, adoption,
+the frontier and the composite against its parts all read it. Each declared objective is
+judged by the ratio of the candidate's mean to the base's (the input's or main's) and
+that ratio's standard error: the objective is `better` or `worse` only beyond two
+standard errors in the objective's direction, else `within_noise`. The noise of one run
+is the objective's declared `relative_noise`, else the task's, else the spread the runs
+show, else a stated 5%; it is never zero, so a task that declares none is judged under
+that default, not strictly. A spread estimated from few runs is widened by the Student-t
+quantile. The result over all objectives is `better` when none is worse and at least one
+is better (a gain on one objective is never lost to a headline that moved within its
+noise), `worse` when any is worse (a tradeoff is a regression on the objective that
+lost), `within_noise` when every one is inside its noise, and `inconclusive` when one
+cannot be judged (a missing objective, a base of zero). Objective order selects the display
+headline, not optimization priority. A merged commit must regress no objective. Among
+eligible candidates, adoption chooses the earliest member of the non-dominated frontier.
+
+Main moves in the dynamic search when a candidate built on it has its trusted measurement:
+if its accuracy and benchmark checks passed and its benchmark is `better` than main's by
+that rule, main is the candidate from the moment the measurement lands, without waiting
+for its workstream to close and without a merge. A candidate built on an older main is
+brought in by a merge. A run can also record versioned per-objective tolerances with
+calibration observations and provenance. Repeated baseline receipts supply the observed
+relative spread when available; a declared floor remains the minimum. These explicit
+policy migrations preserve original measurements and receipts.
 
 An agent's evaluation is compared with its base, the revision its workspace
 started from. The base is measured once per (measured input, gates, host) and
@@ -268,19 +277,19 @@ it more samples (a base holds at most two fresh samples when the task declares
 `relative_noise`, three when it does not). A base the strategy is already
 measuring (its own measurement of the run's input, still running) is awaited rather than
 measured again: core claims that run, and its result becomes the base's samples when it ends. The
-comparison is the ratio of the candidate's mean over the base's mean, its noise,
-and a verdict: `better`, `within_noise` or `worse`. The noise is one standard
-error of the ratio. With a declared `relative_noise` it comes from the runs'
-pooled relative spread, never below that floor, and a verdict needs two noises.
-A task that declares none has only the runs' spread to go on, and a candidate's
-code can change how much its runs vary, so each side keeps its own spread
-(Welch's t test). It gets a verdict only once the candidate and the base hold
-three runs each and those runs differ, and then the bar is the Student-t
-quantile at the floor of the Welch-Satterthwaite degrees of freedom (between
-4.30 noises at the fewest runs and 2.04 with many), which keeps false verdicts
-near 5% whatever the two spreads and counts. Until then the
-result is `inconclusive` (never `within_noise`, whatever the ratio) and a close call: the base takes up to two more runs and the candidate's input
-up to three in all, and the official check adds none. The agent's evaluation tool and the resumed turn
+comparison is the ratio of the candidate's mean over the base's mean on every
+objective the benchmark reports, each with its noise and a verdict (`better`,
+`within_noise`, `worse` or `inconclusive`), and the result over them by the rule above. The
+noise is one standard error of the ratio. With a declared `relative_noise` (the objective's
+own, else the task's) it comes from that variation of one run over the runs held; without
+one each side keeps the variation its own runs show, as Welch's t test does, and falls back
+to the stated 5% of one run where a side holds one run or its runs all read alike. A
+verdict needs two noises (the Student-t quantile at the Welch-Satterthwaite degrees of
+freedom where the spread is estimated from few runs, between 4.30 noises at the fewest and
+2.04 with many). A result that is `better` or `worse` is decided; `within_noise` is a close
+call: the base takes up to two more runs and the candidate's input up to three in all
+(one more run of the base when every objective declares its noise), and the official check
+adds none. The agent's evaluation tool and the resumed turn
 report the comparison the base's fresh samples make, and the run's events carry
 each one logged as `measurement_compared`.
 
