@@ -80,8 +80,8 @@ def _project(state: MappingState, event: dict[str, Any], original: dict[str, Any
 
 def _units(fixture: dict[str, Any]) -> dict[str, str]:
     """Native fixture headers declare units from the canonical scenario, before any readings."""
-    objective = fixture["objective"]
-    units = {objective["metric"]: objective["unit"]}
+    objective = fixture.get("objective")
+    units = {} if objective is None else {objective["metric"]: objective["unit"]}
     for event in fixture["events"]:
         span = (event.get("data") or {}).get("span") or {}
         label = span.get("label") or {}
