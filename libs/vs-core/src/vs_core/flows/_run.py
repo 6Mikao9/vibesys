@@ -432,7 +432,9 @@ class _Run:
         request = work if earlier is None else earlier.request
         if earlier is not None:
             pending = Pending(request)
-        self._awaited[pending.decision] = InFlight(path=task.path, label=issued_as, request=request)
+        self._awaited[pending.decision] = InFlight(
+            path=task.path, label=issued_as, request=request, decision=pending.decision
+        )
         if earlier is None:
             return None
         self._pendings[pending.decision] = pending

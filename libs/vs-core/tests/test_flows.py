@@ -179,16 +179,26 @@ def test_the_stop_is_a_source_that_yields_the_event_once(begin: Begin) -> None:
     assert (ended(run).outcome, ended(run).reason) == ("cancelled", "stopped: stopped by stop")
 
 
-def test_other_control_actions_are_ignored(begin: Begin) -> None:
+_ARTIFACT = core.ArtifactRef(artifact_id=core.ArtifactId(root="steer-text"), digest="abc")
+_OTHER_CONTROLS = [
+    core.ControlInput(
+        control_id=core.ControlId(root="c"), action="pause", owner=core.PauseOwner.OPERATOR
+    ),
+    core.ControlInput(control_id=core.ControlId(root="c"), action="pause_now"),
+    core.ControlInput(control_id=core.ControlId(root="c"), action="park"),
+    core.ControlInput(control_id=core.ControlId(root="c"), action="resume", when="now"),
+    core.ControlInput(control_id=core.ControlId(root="c"), action="steer", artifact=_ARTIFACT),
+]
+"""Every control the operator can give but a stop: core delivers each as `StopRequested`."""
+
+
+@pytest.mark.parametrize("control", _OTHER_CONTROLS, ids=lambda control: control.action)
+def test_other_control_actions_are_ignored(begin: Begin, control: core.ControlInput) -> None:
+    """A steer, pause or resume reaches the flows as the control event, and requests no stop."""
     run = begin(plan_then_end)
-    run.send(
-        core.StopRequested(
-            control=core.ControlInput(
-                control_id=core.ControlId(root="c"), action="pause", owner=core.PauseOwner.OPERATOR
-            )
-        )
-    )
+    run.send(core.StopRequested(control=control))
     assert waits(run) == ["planner"]
+    assert run.state.live.stop is None
 
 
 def test_a_flow_that_waits_for_nothing_that_can_arrive_is_a_deadlock(begin: Begin) -> None:

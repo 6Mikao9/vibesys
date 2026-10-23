@@ -185,6 +185,10 @@ class InFlight(Value):
     path: str
     label: str
     request: Measure | Withdraw | StartAttempt
+    decision: DecisionId | None = None
+    """The decision it was asked under; None in a state saved before it was kept. A restart
+    keeps only what the run took (`RunView.taken`): core never took a dropped decision, so a
+    flow that asks for it again must send it."""
     answer: (
         Annotated[WorkspaceOpened | WorkspaceClosed | Failed, Field(discriminator="kind")] | None
     ) = None

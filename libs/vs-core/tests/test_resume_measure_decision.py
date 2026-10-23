@@ -127,6 +127,10 @@ class Host:
     def event(self, event: core.CoreEvent) -> None:
         self.take(self.stepper(self.core, event))
 
+    def alarm(self, time: float) -> None:
+        """The run clock reached ``time``: the search is woken."""
+        self._advance((core.TimeReached(time=time),))
+
     def run_started(self) -> core.SubmitMeasurement:
         (request,) = self.submissions
         return request
@@ -173,7 +177,7 @@ class Host:
         now = loaded.core.run.now_at + 10.0
         host.event(core.RecoveryStarted(epoch=epoch, now_at=now))
         host.event(core.ClockAdvanced(now_at=now + 1.0))
-        host._advance((core.TimeReached(time=now + 1.0),))
+        host.alarm(now + 1.0)
         return host
 
 

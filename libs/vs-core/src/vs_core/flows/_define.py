@@ -384,6 +384,9 @@ class FlowDriver[C]:
         ``lifted`` starts them with the stop that stood taken back (a resume lifted it).
         """
         live = state.live.model_copy(update={"stop": None}) if lifted else state.live
+        taken = set(view.taken)
+        kept = tuple(i for i in live.in_flight if i.decision is None or i.decision in taken)
+        live = live.model_copy(update={"in_flight": kept})
         run = self._new_run(state.facts)
         decisions = run.restore(live, view, None)
         restarted = self._first_state(run, state.facts, live, decisions)
