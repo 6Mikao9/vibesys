@@ -1,6 +1,11 @@
 import {describe, expect, test} from 'bun:test';
-import {ConnectionManager} from '@vibesys/connection';
-import {FakeLink} from '@vibesys/connection/testing';
+import {
+  ConnectionManager,
+  registryClusters,
+  registryReads,
+  registrySetup,
+} from '@vibesys/connection';
+import {FakeLink, olderHost} from '@vibesys/connection/testing';
 import {type HostId, hostKey, REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import {SettingsStore, withHostSettings, withoutHost} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
@@ -389,6 +394,56 @@ describe('MachinesMain', () => {
       expect(await machines.addCluster(HOST_B, cluster)).toEqual(saved);
       expect(await machines.removeCluster(HOST_B, 'lab')).toEqual(saved);
       expect(calls).toEqual(['test', 'put', 'remove:lab']);
+    });
+
+    test('a host whose VibeSys predates the registry needs an update on every path, with no host text', async () => {
+      const checkout = async () => '/src/checkout';
+      const {machines, manager} = await subject(new Map(), {
+        transportV2: async () => true,
+        registry: registryReads({checkout, unary: olderHost.read}),
+        setup: registrySetup({unary: olderHost.read}),
+        clusters: registryClusters({checkout, unary: olderHost.mutate}),
+        runs: {live: async () => 0},
+      });
+      await using _ = manager;
+      const cluster = {
+        name: 'lab',
+        reach: {kind: 'ssh' as const, host: 'host-a'},
+        workspace: '/work',
+      };
+      expect(await machines.inspect(HOST_B, '/src/checkout')).toEqual({state: 'unsupported'});
+      expect(await machines.report(HOST_B)).toEqual({kind: 'needs-update', facts: null});
+      expect(await machines.compute(HOST_B)).toEqual({kind: 'unsupported'});
+      for (const change of [
+        () => machines.testCluster(HOST_B, cluster),
+        () => machines.addCluster(HOST_B, cluster),
+        () => machines.removeCluster(HOST_B, 'lab'),
+      ]) {
+        const error = await change().then(
+          () => null,
+          (failure: unknown) => failure as Error,
+        );
+        expect(error?.message).toContain("This host's VibeSys needs an update");
+        expect(error?.message).not.toMatch(/usage|invalid choice|does not provide/i);
+      }
+    });
+
+    test('Reconnect on a machine that needs an update asks the same question again', async () => {
+      let asked = 0;
+      const checkout = async () => '/src/checkout';
+      const counting = async (...args: Parameters<typeof olderHost.read>) => {
+        asked += 1;
+        return olderHost.read(...args);
+      };
+      const {machines, manager} = await subject(new Map(), {
+        transportV2: async () => true,
+        registry: registryReads({checkout, unary: counting}),
+        runs: {live: async () => 0},
+      });
+      await using _ = manager;
+      expect(await machines.report(HOST_B)).toEqual({kind: 'needs-update', facts: null});
+      expect(await machines.report(HOST_B)).toEqual({kind: 'needs-update', facts: null});
+      expect(asked).toBe(2);
     });
 
     test('an on switch without the registry throws instead of using the helper', async () => {

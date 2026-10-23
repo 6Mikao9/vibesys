@@ -1,6 +1,7 @@
 import {expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
+  HOST_UNSUPPORTED_MESSAGE,
   HostCallRequestSchema,
   HostCallResponseSchema,
   IntentAction,
@@ -100,7 +101,13 @@ test('intent and successor-epoch facts are history, with refusal reasons preserv
 });
 
 test('typed HostCall refusals remain distinct from malformed or unconfirmed replies', () => {
-  for (const code of ['invalid_input', 'inbox_closed', 'request_too_large', 'invalid_method']) {
+  for (const code of [
+    'invalid_input',
+    'inbox_closed',
+    'request_too_large',
+    'invalid_method',
+    'host_unsupported',
+  ]) {
     for (const stderr of ['', 'details']) {
       const bytes = toBinary(
         HostCallResponseSchema,
@@ -118,6 +125,17 @@ test('typed HostCall refusals remain distinct from malformed or unconfirmed repl
         }),
       );
       expect(() => hostIntentResponse(bytes, 'r-1')).toThrow(IntentRefused);
+      let refusal: IntentRefused | undefined;
+      try {
+        hostIntentResponse(bytes, 'r-1');
+      } catch (error) {
+        refusal = error as IntentRefused;
+      }
+      // The host's stderr is for logs; a host that lacks the command says it needs an update.
+      expect(refusal?.diagnostic).toBe(stderr);
+      expect(refusal?.message).toBe(
+        code === 'host_unsupported' ? HOST_UNSUPPORTED_MESSAGE : 'Request refused',
+      );
     }
   }
 });
