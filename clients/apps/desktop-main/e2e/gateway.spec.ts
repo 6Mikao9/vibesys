@@ -109,13 +109,13 @@ for (const mode of ['socket', 'connect pipe'] as const) {
       const hello = await page.evaluate(
         async request => {
           const bridge = (window as unknown as GatewayRenderer).vibesysGateway;
-          return [
-            ...(await bridge.unary(
-              'local',
-              '/vibesys.api.v1.HostService/Hello',
-              new Uint8Array(request),
-            ).result),
-          ];
+          const reply = await bridge.unary(
+            'local',
+            '/vibesys.api.v1.HostService/Hello',
+            new Uint8Array(request),
+          ).result;
+          if (!('bytes' in reply)) throw new Error(reply.error);
+          return [...reply.bytes];
         },
         [
           ...toBinary(
@@ -170,13 +170,12 @@ async function missingRunStatus(page: Page): Promise<number | null> {
   return page.evaluate(
     async bytes => {
       const bridge = (window as unknown as GatewayRenderer).vibesysGateway;
-      try {
-        await bridge.unary('local', '/vibesys.api.v1.HostService/Skeleton', new Uint8Array(bytes))
-          .result;
-        return null;
-      } catch (error) {
-        return (error as {status?: number}).status ?? null;
-      }
+      const reply = await bridge.unary(
+        'local',
+        '/vibesys.api.v1.HostService/Skeleton',
+        new Uint8Array(bytes),
+      ).result;
+      return 'status' in reply ? (reply.status ?? null) : null;
     },
     [...request],
   );
@@ -309,7 +308,7 @@ for (const damage of ['truncated', 'corrupt'] as const) {
 }
 
 interface GatewayRenderer {
-  vibesysGateway: import('@vibesys/ipc').GatewayBridge;
+  vibesysGateway: import('@vibesys/ipc').GatewayPreload;
   gatewayRead(): Promise<number[]>;
   gatewayCancel(): void;
 }
