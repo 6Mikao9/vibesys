@@ -36,6 +36,7 @@ from vibesys.candidates.api import InputReading, Measured
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.metrics import MetricRow
 from vibesys.orchestration.dynamic.search.api import (
+    CandidateMeasured,
     Closing,
     Evidence,
     Proof,
@@ -188,7 +189,7 @@ def start_of(index: int, parent: RevisionRef) -> WorkstreamStart:
     )
 
 
-def report_of(index: int, work: Work, start: WorkstreamStart):  # noqa: ANN201  # test helper
+def report_of(index: int, work: Work, start: WorkstreamStart) -> CandidateMeasured | None:
     """What the workstream reports once it asserted its settlement; None when it kept nothing."""
     candidate = candidate_of(index)
     settle = Settle(

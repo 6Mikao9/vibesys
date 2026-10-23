@@ -44,7 +44,6 @@ from typing import Any, Literal
 from pydantic import ConfigDict, Field, TypeAdapter, model_validator
 from pydantic.dataclasses import dataclass
 
-# lint-waiver: LW-007011 [TC001]; Pydantic resolves this dataclass field at runtime
 from vs_core.api import ComparisonVerdict
 
 __all__ = [

@@ -23,7 +23,6 @@ call chain (issue #507).
 from __future__ import annotations
 
 from dataclasses import dataclass as standard_dataclass
-from statistics import fmean
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
@@ -506,7 +505,8 @@ def mean_metrics(rows: Sequence[tuple[MetricRow, ...]]) -> tuple[MetricRow, ...]
 
 def _runs_of(values: Sequence[float]) -> dict[str, float]:
     """The fields of a row that is the mean of ``values``: the mean, how many, and their spread."""
-    return {"value": fmean(values), "runs": len(values), "spread": Runs.of(values).spread}
+    stood = Runs.of(values)
+    return {"value": stood.mean, "runs": stood.count, "spread": stood.spread}
 
 
 def pooled_benchmarks[R: EvidenceReading](readings: tuple[R, ...]) -> tuple[R, ...]:
