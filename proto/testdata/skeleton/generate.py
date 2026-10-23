@@ -89,6 +89,7 @@ def scenarios() -> dict[str, tuple[list[Record], Keyframe]]:
         Record(seq=i, epoch=1, at=Timestamp(seconds=i), body=b) for i, b in enumerate(bodies, 1)
     ]
     expected = Keyframe(
+        failures_tracked=True,
         through_seq=10,
         spans={
             "work": SpanHistory(
@@ -148,7 +149,7 @@ def scenarios() -> dict[str, tuple[list[Record], Keyframe]]:
     cases = {
         "core": (records, expected),
         "epochs": (resumed, expected_resumed),
-        "legacy": (legacy, Keyframe(through_seq=1)),
+        "legacy": (legacy, Keyframe(through_seq=1, failures_tracked=True)),
     }
     for stream_records, keyframe in cases.values():
         keyframe.log_offset = len(RUN_LOG_MAGIC) + sum(len(encode_frame(r)) for r in stream_records)

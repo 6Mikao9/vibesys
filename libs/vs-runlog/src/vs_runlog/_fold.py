@@ -31,7 +31,12 @@ def fold_skeleton(
     Additive record bodies and legacy payloads advance the cursor without
     changing the skeleton. A seed includes all history through its sequence.
     """
-    result = Keyframe.from_binary(seed.to_binary()) if seed is not None else Keyframe()
+    # A fresh fold has seen every record; one seeded from an older keyframe inherits its flag.
+    result = (
+        Keyframe.from_binary(seed.to_binary())
+        if seed is not None
+        else Keyframe(failures_tracked=True)
+    )
     for record in records:
         append_skeleton(result, record)
     result.log_offset = log_offset

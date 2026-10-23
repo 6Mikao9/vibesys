@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_proto.api import (
+    Keyframe,
     MetricPoint,
     Notice,
     NoticeCode,
@@ -13,6 +15,7 @@ from vs_proto.api import (
     Record,
     Severity,
     Timestamp,
+    ValidationError,
     validate,
 )
 from vs_runlog.api import fold_skeleton
@@ -69,3 +72,43 @@ def test_the_keyframe_holds_the_latest_error_notice_of_each_epoch(
     assert {record.epoch: record.seq for record in keyframe.failures} == expected
     if records:
         validate(keyframe)
+
+
+def _keyframe_with(failures: list[Record], *, tracked: bool = True, through: int = 305) -> Keyframe:
+    return Keyframe(through_seq=through, log_offset=8, failures=failures, failures_tracked=tracked)
+
+
+def test_a_fresh_fold_tracks_failures_and_a_seeded_one_inherits_the_flag() -> None:
+    fresh = fold_skeleton([_record(1, 1, _notice(Severity.WARNING))], log_offset=8)
+    assert fresh.failures_tracked
+    old = Keyframe(through_seq=1, log_offset=8)  # written before the field: untracked
+    resumed = fold_skeleton([_record(2, 1, _notice(Severity.ERROR))], log_offset=8, seed=old)
+    assert not resumed.failures_tracked
+
+
+@pytest.mark.parametrize(
+    "keyframe",
+    [
+        _keyframe_with([_record(9999, 1, _notice(Severity.ERROR))]),
+        _keyframe_with([_record(4, 1, _notice(Severity.WARNING))]),
+        _keyframe_with([_record(4, 1, Oneof("metric", MetricPoint(series="a", value=1.0)))]),
+        _keyframe_with(
+            [_record(4, 1, _notice(Severity.ERROR)), _record(5, 1, _notice(Severity.FATAL))]
+        ),
+        _keyframe_with([_record(4, 1, _notice(Severity.ERROR))], tracked=False),
+    ],
+)
+def test_a_keyframe_whose_failures_are_not_error_notices_of_its_prefix_is_invalid(
+    keyframe: Keyframe,
+) -> None:
+    with pytest.raises(ValidationError):
+        validate(keyframe)
+
+
+def test_failures_of_the_prefix_are_valid() -> None:
+    validate(
+        _keyframe_with(
+            [_record(4, 1, _notice(Severity.ERROR)), _record(300, 2, _notice(Severity.FATAL))]
+        )
+    )
+    validate(_keyframe_with([], tracked=False))

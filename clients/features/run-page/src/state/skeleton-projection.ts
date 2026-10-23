@@ -72,7 +72,10 @@ function latestFailure(
   recordLog: readonly RecordRow[] | undefined,
 ): RecordRow | undefined {
   const epoch = observeRun(skeleton).epoch;
-  const kept = rowsOfRecords(skeleton.failures);
+  // A failure after the prefix it claims to summarise is no fact of it: never the banner.
+  const kept = rowsOfRecords(
+    skeleton.failures.filter(record => record.seq <= (skeleton.throughSeq ?? 0n)),
+  );
   return [...kept, ...(recordLog ?? [])]
     .filter(row => row.failure && row.epoch === epoch)
     .sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : 1))

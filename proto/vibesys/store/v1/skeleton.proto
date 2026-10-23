@@ -66,6 +66,11 @@ message RunProcess {
 // seek without parsing old records. The gateway reads only these two headers;
 // it passes the entire encoded keyframe through without interpreting its body.
 message Keyframe {
+  option (buf.validate.message).cel = {
+    id: "keyframe.failures_within_prefix"
+    message: "failures must be error notices of the prefix: sequence at most through_seq, at most one per epoch, and only a keyframe that tracks them may carry any"
+    expression: "this.failures.all(f, f.seq <= this.through_seq && has(f.notice) && f.notice.severity >= 2) && this.failures.map(f, f.epoch).unique() && (this.failures.size() == 0 || this.failures_tracked)"
+  };
   uint64 through_seq = 1 [(buf.validate.field).uint64.gt = 0];
   uint64 log_offset = 2 [(buf.validate.field).uint64 = {
     gte: 8
@@ -77,9 +82,12 @@ message Keyframe {
   repeated EpochVersion epochs = 6;
   repeated LifecycleVersion lifecycles = 7;
   // The latest error notice of each epoch, whole, so a reader can show a run's diagnostic
-  // without reading the records the keyframe summarises. Keyframes written before this field
-  // carry none: such a reader sees only the notices after its keyframe.
+  // without reading the records the keyframe summarises.
   repeated Record failures = 8;
+  // True when the writer folded every record through through_seq into `failures`, so that an
+  // empty list means no error notice. Keyframes written before the field are false: their
+  // reader recovers the failure facts from the log.
+  bool failures_tracked = 9;
 }
 
 message SpanHistory {

@@ -17,7 +17,7 @@ import {validateKeyframe} from './keyframe.js';
 /** Writer-only byte offsets do not belong to the client's data model. */
 export type Skeleton = Pick<
   Keyframe,
-  'spans' | 'metrics' | 'streams' | 'epochs' | 'lifecycles' | 'failures'
+  'spans' | 'metrics' | 'streams' | 'epochs' | 'lifecycles' | 'failures' | 'failuresTracked'
 > & {
   readonly throughSeq: bigint | undefined;
 };
@@ -27,15 +27,13 @@ export function seedSkeleton(keyframe?: Keyframe): Skeleton {
   if (keyframe) validateKeyframe(keyframe);
   return keyframe
     ? copySkeleton(keyframe)
-    : {...copySkeleton(create(KeyframeSchema)), throughSeq: undefined};
+    : {...copySkeleton(create(KeyframeSchema, {failuresTracked: true})), throughSeq: undefined};
 }
 
 function copySkeleton(keyframe: Keyframe): Skeleton {
-  const {throughSeq, spans, metrics, streams, epochs, lifecycles, failures} = clone(
-    KeyframeSchema,
-    keyframe,
-  );
-  return {throughSeq, spans, metrics, streams, epochs, lifecycles, failures};
+  const {throughSeq, spans, metrics, streams, epochs, lifecycles, failures, failuresTracked} =
+    clone(KeyframeSchema, keyframe);
+  return {throughSeq, spans, metrics, streams, epochs, lifecycles, failures, failuresTracked};
 }
 
 /**

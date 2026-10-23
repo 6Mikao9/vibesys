@@ -287,11 +287,14 @@ type Keyframe struct {
 	Epochs     []*EpochVersion         `protobuf:"bytes,6,rep,name=epochs,proto3" json:"epochs,omitempty"`
 	Lifecycles []*LifecycleVersion     `protobuf:"bytes,7,rep,name=lifecycles,proto3" json:"lifecycles,omitempty"`
 	// The latest error notice of each epoch, whole, so a reader can show a run's diagnostic
-	// without reading the records the keyframe summarises. Keyframes written before this field
-	// carry none: such a reader sees only the notices after its keyframe.
-	Failures      []*Record `protobuf:"bytes,8,rep,name=failures,proto3" json:"failures,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// without reading the records the keyframe summarises.
+	Failures []*Record `protobuf:"bytes,8,rep,name=failures,proto3" json:"failures,omitempty"`
+	// True when the writer folded every record through through_seq into `failures`, so that an
+	// empty list means no error notice. Keyframes written before the field are false: their
+	// reader recovers the failure facts from the log.
+	FailuresTracked bool `protobuf:"varint,9,opt,name=failures_tracked,json=failuresTracked,proto3" json:"failures_tracked,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Keyframe) Reset() {
@@ -378,6 +381,13 @@ func (x *Keyframe) GetFailures() []*Record {
 		return x.Failures
 	}
 	return nil
+}
+
+func (x *Keyframe) GetFailuresTracked() bool {
+	if x != nil {
+		return x.FailuresTracked
+	}
+	return false
 }
 
 type SpanHistory struct {
@@ -737,7 +747,7 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\x03pid\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\x03pid\x12\x1d\n" +
 	"\x05epoch\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x05epoch\x12A\n" +
 	"\n" +
-	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\"\xa0\x04\n" +
+	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\"\xcd\a\n" +
 	"\bKeyframe\x12(\n" +
 	"\vthrough_seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\n" +
 	"throughSeq\x120\n" +
@@ -750,11 +760,13 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\n" +
 	"lifecycles\x18\a \x03(\v2\".vibesys.store.v1.LifecycleVersionR\n" +
 	"lifecycles\x124\n" +
-	"\bfailures\x18\b \x03(\v2\x18.vibesys.store.v1.RecordR\bfailures\x1aW\n" +
+	"\bfailures\x18\b \x03(\v2\x18.vibesys.store.v1.RecordR\bfailures\x12)\n" +
+	"\x10failures_tracked\x18\t \x01(\bR\x0ffailuresTracked\x1aW\n" +
 	"\n" +
 	"SpansEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
-	"\x05value\x18\x02 \x01(\v2\x1d.vibesys.store.v1.SpanHistoryR\x05value:\x028\x01\"H\n" +
+	"\x05value\x18\x02 \x01(\v2\x1d.vibesys.store.v1.SpanHistoryR\x05value:\x028\x01:\xff\x02\xbaH\xfb\x02\x1a\xf8\x02\n" +
+	"\x1fkeyframe.failures_within_prefix\x12\x95\x01failures must be error notices of the prefix: sequence at most through_seq, at most one per epoch, and only a keyframe that tracks them may carry any\x1a\xbc\x01this.failures.all(f, f.seq <= this.through_seq && has(f.notice) && f.notice.severity >= 2) && this.failures.map(f, f.epoch).unique() && (this.failures.size() == 0 || this.failures_tracked)\"H\n" +
 	"\vSpanHistory\x129\n" +
 	"\bversions\x18\x01 \x03(\v2\x1d.vibesys.store.v1.SpanVersionR\bversions\"\\\n" +
 	"\vSpanVersion\x12\x19\n" +
