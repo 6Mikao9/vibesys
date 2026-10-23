@@ -13,10 +13,9 @@ import {
   READ_METHOD,
   SshLink,
 } from '@vibesys/connection';
-import {type HostKey, hostFromKey} from '@vibesys/hosts';
+import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
 import {GATEWAY_CHANNEL, gatewayEnd, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
 import {configuredHostCall, configuredRead, HOST_CALL_METHOD} from '@vibesys/runs/intents';
-import {type SettingsStore, settingsFor} from '@vibesys/settings';
 import {grpcCode, type ScheduleTimeout} from '@vibesys/transport';
 import type {IpcMain} from 'electron';
 import {rendererGeneration, type WelcomeInvokeEvent} from './welcome-ipc.js';
@@ -40,11 +39,11 @@ export function installGatewayIpc(
   ipc: IpcMain,
   {
     calls,
-    settings,
+    checkout,
     admits,
   }: {
     calls: GatewayCalls;
-    settings: SettingsStore;
+    checkout: (host: HostId) => Promise<string | null>;
     admits: (event: WelcomeInvokeEvent) => boolean;
   },
 ): void {
@@ -83,7 +82,7 @@ export function installGatewayIpc(
         if (!done) port.postMessage(gatewayReply(bytes));
       };
       if (request.kind === 'unary') {
-        const bytes = await withCheckout(settings, request);
+        const bytes = await withCheckout(checkout, request);
         receive(await calls.unary(request.host, request.method, bytes, abort.signal));
       } else await calls.stream(request.host, request.method, request.bytes, abort.signal, receive);
     })().then(() => finish(), finish);
@@ -92,15 +91,14 @@ export function installGatewayIpc(
 
 /** Host-call and read requests carry the checkout configured for their host. */
 async function withCheckout(
-  settings: SettingsStore,
+  checkout: (host: HostId) => Promise<string | null>,
   request: {readonly host: HostKey; readonly method: string; readonly bytes: Uint8Array},
 ): Promise<Uint8Array> {
   if (request.method !== HOST_CALL_METHOD && request.method !== READ_METHOD) return request.bytes;
-  const {settings: file} = await settings.hosts();
-  const checkout = settingsFor(file, hostFromKey(request.host))?.checkout ?? null;
+  const saved = await checkout(hostFromKey(request.host));
   return request.method === HOST_CALL_METHOD
-    ? configuredHostCall(request.bytes, checkout)
-    : configuredRead(request.bytes, checkout);
+    ? configuredHostCall(request.bytes, saved)
+    : configuredRead(request.bytes, saved);
 }
 
 /** One terminal reply: the failure's text and, when the gateway refused the call, its gRPC status. */

@@ -54,6 +54,7 @@ import {
   serveBundledUi,
 } from './app-security.js';
 import {AppStartup} from './app-startup.js';
+import {effectiveCheckout} from './checkout.js';
 import {Desktop} from './desktop.js';
 import {createGatewayCalls, installGatewayIpc} from './gateway-ipc.js';
 import {type LaunchPlan, userDataOverride} from './launch-args.js';
@@ -268,7 +269,11 @@ async function openWindow(
   powerMonitor.on('resume', () => manager.wake());
   watchNetwork(manager);
   const admits = desktop.admitsRenderer.bind(desktop);
-  installGatewayIpc(ipcMain, {calls: gateway, settings, admits});
+  installGatewayIpc(ipcMain, {
+    calls: gateway,
+    checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
+    admits,
+  });
   return desktop;
 }
 
@@ -336,15 +341,11 @@ function listedHosts(parts: {
       ...(endLogin === undefined ? {} : {endLogin}),
       runs,
       catalog: registryRunCatalog({
-        checkout: async id =>
-          (await settings.hosts()).settings.hosts[hostKey(id)]?.checkout ??
-          (id.kind === 'local' ? REPOSITORY_ROOT : null),
+        checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
         unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
       }),
       savedRuns: registrySavedRuns({
-        checkout: async id =>
-          (await settings.hosts()).settings.hosts[hostKey(id)]?.checkout ??
-          (id.kind === 'local' ? REPOSITORY_ROOT : null),
+        checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
         unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
       }),
       log,

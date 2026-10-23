@@ -8,7 +8,6 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {fromChild, GatewayCalls, gatewayProcess} from '@vibesys/connection';
 import {API_SCHEMA_HASH} from '@vibesys/proto';
-import {SettingsStore} from '@vibesys/settings';
 import {app, BrowserWindow, ipcMain, protocol} from 'electron';
 // Resolve the built entry at runtime, as the other Electron E2E compositions do.
 /** @type {typeof import('../src/main/gateway-ipc.js')} */
@@ -24,12 +23,6 @@ const binary = process.env['VIBESYS_GATEWAY_BINARY'];
 const mode = process.env['VIBESYS_GATEWAY_MODE'];
 if (!root || !binary || (mode !== 'socket' && mode !== 'connect pipe'))
   throw new Error('gateway fixture configuration is missing');
-const settings = new SettingsStore({
-  settingsPath: join(root, 'settings', 'hosts.json'),
-  recentPath: join(root, 'settings', 'recent.json'),
-  preferencesPath: join(root, 'settings', 'preferences.json'),
-  log: message => console.error(message),
-});
 /** @type {import('@vibesys/transport').ScheduleTimeout} */
 const schedule = (callback, delay) => {
   const timer = setTimeout(callback, delay);
@@ -79,7 +72,7 @@ gatewayState.vibesysGatewayReady = app.whenReady().then(async () => {
   });
   installGatewayIpc(ipcMain, {
     calls,
-    settings,
+    checkout: async () => root,
     admits: event => event.senderId === window.webContents.id && event.senderUrl === page,
   });
   app.on('before-quit', () => calls.close());

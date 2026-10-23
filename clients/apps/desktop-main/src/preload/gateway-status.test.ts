@@ -10,19 +10,23 @@ import {createRequire} from 'node:module';
 import {create, type DescMessage, type MessageInitShape, toBinary} from '@bufbuild/protobuf';
 import {GatewayCalls, type GatewayDialer} from '@vibesys/connection';
 import {FakeGateway} from '@vibesys/connection/testing';
+import type {HostId} from '@vibesys/hosts';
 import {GATEWAY_CHANNEL, GatewayError, gatewayBridge} from '@vibesys/ipc';
 import {
   GetBlobsRequestSchema,
+  HostCallRequestSchema,
   HostService,
+  ReadRequestSchema,
   SkeletonRequestSchema,
   TailRequestSchema,
   TailStreamRequestSchema,
   WatchRunsRequestSchema,
 } from '@vibesys/proto';
-import {SettingsStore} from '@vibesys/settings';
+import {SettingsStore, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {IpcMain} from 'electron';
+import {effectiveCheckout} from '../main/checkout.js';
 import {installGatewayIpc} from '../main/gateway-ipc.js';
 
 const {createGatewayPreload} = createRequire(import.meta.url)(
@@ -83,18 +87,15 @@ class FakeIpcMain {
   }
 }
 
-function pageBridge(peer: GatewayDialer) {
+function pageBridge(peer: GatewayDialer, checkout?: (host: HostId) => Promise<string | null>) {
   const clock = new FakeClock();
   const calls = new GatewayCalls(() => peer, clock.schedule);
   const ipc = new FakeIpcMain();
-  const settings = new SettingsStore({
-    settingsPath: '/settings/hosts.json',
-    recentPath: '/settings/recent.json',
-    preferencesPath: '/settings/preferences.json',
-    log: () => undefined,
-    filesystem: new FakeSettingsFilesystem(),
+  installGatewayIpc(ipc as unknown as IpcMain, {
+    calls,
+    checkout: checkout ?? (async () => '/checkout'),
+    admits: () => true,
   });
-  installGatewayIpc(ipc as unknown as IpcMain, {calls, settings, admits: () => true});
   const preload = createGatewayPreload({
     channel: () => {
       const {port1, port2} = new MessageChannel();
@@ -150,6 +151,73 @@ describe('a refusal keeps its gRPC status from the gateway to the page', () => {
           });
           expect(status).toBe(code);
         }
+    } finally {
+      calls.close();
+      peer.close();
+    }
+  });
+});
+
+describe('the checkout a call carries is the effective one, saved or not', () => {
+  const profile = () =>
+    new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
+      log: () => undefined,
+      filesystem: new FakeSettingsFilesystem(),
+    });
+  const intent = encode(HostCallRequestSchema, {
+    method: {
+      case: 'postIntent',
+      value: {
+        projectRoot: '/p',
+        runId: 'a',
+        requestId: 'r-1',
+        expectedEpoch: 1n,
+        intent: {case: 'pause', value: {}},
+      },
+    },
+  });
+  const read = encode(ReadRequestSchema, {
+    method: {case: 'listHarnesses', value: {requestId: 'r-2'}},
+  });
+
+  test('a fresh profile uses the app checkout for HostCall and Read; a saved one wins', async () => {
+    for (const saved of [null, '/saved checkout']) {
+      const peer = new FakeGateway();
+      const settings = profile();
+      if (saved !== null)
+        await settings.updateHosts(current =>
+          withHostSettings(current, {kind: 'local'}, {checkout: saved}),
+        );
+      const {bridge, calls} = pageBridge(peer, effectiveCheckout(settings, '/app'));
+      try {
+        void bridge.unary('local', method('hostCall'), intent).result.catch(() => undefined);
+        expect((await peer.nextHostCall()).request.checkout).toBe(saved ?? '/app');
+        void bridge.unary('local', method('read'), read).result.catch(() => undefined);
+        expect((await peer.nextRead()).request.checkout).toBe(saved ?? '/app');
+      } finally {
+        calls.close();
+        peer.close();
+      }
+    }
+  });
+
+  test('a remote host with no saved checkout is refused before anything is sent', async () => {
+    const peer = new FakeGateway();
+    const {bridge, calls} = pageBridge(peer, effectiveCheckout(profile(), '/app'));
+    try {
+      for (const request of [
+        [method('hostCall'), intent],
+        [method('read'), read],
+      ] as const) {
+        const error = await bridge.unary('ssh:host-a', request[0], request[1]).result.then(
+          () => undefined,
+          (reason: unknown) => String(reason),
+        );
+        expect(error).toContain('checkout');
+      }
     } finally {
       calls.close();
       peer.close();
