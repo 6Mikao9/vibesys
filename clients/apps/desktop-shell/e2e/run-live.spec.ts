@@ -1,5 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
+import {create, toBinary} from '@bufbuild/protobuf';
 import {expect, type Page, test} from '@playwright/test';
+import {RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
 import {Controls} from './chat-controls.js';
 import {
   type FakeBridgeSeed,
@@ -158,9 +160,25 @@ test('a live run drains from the header over its session, and is let go', async 
 
   await push(page, listed([server('paused', 'user')]));
   await transitionJourney(page, 'empty', 'parked');
-  await expect(page.getByRole('main').getByText('Paused by you')).toBeVisible();
-  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
-  await expect(page.getByRole('button', {name: 'Pause now', exact: true})).toBeEnabled();
+  // The drained writer has left: the host reports the writer ended, so Resume is admissible.
+  await page.evaluate(
+    bytes =>
+      (window as unknown as {fakeGateway: {observe(b: number[]): void}}).fakeGateway.observe(bytes),
+    [
+      ...toBinary(
+        WatchRunsResponseSchema,
+        create(WatchRunsResponseSchema, {
+          runId: 'run-a',
+          liveness: RunLiveness.PARKED,
+          head: {epoch: 1},
+        }),
+      ),
+    ],
+  );
+  // A drained pause is parked: the run says Paused, offers Resume, and has nothing left to cut short.
+  await expect(page.getByRole('main').getByText('Paused', {exact: true}).first()).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeEnabled();
+  await expect(page.getByRole('button', {name: 'Pause now', exact: true})).toHaveCount(0);
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   if (shots !== undefined) await page.screenshot({path: `${shots}/ink-live-paused.png`});
 
