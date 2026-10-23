@@ -5,6 +5,7 @@ import {
   clusterTestsByAlias,
   loginStartsByProvider,
   machineSettingsWorld,
+  storeRunFixture,
 } from '@vibesys/run-fixtures';
 import {
   type FakeBridgeSeed,
@@ -16,6 +17,7 @@ import {
   installFakeNewRun,
   installFakeProjectRuns,
 } from './fake-bridge.js';
+import {installGateway, wire} from './fake-gateway.js';
 import {FAKE_OFFER} from './fake-offer.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {STARTED_AT} from './started-at.js';
@@ -139,6 +141,8 @@ export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<voi
 
 /** Opens the app and goes to New run by the rail, as a user starts a run. */
 export async function openNewRun(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
+  // The run that Start run opens is read over the gateway like every run.
+  await installGateway(page, wire(storeRunFixture('live')));
   await open(page, seed);
   await page
     .getByRole('navigation', {name: 'VibeSys'})
