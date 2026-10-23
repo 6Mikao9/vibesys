@@ -166,17 +166,11 @@ class StopLifted(Value):
 
     Work the stop already ended stays ended (a task that took ``Stopped`` has returned); a
     task that had not taken it yet no longer will, and ``ctx.stop_requested`` is false again.
-
-    ``ended`` says the resume reopened a run core had ended. Whatever the flows still wait for
-    belongs to the authority that ended: core answered some of it with the end and never took
-    the rest (a decision made after the end), so nothing will answer it. They start again from
-    their checkpoints.
     """
 
     kind: Literal["stop_lifted"] = "stop_lifted"
     control: ControlInput
     new_epoch: bool = Field(default=False, exclude_if=lambda value: not value)
-    ended: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class TimeReached(Value):
@@ -294,6 +288,10 @@ class RunView(Value):
     comparisons: tuple[StatedComparison, ...] = ()
     """Every candidate input's comparison with its base as it stands now, and whether it is
     still settling; one per scope, candidate input and base input."""
+    taken: tuple[DecisionId, ...] = ()
+    """Every decision the run took from the search: core's receipts, and the decisions the shell
+    holds back until core can take them. A decision the search made that is not here was never
+    taken (core dropped it when the run had ended), so no answer to it will ever come."""
     measured_plans: tuple[MeasuredPlan, ...] = ()
     """Plans core has admitted, so a search can repeat a stage list it did not choose.
 

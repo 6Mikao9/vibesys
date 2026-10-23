@@ -306,6 +306,10 @@ class _Run:
             if task.blocked is not None
         )
 
+    def awaiting(self) -> tuple[DecisionId, ...]:
+        """The decisions the flows asked for and have no answer to yet."""
+        return tuple(decision for decision, pending in self._pendings.items() if pending.alive())
+
     def latch[T](self, key: LatchKey[T]) -> Latch[T]:
         """A new handle on the run's latch ``key``; another key with its name is a bug."""
         cell = self._latches.setdefault(key.name, LatchCell(key))

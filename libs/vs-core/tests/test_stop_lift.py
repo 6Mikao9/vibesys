@@ -15,18 +15,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api.testing import FAKE_REGISTRY, FakeView
+from vs_core.api.testing import FAKE_REGISTRY
+from vs_sim.api.testing import examples
 
 from .flow_support import Config, Plan, answer_of, ask, start
 from .test_flows import Begin, answer, ended, stop_aware, waits, worker
 from .test_flows_codec import ask_twice
 
 if TYPE_CHECKING:
-    from vs_core.api.testing import FlowRun
+    from vs_core.api.testing import Asked, FlowRun
 
 _ROUNDS = 3
 
@@ -177,10 +178,18 @@ def test_a_run_saved_stopped_by_the_previous_version_resumes_and_lifts() -> None
     assert core.requested_stop_mode(transition.state.run) is None
 
     run = start(ask_twice)
-    flows, _ = run.driver.update(
-        envelope.strategy, core.StopLifted(control=lifted.control), FakeView().current()
+    holds = run.view.current().model_copy(
+        update={
+            "taken": tuple(
+                core.DecisionId(root=source)
+                for waiting in run.driver.waiting(envelope.strategy)
+                for source in waiting.sources
+            )
+        }
     )
+    flows, _ = run.driver.update(envelope.strategy, core.StopLifted(control=lifted.control), holds)
     assert flows.live.stop is None
+    assert flows.base is None, "core holds what the flows wait for, so they were not restarted"
 
 
 @pytest.mark.regression
@@ -219,21 +228,15 @@ def test_new_epoch_replays_every_live_wait_instead_of_restarting_from_old_checkp
     assert not run.state.restart_settled
 
 
-# -- a resume that reopens an ended run -------------------------------------------------------
+# -- a resume of a run whose decisions core dropped ------------------------------------------
 
 
-class Marker(core.Value):
-    """Published each time the root starts, so a test sees a restart."""
-
-    started: int
-
-
-async def waits_for_a_decision(ctx: core.Flow, config: Config) -> core.NoWinner:
-    """A root winding down: it asked for the winner to be adopted and waits for the answer."""
+async def two_rounds(ctx: core.Flow, config: Config) -> core.NoWinner:
+    """A root that asks one turn after the other, checkpointed so a resume starts it again."""
     ctx.checkpoint(config)
-    ctx.publish(Marker(started=len(ctx.settlements)))
-    await ask(ctx, "adopt")
-    return core.NoWinner(reason="adopted")
+    for index in range(_ROUNDS):
+        await ask(ctx, f"round-{index}")
+    return core.NoWinner(reason="done")
 
 
 def _asked_so_far(run: FlowRun[Config]) -> int:
@@ -241,29 +244,48 @@ def _asked_so_far(run: FlowRun[Config]) -> int:
     return len(run.decisions)
 
 
-def test_a_resume_that_reopens_an_ended_run_asks_again_for_the_decision_core_never_took(
+def _open_turn(run: FlowRun[Config]) -> Asked | None:
+    """The oldest turn the flows wait on, if any (a ``Finish`` is answered by nobody)."""
+    return next((asked for asked in run.open if isinstance(asked.request, core.RequestTurn)), None)
+
+
+def _answer_everything(run: FlowRun[Config]) -> None:
+    """The host answers the turns that are open, until the flows ask no more."""
+    for _ in range(10 * _ROUNDS):
+        asked = _open_turn(run)
+        if asked is None:
+            return
+        run.reply(asked, Plan(n=1))
+
+
+def test_a_resume_asks_again_for_a_decision_core_dropped_when_it_ended_the_run(
     begin: Begin,
 ) -> None:
-    """Regression: the root waited for ever on a decision the ended run's core never kept.
+    """Regression: the root waited for ever on a decision the ended run's core never took.
 
-    A run core ended while the root was adopting its winner is reopened by a resume. The adoption
-    the root waits for belongs to the authority that ended: nothing will ever answer it, and
-    the root, not concluded, was left idle (`run.concluded` was the only reason to restart).
+    Core ended the run (recovery was blocked) while the root was between two turns. The next
+    turn the root asked was dropped, as core drops what a terminal run is sent. The resume
+    reopened the run, but the root, not concluded, still waited for the answer to a decision
+    nobody had, and sat idle: `run.concluded` was the only reason to restart the flows.
     """
-    run = begin(waits_for_a_decision)
-    before = _asked_so_far(run)
+    run = begin(two_rounds)
+    run.end_run()
+    answer(run, "round-0")
+    assert not run.open, "core dropped the decision the root asked next"
     run.stop("recovery-blocked")
-    run.lift_stop(new_epoch=True, ended=True)
+    run.reopen()
+    run.lift_stop(new_epoch=True)
     assert run.state.base is not None, "every flow started again from its checkpoint"
-    assert _asked_so_far(run) > before, "the root asked again"
+    _answer_everything(run)
+    assert ended(run).reason == "no-winner: done"
 
 
 @pytest.mark.parametrize("new_epoch", [False, True], ids=["same-epoch", "new-epoch"])
-def test_a_resume_of_a_run_core_did_not_end_leaves_the_flows_waiting_for_their_decisions(
+def test_a_resume_leaves_the_flows_waiting_for_the_decisions_core_holds(
     begin: Begin, *, new_epoch: bool
 ) -> None:
     """A pause, a park or a stop the search is still taking: core holds what the flows await."""
-    run = begin(waits_for_a_decision)
+    run = begin(two_rounds)
     before = _asked_so_far(run)
     run.stop("pause")
     run.lift_stop(new_epoch=new_epoch)
@@ -271,26 +293,50 @@ def test_a_resume_of_a_run_core_did_not_end_leaves_the_flows_waiting_for_their_d
     assert _asked_so_far(run) == before
 
 
-class Resume(StrEnum):
-    """How a run was resumed: where core stood when the operator's resume came."""
+class Move(StrEnum):
+    """What can happen to a run between the root's decisions: the host, the operator, core."""
 
-    LIVE = "live"
-    """Core had not ended the run: it was paused, parked or stopped, and holds the decisions."""
-    ENDED = "ended"
-    """Core had ended the run, and the resume reopened it."""
+    ANSWER = "answer"
+    """The host answers the oldest open turn."""
+    END = "end"
+    """Core ends the run: it drops every decision it is sent."""
+    REOPEN = "reopen"
+    """Core takes decisions again."""
+    STOP = "stop"
+    LIFT = "lift"
 
 
-@given(
-    stops=st.integers(0, 3), resumes=st.lists(st.sampled_from(list(Resume)), min_size=1, max_size=4)
+@settings(max_examples=examples(pr=60, nightly=600))
+@example(moves=[Move.END, Move.ANSWER], restarting=False)
+@example(
+    moves=[Move.ANSWER, Move.END, Move.ANSWER, Move.STOP, Move.REOPEN, Move.LIFT], restarting=True
 )
-def test_no_flow_awaits_a_decision_of_an_authority_that_ended(
-    stops: int, resumes: list[Resume]
+@given(moves=st.lists(st.sampled_from(list(Move)), max_size=12), restarting=st.booleans())
+def test_a_run_resumed_after_core_dropped_decisions_goes_on_to_its_end(
+    moves: list[Move], *, restarting: bool
 ) -> None:
-    """Whatever stopped and resumed before: a resume of an ended run asks every wait again."""
-    run = start(waits_for_a_decision, restarting=False)
-    for index, resume in enumerate(resumes):
-        before = _asked_so_far(run)
-        if index < stops:
-            run.stop(f"stop-{index}")
-        run.lift_stop(f"resume-{index}", new_epoch=True, ended=resume is Resume.ENDED)
-        assert (_asked_so_far(run) > before) is (resume is Resume.ENDED)
+    """Whatever happened to the run before: after the resume the host's answers finish it.
+
+    The root decides while core is ready, while it has ended the run, in any order with the
+    operator's stops and lifts; the last step reopens the run and resumes it. The flows then
+    wait only for decisions core holds, so answering what is open ends the search.
+    """
+    run = start(two_rounds, restarting=restarting)
+    for number, move in enumerate(moves):
+        match move:
+            case Move.ANSWER if (asked := _open_turn(run)) is not None:
+                run.reply(asked, Plan(n=1))
+            case Move.END:
+                run.end_run()
+            case Move.REOPEN:
+                run.reopen()
+            case Move.STOP:
+                run.stop(f"stop-{number}")
+            case Move.LIFT:
+                run.lift_stop(f"resume-{number}", new_epoch=True)
+            case _:
+                pass
+    run.reopen()
+    run.lift_stop("resume-last", new_epoch=True)
+    _answer_everything(run)
+    assert ended(run).reason == "no-winner: done"

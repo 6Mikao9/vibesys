@@ -301,6 +301,8 @@ class FlowRun[C]:
         one of these stays open, for the host to answer as the run it reuses.
         """
         self._open: list[Asked] = []
+        self._taken: list[DecisionId] = []
+        self._core_ended = False
         self._sleeps: list[Seconds] = []
         self._prompts: dict[ArtifactId, tuple[str, Value]] = {}
         self._owners: dict[str, Callable[[OperationRequest], BaseModel]] = {}
@@ -328,7 +330,7 @@ class FlowRun[C]:
             adopting=options.get("adopting", True),
         )
         run.state, issued = run.driver.init(
-            config, initial_state().run.facts if facts is None else facts, run.view.current()
+            config, initial_state().run.facts if facts is None else facts, run._view()
         )
         run._take(issued)
         run._pump()
@@ -585,13 +587,10 @@ class FlowRun[C]:
             )
         )
 
-    def lift_stop(
-        self, control: str = "resume", *, new_epoch: bool = False, ended: bool = False
-    ) -> None:
+    def lift_stop(self, control: str = "resume", *, new_epoch: bool = False) -> None:
         """The operator resumes the run, which lifts the stop that stood.
 
-        ``new_epoch`` says the resume opened a new epoch; ``ended`` that core had ended the run
-        before it, so the flows wait for answers nobody will give.
+        ``new_epoch`` says the resume opened a new epoch, as one that reopens an ended run does.
         """
         self._timeline.append(control)
         self.send(
@@ -600,9 +599,20 @@ class FlowRun[C]:
                     control_id=ControlId(root=control), action="resume", when="now"
                 ),
                 new_epoch=new_epoch,
-                ended=ended,
             )
         )
+
+    def end_run(self) -> None:
+        """Core ends the run: it takes no decision from the search until ``reopen``.
+
+        What the search decides meanwhile is dropped, as core drops it once the run is terminal:
+        no wait opens for it and nothing will ever answer it.
+        """
+        self._core_ended = True
+
+    def reopen(self) -> None:
+        """A resume reopened the run: core takes the search's decisions again."""
+        self._core_ended = False
 
     def advance_to(self, time: Seconds) -> None:
         """Move the clock to ``time`` and deliver ``TimeReached`` for it."""
@@ -645,7 +655,7 @@ class FlowRun[C]:
     def _pump(self) -> None:
         while self._queue:
             event = self._queue.pop(0)
-            self.state, issued = self.driver.update(self.state, event, self.view.current())
+            self.state, issued = self.driver.update(self.state, event, self._view())
             self._take(issued)
             self._stopped = self._stopped or isinstance(event, StopRequested)
             policy = RestartPolicy(every=True) if self.restarting is True else self.restarting
@@ -653,9 +663,24 @@ class FlowRun[C]:
                 self.restart()
             self._steps += 1
 
+    def _view(self) -> RunView:
+        """The view the search reads: the fake view, and the decisions this core has taken."""
+        return self.view.current().model_copy(update={"taken": tuple(self._taken)})
+
+    def _receive(self, issued: list[Decision]) -> list[Decision]:
+        """The decisions this core takes: all but the work of a run it has ended."""
+        if self._core_ended:
+            return [decision for decision in issued if isinstance(decision, WakeAt)]
+        for decision in issued:
+            if isinstance(decision, Wait):
+                self._taken.append(decision.request.decision_id)
+            elif isinstance(decision, Finish):
+                self._taken.append(decision.decision_id)
+        return issued
+
     def _take(self, issued: list[Decision]) -> None:
         self.decisions.extend(issued)
-        for decision in issued:
+        for decision in self._receive(issued):
             match decision:
                 case Wait(request=Operation(request=render) as operation) if self._renders(render):
                     self._render(operation, render)  # ty: ignore[invalid-argument-type]

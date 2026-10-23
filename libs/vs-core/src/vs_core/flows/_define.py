@@ -281,10 +281,10 @@ class FlowDriver[C]:
             raise ContractError(("event",), "an event is journaled as itself or as a record")
         # A new writer does not change the search code or discard its journal.
         # Live flows still own their pending decisions, even across a park.
-        if lifting and (run.concluded or event.ended):
-            # The search ended the run under the stop, so no flow is left to take the lift, or
-            # core ended the run and the resume reopened it: what the flows still wait for
-            # belongs to the authority that ended. Every flow starts again from its latest
+        if lifting and (run.concluded or _unanswerable(run, view)):
+            # The search ended the run under the stop, so no flow is left to take the lift, or a
+            # flow waits for a decision the run never took (core dropped it when the run had
+            # ended), which no answer will ever reach. Every flow starts again from its latest
             # checkpoint, with the stop taken back.
             state, run, restarting = self._restart(state, view, lifted=True)
             restarted.extend(restarting)
@@ -388,6 +388,11 @@ class FlowDriver[C]:
         decisions = run.restore(live, view, None)
         restarted = self._first_state(run, state.facts, live, decisions)
         return restarted, run, decisions
+
+
+def _unanswerable(run: _Run, view: RunView) -> bool:
+    """Whether a flow waits for a decision the run never took, so nothing will answer it."""
+    return not set(run.awaiting()) <= set(view.taken)
 
 
 def _schema_ref(registration: OperationRegistration) -> OperationSchemaRef:

@@ -198,7 +198,7 @@ class _Pass:
         """Deliver queued events one at a time until the search has nothing more to say."""
         while self.queue:
             event = self.queue.pop(0)
-            state, decisions = search.update(state, event, run_view(core))
+            state, decisions = search.update(state, event, run_view(core, self.held))
             core = self.submit(check_decisions(decisions), core)
         return Advanced(
             state=state,

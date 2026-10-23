@@ -51,20 +51,25 @@ from .types.search import (
 from .types.session_inputs import InputDelivered, InputDropped
 from .types.sessions import InterruptCompleted, InterruptFailed, TurnResult, YieldPublicationFailed
 from .types.settlement import AdoptionFailed, AdoptionResult, AttemptSettled
-from .types.strategy import Rejected, RequestTurn
+from .types.strategy import Finish, Rejected, RequestTurn, Wait
 from .types.until import Failed, FailureReason
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable, Iterator
 
     from .types.common import DecisionId, RequestId
     from .types.kernel import CoreState, StrategyEvent
     from .types.records import RequestRecord
     from .types.search import Event
+    from .types.strategy import Decision
 
 
-def run_view(core: CoreState) -> RunView:
-    """The narrow read-only view of a run that ``Search.update`` receives."""
+def run_view(core: CoreState, held: Iterable[Decision] = ()) -> RunView:
+    """The narrow read-only view of a run that ``Search.update`` receives.
+
+    ``held`` are the decisions the shell keeps back for core (`deferred`): the run has taken
+    them from the search, though core has no receipt for them yet.
+    """
     run = core.run
     return RunView(
         run=Scope(owner=run.run_id, generation=run.generation),
@@ -77,8 +82,18 @@ def run_view(core: CoreState) -> RunView:
         measurements=core.evaluation.evidence,
         settlements=core.settlement.settlements,
         comparisons=stated_comparisons(core.evaluation, moment_of(run)),
+        taken=(*(receipt.decision_id for receipt in run.receipts), *_held_ids(held)),
         measured_plans=_measured_plans(core),
     )
+
+
+def _held_ids(held: Iterable[Decision]) -> Iterator[DecisionId]:
+    """The ids of the decisions the shell holds: a wait names its request's, a finish its own."""
+    for decision in held:
+        if isinstance(decision, Wait):
+            yield decision.request.decision_id
+        elif isinstance(decision, Finish):
+            yield decision.decision_id
 
 
 def _measured_plans(core: CoreState) -> tuple[MeasuredPlan, ...]:
@@ -311,7 +326,7 @@ def _control(core: CoreState, event: ControlChanged) -> Event | None:
 
 def _stop_lifted(core: CoreState, event: StopLiftRecorded) -> Event:
     del core
-    return StopLifted(control=event.control, new_epoch=event.new_epoch, ended=event.ended)
+    return StopLifted(control=event.control, new_epoch=event.new_epoch)
 
 
 def _delivered(core: CoreState, event: InputDelivered) -> Event:
