@@ -1,11 +1,9 @@
 /** Skeleton readings are projected into the existing Run screen props; seeking is local. */
-import {toBinary} from '@bufbuild/protobuf';
 import {type HostRun, recordedProjectRoot} from '@vibesys/hosts';
-import {RecordSchema} from '@vibesys/proto';
 import {observeRun, type RunLivenessHint, type Skeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
-import {decodeRecordRows, type RecordRow} from '@vibesys/run-state/records';
+import {type RecordRow, rowsOfRecords} from '@vibesys/run-state/records';
 import {
   lifecycleState,
   readHeadline,
@@ -74,7 +72,7 @@ function latestFailure(
   recordLog: readonly RecordRow[] | undefined,
 ): RecordRow | undefined {
   const epoch = observeRun(skeleton).epoch;
-  const kept = decodeRecordRows(skeleton.failures.map(record => toBinary(RecordSchema, record)));
+  const kept = rowsOfRecords(skeleton.failures);
   return [...kept, ...(recordLog ?? [])]
     .filter(row => row.failure && row.epoch === epoch)
     .sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : 1))

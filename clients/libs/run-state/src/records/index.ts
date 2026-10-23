@@ -54,6 +54,11 @@ function legacyType(json: string): string {
     : '';
 }
 
+/** The rows of records already decoded, such as the error notices a keyframe holds. */
+export function rowsOfRecords(records: readonly StoreRecord[]): readonly RecordRow[] {
+  return decodeRecordRows(records.map(record => toBinary(RecordSchema, record)));
+}
+
 export function decodeRecordRows(bytes: readonly Uint8Array[]): readonly RecordRow[] {
   return bytes.map(value => {
     const record = fromBinary(RecordSchema, value);
