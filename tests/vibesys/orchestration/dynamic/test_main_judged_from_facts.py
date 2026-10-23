@@ -34,7 +34,7 @@ from tests.vibesys.orchestration.dynamic._values import (
     workstream_start,
 )
 
-from vibesys.candidates.api import InputReading, Measured
+from vibesys.candidates.api import Baseline, InputReading, Measured
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.metrics import MetricRow, mean_metrics
 from vibesys.orchestration.dynamic.search.api import (
@@ -48,13 +48,13 @@ from vibesys.orchestration.dynamic.search.api import (
     WorkKind,
     WorkstreamDone,
     WorkstreamStart,
+    assertion,
     measured_by_workstream,
 )
 from vs_core.api import (
     ComparisonVerdict,
     EvidenceKind,
     Runs,
-    Settle,
     TaskObjective,
     dominance,
     judge,
@@ -145,25 +145,23 @@ def start_of(index: int, built: Built) -> WorkstreamStart:
     )
 
 
-def report_of(index: int, built: Built, start: WorkstreamStart) -> CandidateMeasured | None:
+def report_of(
+    index: int, built: Built, start: WorkstreamStart, bar: Baseline | None
+) -> CandidateMeasured | None:
     """What the workstream reports when its measurement lands: the settlement it asserted.
 
-    The settlement is eligible only when the candidate beat the input as it stood at close, which
-    is the verdict that is frozen; what is not is whether the candidate is sound.
+    The settlement is the one the search asserts against the input as it stands then (``bar``):
+    eligible only when the candidate beats that bar, a verdict taken once and never revisited.
+    What is not frozen is whether the candidate is sound.
     """
     candidate = revision(f"c{index}")
-    settle = Settle(
-        assessments=(),
-        eligible=False,
-        retention="candidate",
-        outcome="succeeded",
-        candidate=candidate,
-    )
     outcome = HypothesisOutcome.SUPPORTED if built.sound else HypothesisOutcome.BLOCKED
     closing = Closing(
         result=result_of(outcome, review=True, revision_=candidate),
         evidence=evidence_for(index, built.reading),
+        input=bar,
     )
+    settle = assertion(start, closing, terms_of(), bar)
     return measured_by_workstream(start, closing, settle, terms_of())
 
 
@@ -218,7 +216,7 @@ def test_a_candidate_the_bar_could_not_judge_on_ttft_moves_main_when_the_bar_rep
     start = start_of(0, candidate)
     record.running[start.key] = start
 
-    report = report_of(0, candidate, start)
+    report = report_of(0, candidate, start, record.baseline)
     assert report is not None
     assert report.eligible is False  # the settlement's own verdict on the bar it saw, frozen
     assert report.sound is True
@@ -245,7 +243,7 @@ def test_a_candidate_that_is_not_sound_never_moves_main_whatever_the_bar_reports
     record = fresh_record(tpot_only)
     start = start_of(0, candidate)
     record.running[start.key] = start
-    report = report_of(0, candidate, start)
+    report = report_of(0, candidate, start, record.baseline)
     assert report is not None
     record.candidate_measured(report)
 
@@ -360,18 +358,20 @@ class Driver:
     def __post_init__(self) -> None:
         self.record = fresh_record(sample_reading(self.samples[0]))
 
+    def bars(self) -> list[dict[str, float]]:
+        """The samples of the input the ledger holds now."""
+        return [sample_reading(axes) for axes in self.samples[: self.taken]]
+
     def arrive(self, what: str) -> None:
         if what == "b":
             self.taken += 1
-            self.record.refined(
-                bar_of([sample_reading(axes) for axes in self.samples[: self.taken]])
-            )
+            self.record.refined(bar_of(self.bars()))
             return
         index = int(what)
         start = start_of(index, self.built[index])
         self.starts[index] = start
         self.record.running[start.key] = start
-        report = report_of(index, self.built[index], start)
+        report = report_of(index, self.built[index], start, bar_of(self.bars()))
         assert report is not None
         self.record.candidate_measured(report)
         self.landed.append(index)
@@ -463,7 +463,7 @@ def test_a_checkpoint_from_before_the_candidates_were_kept_is_judged_from_its_ro
     record.hypotheses["h0"] = hypothesis_record("h0")
     start = start_of(0, candidate)
     record.running[start.key] = start
-    report = report_of(0, candidate, start)
+    report = report_of(0, candidate, start, record.baseline)
     assert report is not None
     record.candidate_measured(report)
     record.finished(done_of(0, candidate, start))

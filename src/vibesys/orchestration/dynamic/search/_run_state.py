@@ -1168,15 +1168,20 @@ class RunRecord:
     def candidate_measured(self, measured: CandidateMeasured) -> None:
         """A workstream's candidate was measured: main may move to it before the workstream closes.
 
-        The measurement is judged here at its first sight; the workstream's close offers it again
-        (`finished`), which changes nothing once it was judged.
+        The measurement is taken here at its first sight; the workstream's close offers it again
+        (`finished`), which changes nothing once it was taken. What main does with it is derived
+        from the facts and judged again whenever the bar moves (`MainLine.rejudge`).
         """
         start = self.running.get(measured.key)
         if start is not None:
             self._judge_measurement(start, measured)
 
     def _judge_measurement(self, start: WorkstreamStart, measured: CandidateMeasured) -> None:
-        """Fold a candidate's settled trusted measurement into main: the one way a candidate moves it."""
+        """Fold a candidate's settled trusted measurement into main: the one way a candidate moves it.
+
+        A bar the settlement was decided against may rest on more samples than the record's
+        (`refined`), which judges the candidates main already waits on again.
+        """
         self.refined(measured.input)
         self.main.measured(start, measured, self.terms)
 
