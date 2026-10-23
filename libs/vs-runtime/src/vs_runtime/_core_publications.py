@@ -21,6 +21,19 @@ if TYPE_CHECKING:
     from vs_project.api import StateNamespace
 
 
+def _in_current_shapes(source: bytes) -> bytes:
+    """``source`` with its samples, evidence records and comparisons in the current shapes.
+
+    Bytes that are no text come back as they are: the document decoder reports them.
+    """
+    try:
+        text = source.decode()
+    except UnicodeDecodeError:
+        return source
+    upgraded = upgrade_persisted_shapes(text)
+    return source if upgraded == text else upgraded.encode()
+
+
 class JournalPublicationDelivery:
     """Atomic durable journal, with conflict detection on ID and sequence.
 
@@ -49,7 +62,7 @@ class JournalPublicationDelivery:
         # none of the new ones, and no version that says so
         return decode_state_document(
             PublicationHistory,
-            upgrade_persisted_shapes(source),
+            _in_current_shapes(source),
             source="publications.json",
             context={"operation_registry": self._registry},
             versioned_by=("schema_version", PUBLICATION_SCHEMA_VERSION),

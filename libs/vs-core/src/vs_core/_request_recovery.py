@@ -1565,10 +1565,7 @@ def _deadline(
         reason=reason,
     )
     requests: list[Outbound] = []
-    signals = (
-        *_lost_turn(context, record, first=previous_block is None),
-        *_lost_turn_asked_again(context, record, first=previous_block is None),
-    )
+    signals = _lost_turn(context, record, first=previous_block is None)
     if previous_block is None:
         requests.append(_probe(block, context))
     state, events = _end_open_record(
@@ -1704,50 +1701,37 @@ def _end_open_record(
 def _lost_turn(
     context: RecordsContext, record: RequestRecord, *, first: bool
 ) -> tuple[Signal, ...]:
-    """The cancellation that ends the turn of a dispatch core just ended, else nothing.
+    """The cancellation that ends the turn of a request core just ended, else nothing.
 
     A dispatch that ends at its limit (or a watch) with no result leaves its session executing
     with nothing to answer it. The turn is lost like one whose acceptance stayed unknown:
     Sessions cancels it and answers its invocation as lost, and the search's role decides
     whether to ask again.
-    """
-    if not first or not is_open(record) or record.phase == RequestPhase.PREPARED:
-        return ()
-    invocation = turn_of(context, record)
-    if invocation is None:
-        return ()
-    return (
-        InvocationCancellationRequested(
-            invocation=invocation, authority=lost_turn_authority(invocation)
-        ),
-    )
 
-
-def _lost_turn_asked_again(
-    context: RecordsContext, record: RequestRecord, *, first: bool
-) -> tuple[Signal, ...]:
-    """The next ask to cancel a lost turn whose cancellation ended unanswered at its bound.
-
-    A cancellation that never answered proves nothing: the turn may still run, and the session
-    waits on it for ever, so the ask it serves (a planner call, an implementer's turn) has no
-    next step. Cancelling is idempotent, so core asks again under the next authority, up to
-    ``Limits.request_retries.limit`` more asks (as for a job's cancel, ``cancel_settled``),
-    each one given the bound to answer. Past it the cancellation stays unanswered and the
-    session keeps its wait, which halts the run loudly (``OrphanWaitError``).
+    A cancellation of a lost turn that ended unanswered at its bound proves nothing: the turn may
+    still run, and the session waits on it for ever, so the ask it serves (a planner call, an
+    implementer's turn) has no next step. Cancelling is idempotent, so core asks again under the
+    next authority, up to ``Limits.request_retries.limit`` more asks (as for a job's cancel,
+    ``cancel_settled``), each one given the bound to answer. Past it the cancellation stays
+    unanswered and the session keeps its wait, which halts the run loudly (``OrphanWaitError``).
     """
     request = record.request
-    if not first or not isinstance(request, CancelTurn) or not is_open(record):
+    if not first or not is_open(record):
         return ()
-    limit = context.run.limits.request_retries.limit
-    ask = lost_cancellation_ask(request.invocation, cancellation=request.request_id, limit=limit)
-    if ask is None or ask >= limit:
-        return ()
-    return (
-        InvocationCancellationRequested(
-            invocation=request.invocation,
-            authority=lost_turn_authority(request.invocation, ask + 1),
-        ),
-    )
+    if isinstance(request, CancelTurn):
+        limit = context.run.limits.request_retries.limit
+        ask = lost_cancellation_ask(
+            request.invocation, cancellation=request.request_id, limit=limit
+        )
+        if ask is None or ask >= limit:
+            return ()
+        invocation, authority = request.invocation, lost_turn_authority(request.invocation, ask + 1)
+    else:
+        invocation = None if record.phase == RequestPhase.PREPARED else turn_of(context, record)
+        if invocation is None:
+            return ()
+        authority = lost_turn_authority(invocation)
+    return (InvocationCancellationRequested(invocation=invocation, authority=authority),)
 
 
 def _orphaned_jobs(

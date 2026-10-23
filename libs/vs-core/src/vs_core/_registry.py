@@ -482,30 +482,14 @@ def decode_stored[M: BaseModel](
         ) from error
 
 
-@overload
-def upgrade_persisted_shapes(source: str) -> str: ...
-
-
-@overload
-def upgrade_persisted_shapes(source: bytes) -> bytes: ...
-
-
-def upgrade_persisted_shapes(source: str | bytes) -> str | bytes:
+def upgrade_persisted_shapes(source: str) -> str:
     """``source``, a persisted JSON document that is no envelope, in the current shapes.
 
     The samples, evidence records and comparisons in it are in the shapes the current version
     writes (`upgrade_envelope` does the same for an envelope, and its version says what to
-    rewrite; these documents carry none). Bytes that are no text come back as they are: the
-    caller's decoder reports them.
+    rewrite; these documents carry none). A text that is no JSON document comes back as it is.
     """
-    if isinstance(source, str):
-        return upgrade_document_shapes(source)
-    try:
-        text = source.decode()
-    except UnicodeDecodeError:
-        return source
-    upgraded = upgrade_document_shapes(text)
-    return source if upgraded == text else upgraded.encode()
+    return upgrade_document_shapes(source)
 
 
 def upgrade_envelope(source: str | bytes, at: tuple[str, ...]) -> str:
