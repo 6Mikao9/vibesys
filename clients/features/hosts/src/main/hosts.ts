@@ -711,6 +711,11 @@ export class Hosts {
           item => item.status === 'failed' || item.status === 'cannot-convert',
         ))
           this.#deps.log(`${label}: run ${run.runId} did not convert: ${run.reason}`);
+        // A rebuilt log says which projection moved: the batch totals alone cannot.
+        for (const run of outcome.runs.filter(
+          item => item.status === 'converted' && item.reason.includes('rebuilt'),
+        ))
+          this.#deps.log(`${label}: run ${run.runId} ${run.reason}`);
       },
       (error: unknown) => {
         if (signal.aborted) return;

@@ -2807,6 +2807,7 @@ test('a v2 run list starts one conversion pass per project without retry storms'
       kind: 'converted',
       runs: [
         {runId: 'old', status: 'converted', reason: ''},
+        {runId: 'newer', status: 'converted', reason: 'converted (rebuilt: projection 1 to 2)'},
         {runId: 'live', status: 'skipped', reason: 'run is live'},
         {runId: 'torn', status: 'failed', reason: 'journal is torn'},
       ],
@@ -2854,8 +2855,9 @@ test('a v2 run list starts one conversion pass per project without retry storms'
   ]);
   expect(logs.filter(line => line.includes('conver'))).toEqual([
     'This Mac: run conversion failed: gateway closed',
-    'This Mac: runs converted 1, skipped 1, failed 1, cannot convert 0, already converted 2',
+    'This Mac: runs converted 2, skipped 1, failed 1, cannot convert 0, already converted 2',
     'This Mac: run torn did not convert: journal is torn',
+    'This Mac: run newer converted (rebuilt: projection 1 to 2)',
     'This Mac: run conversion needs a newer checkout',
   ]);
 });
