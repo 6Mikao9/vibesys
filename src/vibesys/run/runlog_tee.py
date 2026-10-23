@@ -60,7 +60,7 @@ class RunLogTee:
         """Own a writer; delay replay until the journal has attached its history.
 
         A live journal supplies its checkout (an empty hash explicitly means
-        unknown). Offline conversion preserves the journal's span clock values.
+        unknown). Offline conversion translates the same wall clock as the live mirror.
         """
         self._writer = writer
         self._content = content
@@ -149,7 +149,7 @@ class RunLogTee:
             clock_offset=clock,
             tree_hash=self._tree_hash,
             dirty=self._dirty,
-            wall_span_clock=self._live,
+            wall_span_clock=True,
             clock_epochs=(*epochs, (at.timestamp(), clock)),
             intents=tuple(intents.items()),
             spans=tuple(

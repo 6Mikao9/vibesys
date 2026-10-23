@@ -271,7 +271,10 @@ def _serve_conversion(payload: bytes, platform: Platform) -> bytes:
 
     def conversions(project: Project, after_run: str) -> Iterator[RunConversion]:
         return transport.iter_conversions(
-            project, clock=platform.clock, threads=platform.threads, after_run=after_run
+            project,
+            clock=platform.clock,
+            threads=platform.threads,
+            options=transport.ConversionOptions(after_run=after_run),
         )
 
     return serve_convert_saved_runs(

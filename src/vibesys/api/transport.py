@@ -1,6 +1,7 @@
 """Stopped-run migration into the typed transport read path."""
 
 from vibesys.run.runlog_conversion import (
+    ConversionOptions,
     ConversionResult,
     ConversionStatus,
     RunConversion,
@@ -10,6 +11,7 @@ from vibesys.run.runlog_conversion import (
 )
 
 __all__ = [
+    "ConversionOptions",
     "ConversionResult",
     "ConversionStatus",
     "RunConversion",

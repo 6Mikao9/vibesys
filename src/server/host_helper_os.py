@@ -240,10 +240,7 @@ class FileProjects:
         self._summary_reader: SummaryReader | None = None
 
     def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        """Reuse catalog metadata and the transport's retained-format importer."""
-        if self._clock is None:
-            message = "saved-run import clock was not supplied"
-            raise ValueError(message)
+        """Read catalog metadata and bounded history availability observations."""
         wire = import_module("vs_proto.api")
         pb = wire.host_payloads
 
@@ -258,9 +255,7 @@ class FileProjects:
             )
             for run in runs
         ]
-        return import_module("server.host_saved_runs").page_saved_runs(
-            request, root, entries, clock=self._clock, threads=self._threads
-        )
+        return import_module("server.host_saved_runs").page_saved_runs(request, root, entries)
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""

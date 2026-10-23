@@ -84,6 +84,68 @@ func (x *RunConversionRefusal) GetReason() string {
 	return ""
 }
 
+// Provenance of a derived run.log. A resumed converter rebuilds after source
+// drift, including a pre-lock writer that resumed after the quiet-window probe.
+type RunConversionReceipt struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	JournalSize       uint64                 `protobuf:"varint,1,opt,name=journal_size,json=journalSize,proto3" json:"journal_size,omitempty"`
+	JournalModifiedNs uint64                 `protobuf:"varint,2,opt,name=journal_modified_ns,json=journalModifiedNs,proto3" json:"journal_modified_ns,omitempty"`
+	ProjectionVersion uint32                 `protobuf:"varint,3,opt,name=projection_version,json=projectionVersion,proto3" json:"projection_version,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *RunConversionReceipt) Reset() {
+	*x = RunConversionReceipt{}
+	mi := &file_vibesys_store_v1_conversion_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunConversionReceipt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunConversionReceipt) ProtoMessage() {}
+
+func (x *RunConversionReceipt) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_conversion_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunConversionReceipt.ProtoReflect.Descriptor instead.
+func (*RunConversionReceipt) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_conversion_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *RunConversionReceipt) GetJournalSize() uint64 {
+	if x != nil {
+		return x.JournalSize
+	}
+	return 0
+}
+
+func (x *RunConversionReceipt) GetJournalModifiedNs() uint64 {
+	if x != nil {
+		return x.JournalModifiedNs
+	}
+	return 0
+}
+
+func (x *RunConversionReceipt) GetProjectionVersion() uint32 {
+	if x != nil {
+		return x.ProjectionVersion
+	}
+	return 0
+}
+
 var File_vibesys_store_v1_conversion_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_conversion_proto_rawDesc = "" +
@@ -92,7 +154,11 @@ const file_vibesys_store_v1_conversion_proto_rawDesc = "" +
 	"\x14RunConversionRefusal\x12!\n" +
 	"\fjournal_size\x18\x01 \x01(\x04R\vjournalSize\x127\n" +
 	"\x13journal_modified_ns\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\x11journalModifiedNs\x12#\n" +
-	"\x06reason\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x06reasonBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
+	"\x06reason\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x06reason\"\xaa\x01\n" +
+	"\x14RunConversionReceipt\x12!\n" +
+	"\fjournal_size\x18\x01 \x01(\x04R\vjournalSize\x127\n" +
+	"\x13journal_modified_ns\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\x11journalModifiedNs\x126\n" +
+	"\x12projection_version\x18\x03 \x01(\rB\a\xbaH\x04*\x02 \x00R\x11projectionVersionBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_conversion_proto_rawDescOnce sync.Once
@@ -106,9 +172,10 @@ func file_vibesys_store_v1_conversion_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_conversion_proto_rawDescData
 }
 
-var file_vibesys_store_v1_conversion_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_vibesys_store_v1_conversion_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_vibesys_store_v1_conversion_proto_goTypes = []any{
 	(*RunConversionRefusal)(nil), // 0: vibesys.store.v1.RunConversionRefusal
+	(*RunConversionReceipt)(nil), // 1: vibesys.store.v1.RunConversionReceipt
 }
 var file_vibesys_store_v1_conversion_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -129,7 +196,7 @@ func file_vibesys_store_v1_conversion_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_conversion_proto_rawDesc), len(file_vibesys_store_v1_conversion_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

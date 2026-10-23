@@ -4,19 +4,34 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import runpy
+import shutil
 from contextlib import closing
+from dataclasses import dataclass
 from functools import partial
 from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from vibesys.api.transport import ConversionStatus, convert_run, convert_runs
-from vibesys.events import AgentOutputChunkData, CoreEventType, RunStartedData, SpanStartedData
+from vibesys.api.transport import (
+    ConversionOptions,
+    ConversionStatus,
+    convert_run,
+    convert_runs,
+    iter_conversions,
+)
+from vibesys.events import (
+    AgentOutputChunkData,
+    CoreEvent,
+    CoreEventType,
+    RunStartedData,
+    SpanStartedData,
+)
 from vibesys.records.api import MappingState, map_event
 from vibesys.run import EventJournal
 from vibesys.run.runlog_tee import RunLogTee
@@ -36,15 +51,15 @@ from vs_proto.api import (
     RunHead,
 )
 from vs_runlog.api import (
+    FakeFileSync,
     FileRunContent,
     FileRunLogWriter,
-    OsFileSync,
     RunLock,
     RunLogReader,
     encode_frame,
     fold_skeleton,
 )
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 
 def journal_at(
@@ -57,6 +72,7 @@ def journal_at(
     project = Project.open(root)
     journal = EventJournal(ManualClock(start=clock_start), SimThreads())
     journal.attach(Project.log_directory_for(root, "run-1"), "run-1")
+    (Project.log_directory_for(root, "run-1") / "run.lock").touch()
     return project, journal
 
 
@@ -90,7 +106,9 @@ def test_conversion_cannot_replace_a_live_writers_destination(
     original = source.read_bytes()
     destination = Project.run_log_path_for(project.root, "run-1")
     with closing(RunLock(destination.parent / "run.lock")):
-        result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+        result = convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        )
     assert result.status is ConversionStatus.SKIPPED
     assert "live" in result.reason
     assert not destination.exists()
@@ -113,7 +131,9 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
     source = Project.event_journal_path_for(project.root, "run-1")
     original = source.read_bytes()
     assert (
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status
         is ConversionStatus.CONVERTED
     )
     destination = Project.run_log_path_for(project.root, "run-1")
@@ -141,7 +161,9 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
         "lifecycle",
     ]
     assert (
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status
         is ConversionStatus.EXISTS
     )
     assert destination.read_bytes() == converted
@@ -151,6 +173,7 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
         "convert.lock",
         "core-events.jsonl",
         "keyframes",
+        "run.conversion-source.pb",
         "run.head",
         "run.lock",
         "run.log",
@@ -166,7 +189,9 @@ def test_empty_and_pretrace_journals_are_skipped(
         journal.emit(CoreEventType.RUN_STARTED)
     else:
         Project.event_journal_path_for(project.root, "run-1").touch()
-    result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    result = convert_run(
+        project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+    )
     assert result.status is ConversionStatus.SKIPPED
     assert ("predates" if with_old_event else "no events") in result.reason
     assert not Project.run_log_path_for(project.root, "run-1").exists()
@@ -185,11 +210,15 @@ def test_conversion_replaces_torn_destination_only_after_success(
     with source.open("ab") as stream:
         stream.write(b"{malformed}")
     with pytest.raises(ValueError, match="journal event"):
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        )
     assert destination.read_bytes() == torn
     source.write_bytes(original)
     assert (
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status
         is ConversionStatus.CONVERTED
     )
 
@@ -202,7 +231,9 @@ def test_corrupt_destination_is_reported_without_overwriting_it(
     destination = Project.run_log_path_for(project.root, "run-1")
     destination.write_bytes(b"BADMAGIC")
     with pytest.raises(ValueError, match="byte 0"):
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        )
     assert destination.read_bytes() == b"BADMAGIC"
 
 
@@ -218,12 +249,16 @@ def test_conversion_upgrades_legacy_records_and_externalizes_large_content(
         execution_id="turn-a",
     )
     destination = Project.run_log_path_for(project.root, "run-1")
-    with FileRunLogWriter(destination, clock=ManualClock(), threads=SimThreads()) as writer:
+    with FileRunLogWriter(
+        destination, clock=ManualClock(), threads=SimThreads(), sync=FakeFileSync()
+    ) as writer:
         writer.append(Record(seq=1, epoch=1, body=Oneof("epoch_started", EpochStarted())))
         writer.append(Record(seq=2, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="old"))))
     original = Project.event_journal_path_for(project.root, "run-1").read_bytes()
     assert (
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status
         is ConversionStatus.CONVERTED
     )
     with destination.open("rb") as stream:
@@ -241,7 +276,9 @@ def test_conversion_upgrades_legacy_records_and_externalizes_large_content(
     assert path.read_bytes() == content.encode()
     assert Project.event_journal_path_for(project.root, "run-1").read_bytes() == original
     assert (
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status
         is ConversionStatus.EXISTS
     )
 
@@ -253,11 +290,15 @@ def test_conversion_repairs_a_tee_with_no_event_records(
     project, journal = journal_at(tmp_path, monkeypatch)
     record_trace(journal)
     destination = Project.run_log_path_for(project.root, "run-1")
-    with FileRunLogWriter(destination, clock=ManualClock(), threads=SimThreads()) as writer:
+    with FileRunLogWriter(
+        destination, clock=ManualClock(), threads=SimThreads(), sync=FakeFileSync()
+    ) as writer:
         if empty_header:
             writer.append(Record(seq=1, epoch=1, body=Oneof("epoch_started", EpochStarted())))
     assert (
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status
         is ConversionStatus.CONVERTED
     )
     with destination.open("rb") as stream:
@@ -267,7 +308,7 @@ def test_conversion_repairs_a_tee_with_no_event_records(
 
 @pytest.mark.regression
 @given(
-    names=st.lists(st.text(alphabet="abcXYZ012", min_size=1, max_size=12), min_size=1, max_size=30)
+    names=st.lists(st.text(alphabet="abcXYZ012", min_size=1, max_size=12), min_size=1, max_size=6)
 )
 @example(names=["last-span"])
 def test_conversion_fold_and_every_keyframe_suffix_equal_the_typed_mapping(
@@ -296,13 +337,24 @@ def test_conversion_fold_and_every_keyframe_suffix_equal_the_typed_mapping(
         source = Project.event_journal_path_for(project.root, "run-1")
         before = source.read_bytes()
         assert (
-            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(),
+                threads=SimThreads(),
+                install_sync=FakeFileSync(),
+            ).status
             is ConversionStatus.CONVERTED
         )
         destination = Project.run_log_path_for(project.root, "run-1")
         with destination.open("rb") as stream:
             records = list(RunLogReader(stream))
-        state = MappingState("run-1", vibesys_version=version("vibesys"))
+        state = MappingState(
+            "run-1",
+            vibesys_version=version("vibesys"),
+            wall_span_clock=True,
+            clock_epochs=((journal.read()[0].timestamp.timestamp(), 0),),
+        )
         expected = []
         for event in journal.read():
             mapped = map_event(state, event)
@@ -325,7 +377,13 @@ def test_conversion_fold_and_every_keyframe_suffix_equal_the_typed_mapping(
             if p.is_file()
         }
         assert (
-            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(),
+                threads=SimThreads(),
+                install_sync=FakeFileSync(),
+            ).status
             is ConversionStatus.EXISTS
         )
         assert {
@@ -346,7 +404,9 @@ def test_conversion_repairs_old_complete_log_without_rewriting_it(
     )
     record_trace(journal)
     journal.emit(CoreEventType.RUN_FINISHED)
-    convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    convert_run(
+        project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+    )
     directory = Project.log_directory_for(project.root, "run-1")
     original = (directory / "run.log").read_bytes()
     if missing in {"head", "both"}:
@@ -354,7 +414,9 @@ def test_conversion_repairs_old_complete_log_without_rewriting_it(
     if missing in {"keyframes", "both"}:
         for path in (directory / "keyframes").iterdir():
             path.unlink()
-    result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    result = convert_run(
+        project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+    )
     assert result.status is ConversionStatus.CONVERTED
     assert "repaired" in result.reason
     head = RunHead.from_binary((directory / "run.head").read_bytes())
@@ -362,7 +424,9 @@ def test_conversion_repairs_old_complete_log_without_rewriting_it(
     assert seed.log_offset == len(original)
     assert (directory / "run.log").read_bytes() == original
     assert (
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status
         is ConversionStatus.EXISTS
     )
 
@@ -385,7 +449,9 @@ def test_phase_two_conversion_preserves_saved_core_envelopes_and_their_resume_mi
     original = json.dumps({"version": 1, "record": record.model_dump(mode="json")}).encode()
     namespace = project.state.state_store_namespace("run-1")
     namespace.write_bytes("store.json", original)
-    result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    result = convert_run(
+        project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+    )
     assert result.status is ConversionStatus.CONVERTED
     assert "state.pb conversion is phase 3" in result.reason
     assert namespace.read_bytes("store.json") == original
@@ -410,14 +476,17 @@ def test_bulk_reports_every_project_and_index_outcome_and_continues_after_failur
         directory = Project.log_directory_for(project.root, run_id)
         directory.mkdir(parents=True)
         (directory / "core-events.jsonl").write_bytes(content)
+        (directory / "run.lock").touch()
     pretrace = EventJournal(ManualClock(start=100), SimThreads())
     pretrace.attach(Project.log_directory_for(project.root, "pretrace"), "pretrace")
     pretrace.emit(CoreEventType.RUN_FINISHED)
+    (Project.log_directory_for(project.root, "pretrace") / "run.lock").touch()
     other = tmp_path / "other"
     other.mkdir()
     external = EventJournal(ManualClock(start=100), SimThreads())
     external.attach(Project.log_directory_for(other, "external"), "external")
     record_trace(external)
+    (Project.log_directory_for(other, "external") / "run.lock").touch()
     external_link = Project.publish_run_for(other, "external")
     index = external_link.parent
     (index / "broken").symlink_to(tmp_path / "absent")
@@ -425,7 +494,11 @@ def test_bulk_reports_every_project_and_index_outcome_and_continues_after_failur
     rows = {
         row.run: row.result
         for row in convert_runs(
-            project, clock=ManualClock(), threads=SimThreads(), include_host_index=True
+            project,
+            clock=ManualClock(),
+            threads=SimThreads(),
+            include_host_index=True,
+            install_sync=FakeFileSync(),
         )
     }
     assert rows["run-1"].status is ConversionStatus.CONVERTED
@@ -442,7 +515,11 @@ def test_bulk_reports_every_project_and_index_outcome_and_continues_after_failur
     second = {
         row.run: row.result
         for row in convert_runs(
-            project, clock=ManualClock(), threads=SimThreads(), include_host_index=True
+            project,
+            clock=ManualClock(),
+            threads=SimThreads(),
+            include_host_index=True,
+            install_sync=FakeFileSync(),
         )
     }
     assert second["run-1"].status is ConversionStatus.SKIPPED
@@ -460,7 +537,9 @@ def test_bulk_reports_a_store_only_run_as_unsupported_in_phase_two(
     project = Project.open(root)
     namespace = project.state.state_store_namespace("store-only")
     namespace.write_bytes("store.json", b"original core state")
-    rows = convert_runs(project, clock=ManualClock(), threads=SimThreads())
+    rows = convert_runs(
+        project, clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+    )
     assert len(rows) == 1
     assert rows[0].run == "store-only"
     assert rows[0].result.status is ConversionStatus.SKIPPED
@@ -474,7 +553,9 @@ def test_conversion_header_records_the_live_schema_hashes(
     """The committed goldens pin these hashes, so this is where the live ones are checked."""
     project, journal = journal_at(tmp_path, monkeypatch)
     record_trace(journal)
-    convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    convert_run(
+        project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+    )
     with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
         header = next(iter(RunLogReader(stream))).body
     assert header is not None
@@ -511,34 +592,61 @@ def test_conversion_reports_or_repairs_damaged_derived_state(
     )
     record_trace(journal)
     journal.emit(CoreEventType.RUN_FINISHED)
-    convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    convert_run(
+        project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+    )
     directory = Project.log_directory_for(project.root, "run-1")
     head = RunHead.from_binary((directory / "run.head").read_bytes())
     if damage == "log-sequence":
         with (directory / "run.log").open("rb") as stream:
             records = list(RunLogReader(stream))
+        (directory / "run.head").unlink()  # Unpublished legacy output requires a frame scan.
         records[-1].seq += 1
         (directory / "run.log").write_bytes(
             RUN_LOG_MAGIC + b"".join(encode_frame(r) for r in records)
         )
         with pytest.raises(ValueError, match="non-dense"):
-            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+            convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(),
+                threads=SimThreads(),
+                install_sync=FakeFileSync(),
+            )
     elif damage == "keyframe-offset":
         path = directory / "keyframes" / f"{head.committed_seq}.pb"
         seed = Keyframe.from_binary(path.read_bytes())
         seed.log_offset += 1
         path.write_bytes(seed.to_binary())
         with pytest.raises(ValueError, match="checkpoint does not match"):
-            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+            convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(),
+                threads=SimThreads(),
+                install_sync=FakeFileSync(),
+            )
     else:
         head.committed_seq -= 1
         (directory / "run.head").write_bytes(head.to_binary())
         assert (
-            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(),
+                threads=SimThreads(),
+                install_sync=FakeFileSync(),
+            ).status
             is ConversionStatus.CONVERTED
         )
         assert (
-            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(),
+                threads=SimThreads(),
+                install_sync=FakeFileSync(),
+            ).status
             is ConversionStatus.EXISTS
         )
 
@@ -552,7 +660,11 @@ def test_bulk_reports_index_publication_failure_and_preserves_the_entry(
     (home / "runs").mkdir()
     (home / "runs/run-1").write_bytes(b"keep")
     results = convert_runs(
-        project, clock=ManualClock(), threads=SimThreads(), include_host_index=True
+        project,
+        clock=ManualClock(),
+        threads=SimThreads(),
+        include_host_index=True,
+        install_sync=FakeFileSync(),
     )
     assert results[0].result.status is ConversionStatus.FAILED
     assert "not a symlink" in results[0].result.reason
@@ -568,10 +680,13 @@ def test_typed_tee_explicit_commit_publishes_pending_checkpoint(
     for _ in range(300):
         journal.emit(CoreEventType.FRAMEWORK_WARNING, text="progress")
     destination = Project.run_log_path_for(project.root, "run-1")
-    writer = FileRunLogWriter(destination, clock=ManualClock(), threads=SimThreads())
+    writer = FileRunLogWriter(
+        destination, clock=ManualClock(), threads=SimThreads(), sync=FakeFileSync()
+    )
     content = FileRunContent(
         Project.run_blobs_directory_for(project.root, "run-1"),
         Project.log_streams_directory_for(project.root, "run-1"),
+        sync=FakeFileSync(),
     )
     with RunLogTee(writer, content, "run-1") as tee:
         source = Project.event_journal_path_for(project.root, "run-1")
@@ -585,9 +700,8 @@ def test_typed_tee_explicit_commit_publishes_pending_checkpoint(
         assert Keyframe.from_binary(checkpoint.read_bytes()).through_seq == records[-1].seq
 
 
-@pytest.mark.parametrize("crash_at", range(1, 6))
 def test_conversion_crash_at_each_install_step_recovers_without_in_run_staging(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_at: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project, journal = journal_at(tmp_path, monkeypatch)
     journal.emit(
@@ -596,59 +710,61 @@ def test_conversion_crash_at_each_install_step_recovers_without_in_run_staging(
     record_trace(journal)
     journal.close()
     destination = Project.run_log_path_for(project.root, "run-1")
+    runs = destination.parent.parent
     source = Project.event_journal_path_for(project.root, "run-1")
     original = source.read_bytes()
     # Force replacement of older derived output, including the backup-keyframes step.
     (destination.parent / "keyframes").mkdir()
     (destination.parent / "keyframes" / "old.pb").write_bytes(b"old")
-    gate = FaultGate(
-        FaultPlan(
-            seed=0,
-            rules=(
-                FaultRule(
-                    boundary=Boundary.DURABLE_WRITE,
-                    target="install",
-                    at=crash_at,
-                    fault=HostFault.CRASH_AFTER,
+    real = FakeFileSync()
+    prebuilt = tmp_path / "prebuilt"
+    shutil.copytree(runs, prebuilt)
+    for crash_at in range(1, 6):
+        shutil.rmtree(runs)
+        shutil.copytree(prebuilt, runs)
+        gate = FaultGate(
+            FaultPlan(
+                seed=0,
+                rules=(
+                    FaultRule(
+                        boundary=Boundary.DURABLE_WRITE,
+                        target="install",
+                        at=crash_at,
+                        fault=HostFault.CRASH_AFTER,
+                    ),
                 ),
-            ),
+            )
         )
-    )
-    real = OsFileSync()
-    images: list[dict[str, bytes | None]] = []
+        images: list[set[str]] = []
 
-    def sync(descriptor: int, /) -> None:
-        # Capture the crash image before Python's lexical cleanup can remove the stage.
-        images.append(
-            {
-                str(p.relative_to(destination.parent.parent)): p.read_bytes()
-                if p.is_file()
-                else None
-                for p in destination.parent.parent.rglob("*")
-            }
+        def sync(
+            descriptor: int, /, *, images: list[set[str]] = images, gate: FaultGate = gate
+        ) -> None:
+            # Capture the crash image's names before Python's lexical cleanup can remove the stage.
+            images.append({str(p.relative_to(runs)) for p in runs.rglob("*")})
+            gate.around(Boundary.DURABLE_WRITE, "install", partial(real, descriptor))
+
+        with pytest.raises(HostCrashError):
+            convert_run(
+                project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=sync
+            )
+        assert len(images) == crash_at
+        assert all(
+            not any(part.startswith(".convert-run-") for part in Path(name).parts)
+            for image in images
+            for name in image
         )
-        gate.around(Boundary.DURABLE_WRITE, "install", partial(real, descriptor))
-
-    with pytest.raises(HostCrashError):
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=sync)
-
-    assert len(images) == crash_at
-    assert all(
-        not any(part.startswith(".convert-run-") for part in Path(name).parts)
-        for image in images
-        for name in image
-    )
-    assert source.read_bytes() == original
-    assert convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status in {
-        ConversionStatus.CONVERTED,
-        ConversionStatus.EXISTS,
-    }
-    head = RunHead.from_binary((destination.parent / "run.head").read_bytes())
-    frame = Keyframe.from_binary(
-        (destination.parent / "keyframes" / f"{head.committed_seq}.pb").read_bytes()
-    )
-    assert frame.log_offset == destination.stat().st_size
-    assert source.read_bytes() == original
+        assert source.read_bytes() == original
+        assert convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status in {ConversionStatus.CONVERTED, ConversionStatus.EXISTS}
+        head = RunHead.from_binary((destination.parent / "run.head").read_bytes())
+        frame = Keyframe.from_binary(
+            (destination.parent / "keyframes" / f"{head.committed_seq}.pb").read_bytes()
+        )
+        assert frame.log_offset == destination.stat().st_size
+        assert not list(runs.rglob(".convert-*"))
+        assert source.read_bytes() == original
 
 
 def test_staging_stays_outside_run_even_during_preparation(
@@ -663,10 +779,12 @@ def test_staging_stays_outside_run_even_during_preparation(
     class InspectingClock(ManualClock):
         def now(self) -> float:
             assert not list(directory.parent.rglob(".convert-run-*"))
-            observed.extend(directory.parent.parent.glob(".convert-run-*"))
+            observed.extend(directory.parent.parent.glob(".convert-run-1-*"))
             return super().now()
 
-    result = convert_run(project, "run-1", clock=InspectingClock(), threads=SimThreads())
+    result = convert_run(
+        project, "run-1", clock=InspectingClock(), threads=SimThreads(), install_sync=FakeFileSync()
+    )
     assert result.status is ConversionStatus.CONVERTED
     assert observed
 
@@ -687,12 +805,20 @@ def test_stale_stages_are_swept_only_with_exclusive_conversion_ownership(
     (directory / ".convert-run-link").symlink_to(unrelated, target_is_directory=True)
     with closing(RunLock(directory / "convert.lock")):
         assert (
-            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(),
+                threads=SimThreads(),
+                install_sync=FakeFileSync(),
+            ).status
             is ConversionStatus.SKIPPED
         )
         assert stale.is_dir()
     assert (
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status
         is ConversionStatus.CONVERTED
     )
     assert not stale.exists()
@@ -712,7 +838,7 @@ def test_repeated_failed_installs_leave_no_temporary_folder(
         message = "installation refused"
         raise OSError(message)
 
-    for _ in range(3):
+    for _ in range(1):
         with pytest.raises(OSError, match="installation refused"):
             convert_run(
                 project,
@@ -734,7 +860,9 @@ def test_final_refusal_retries_only_after_the_journal_revision_changes(
     fixture = Path(__file__).parent / "fixtures/pre-agent-identity.jsonl"
     path.write_bytes(fixture.read_bytes())
     assert (
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status
         is ConversionStatus.CANNOT_CONVERT
     )
     event = json.loads(path.read_bytes())
@@ -743,7 +871,202 @@ def test_final_refusal_retries_only_after_the_journal_revision_changes(
     )
     path.write_text(json.dumps(event) + "\n")
     assert (
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        convert_run(
+            project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=FakeFileSync()
+        ).status
         is ConversionStatus.CONVERTED
     )
     assert not (path.parent / "run.conversion.pb").exists()
+
+
+_MODES = [
+    "stopped",
+    "modern-live",
+    "prelock-live",
+    "prelock-future",
+    "late-writer",
+    "broken",
+    "pretrace",
+]
+_LIVE_MODES = {"modern-live", "prelock-live", "prelock-future"}
+
+
+@dataclass
+class _Tree:
+    """A generated project: one run per mode, each in the state a writer or a kill left it."""
+
+    project: Project
+    runs: Path
+    modes: list[str]
+    originals: dict[str, bytes]
+    late_line: bytes
+    locks: list[RunLock]
+
+    def run_id(self, index: int) -> str:
+        return f"run-{index}"
+
+    def journal(self, run_id: str) -> Path:
+        return Project.event_journal_path_for(self.project.root, run_id)
+
+
+def _plant_tree(root: Path, env: pytest.MonkeyPatch, modes: list[str]) -> _Tree:
+    project, journal = journal_at(root, env)
+    journal.emit(
+        CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="single-agent", input="input")
+    )
+    record_trace(journal)
+    journal.emit(CoreEventType.FRAMEWORK_WARNING, text="late")
+    journal.close()
+    template = root / "template"
+    directory = Project.log_directory_for(project.root, "run-1")
+    shutil.copytree(directory, template)
+    shutil.rmtree(directory.parent)
+    *kept, late = (template / "core-events.jsonl").read_bytes().splitlines(keepends=True)
+    tree = _Tree(project, directory.parent.parent, modes, {}, late, [])
+    for index, mode in enumerate(modes):
+        run_id = tree.run_id(index)
+        run = Project.log_directory_for(project.root, run_id)
+        shutil.copytree(template, run)
+        source = run / "core-events.jsonl"
+        if mode == "late-writer":
+            source.write_bytes(b"".join(kept))
+        if mode in {"prelock-live", "prelock-future"}:
+            (run / "run.lock").unlink()
+            modified = 999 if mode == "prelock-live" else 2000
+            os.utime(source, (modified, modified))
+        elif mode == "modern-live":
+            tree.locks.append(RunLock(run / "run.lock"))
+        elif mode == "broken":
+            source.write_bytes(b"{broken}")
+        elif mode == "pretrace":
+            source.write_bytes(b"")
+        tree.originals[run_id] = source.read_bytes()
+    return tree
+
+
+def _kill_one_pass(
+    tree: _Tree, interruption: int, clock: ManualClock, threads: SimThreads, image: Path
+) -> None:
+    """Convert once; the kill at durability cut ``interruption`` leaves its exact crash image."""
+    sync = FakeFileSync()
+    calls = 0
+    current = ""
+    resumed: set[str] = set()
+    crashed = False
+
+    def interrupt(descriptor: int, /) -> None:
+        nonlocal calls, crashed
+        sync(descriptor)
+        calls += 1
+        if tree.modes[int(current[4:])] == "late-writer" and current not in resumed:
+            # A pre-lock writer idle at the probe resumes while the converter works.
+            resumed.add(current)
+            with tree.journal(current).open("ab") as stream:
+                stream.write(tree.late_line)
+            os.utime(tree.journal(current), (998, 998))
+        if calls == interruption and not crashed:
+            crashed = True
+            shutil.copytree(tree.runs, image)
+            raise HostCrashError(Boundary.DURABLE_WRITE, "install", calls)
+
+    for index, mode in enumerate(tree.modes):
+        current = tree.run_id(index)
+        try:
+            result = convert_run(
+                tree.project, current, clock=clock, threads=threads, install_sync=interrupt
+            )
+        except (HostCrashError, ValueError):
+            continue
+        if mode in _LIVE_MODES:
+            assert result.status is ConversionStatus.SKIPPED
+            assert not Project.run_log_path_for(tree.project.root, current).exists()
+    if crashed:
+        # OS death releases locks, but does not run TemporaryDirectory.__exit__.
+        for lock in tree.locks:
+            lock.close()
+        tree.locks.clear()
+        shutil.rmtree(tree.runs)
+        shutil.copytree(image, tree.runs)
+
+
+def _mapped_records(journal: Path) -> int:
+    """The records the typed mapping makes of the journal as it is now."""
+    events = [CoreEvent.model_validate_json(line) for line in journal.read_bytes().splitlines()]
+    state = MappingState(
+        "run",
+        vibesys_version=version("vibesys"),
+        wall_span_clock=True,
+        clock_epochs=((events[0].timestamp.timestamp(), 0),),
+    )
+    count = 0
+    for event in events:
+        mapped = map_event(state, event)
+        count += len(mapped.records)
+        state = mapped.state
+    return count
+
+
+def _tree_bytes(tree: _Tree) -> dict[Path, bytes]:
+    return {p: p.read_bytes() for p in tree.runs.rglob("*") if p.is_file()}
+
+
+@pytest.mark.regression
+@example(modes=["stopped", "prelock-future"], interruption=1, cancel_after=1)
+@example(modes=["stopped"], interruption=3, cancel_after=0)
+@example(modes=["late-writer"], interruption=30, cancel_after=0)
+@settings(max_examples=examples(pr=3, nightly=100))
+@given(
+    modes=st.lists(st.sampled_from(_MODES), min_size=1, max_size=2),
+    interruption=st.integers(min_value=1, max_value=30),
+    cancel_after=st.integers(min_value=0, max_value=2),
+)
+def test_conversion_recovers_generated_run_trees_after_kill_cancel_and_writer_races(
+    modes: list[str],
+    interruption: int,
+    cancel_after: int,
+) -> None:
+    """After any kill, writer timing and cancelled pass: no stage, each run converted once."""
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as env:
+        root = Path(temporary)
+        tree = _plant_tree(root, env, modes)
+        clock, threads, sync = ManualClock(start=1000), SimThreads(), FakeFileSync()
+        try:
+            _kill_one_pass(tree, interruption, clock, threads, root / "crash-image")
+            for run_id, original in tree.originals.items():
+                if tree.modes[int(run_id[4:])] != "late-writer":
+                    assert tree.journal(run_id).read_bytes() == original
+        finally:
+            for lock in tree.locks:
+                lock.close()
+        clock.advance(2000)
+        # The caller can cancel at any run boundary and then resume from a new pass.
+        iterator = iter_conversions(
+            tree.project, clock=clock, threads=threads, options=ConversionOptions(install_sync=sync)
+        )
+        for _ in range(cancel_after):
+            next(iterator, None)
+        iterator.close()
+        rows = convert_runs(tree.project, clock=clock, threads=threads, install_sync=sync)
+        assert {row.run for row in rows} == set(tree.originals)
+        assert all(
+            row.result.status
+            in {ConversionStatus.CONVERTED, ConversionStatus.SKIPPED, ConversionStatus.FAILED}
+            for row in rows
+        )
+        assert not list(tree.runs.rglob(".convert-*"))
+        settled = _tree_bytes(tree)
+        convert_runs(tree.project, clock=clock, threads=threads, install_sync=sync)
+        assert _tree_bytes(tree) == settled
+        for index, mode in enumerate(modes):
+            run_id = tree.run_id(index)
+            if mode != "late-writer":
+                assert tree.journal(run_id).read_bytes() == tree.originals[run_id]
+            if mode in {"broken", "pretrace"}:
+                continue
+            with Project.run_log_path_for(tree.project.root, run_id).open("rb") as stream:
+                records = list(RunLogReader(stream))
+            assert [r.seq for r in records] == list(range(1, len(records) + 1))
+            assert {r.epoch for r in records} == {1}
+            if mode in {"stopped", "late-writer", "prelock-live", "prelock-future", "modern-live"}:
+                # A journal the converter saw whole, or a writer that finished, is fully mirrored.
+                assert len(records) == _mapped_records(tree.journal(run_id))

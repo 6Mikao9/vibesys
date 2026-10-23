@@ -26,6 +26,19 @@ class OsFileSync:
         os.fsync(descriptor)
 
 
+class FakeFileSync:
+    """Record successful flushes on an ephemeral filesystem without OS durability waits."""
+
+    def __init__(self) -> None:
+        """Start with no observed flushes."""
+        self.calls = 0
+
+    def __call__(self, descriptor: int, /) -> None:
+        """Validate the borrowed descriptor and acknowledge its pending writes."""
+        os.fstat(descriptor)
+        self.calls += 1
+
+
 _FILE_SYNC = OsFileSync()
 
 

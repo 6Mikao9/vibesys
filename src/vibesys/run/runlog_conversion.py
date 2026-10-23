@@ -10,11 +10,18 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
-from vibesys.events import CoreEvent, CoreEventType
+from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vibesys.run.runlog_tee import JOURNAL_EVENT_MAX_BYTES, RunLogTee
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import Project, ProjectError, atomic_write_bytes
-from vs_proto.api import Keyframe, RunConversionRefusal, RunHead, validate
+from vs_proto.api import (
+    Direction,
+    Keyframe,
+    RunConversionReceipt,
+    RunConversionRefusal,
+    RunHead,
+    validate,
+)
 from vs_runlog.api import (
     FileRunContent,
     FileRunLogWriter,
@@ -23,15 +30,17 @@ from vs_runlog.api import (
     RunLogReader,
     RunLogStopReason,
     install_run_log,
+    read_run_head,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator, Iterator
 
     from vs_sim.api import SleepingClock, Threads
 
 
 _PRELOCK_QUIET_SECONDS = 300
+_PROJECTION_VERSION = 1
 
 
 class RunLogConversionError(ValueError):
@@ -77,6 +86,12 @@ def _events(path: Path) -> Iterator[tuple[bytes, CoreEvent]]:
 def _complete_sequence(path: Path) -> int:
     if not path.exists():
         return 0
+    # A published head and its final keyframe fence the committed prefix. Older
+    # logs without either still use the complete frame scan and repair path.
+    if (path.parent / "run.head").is_file():
+        head = read_run_head(path)
+        if head.committed_seq and _has_checkpoint(path.parent, head.committed_seq):
+            return _checkpoint_sequence(path, head.committed_seq)
     with path.open("rb") as stream:
         reader = RunLogReader(stream)
         legacy = False
@@ -97,6 +112,67 @@ def _complete_sequence(path: Path) -> int:
         message = f"corrupt run.log at byte {reader.stop.offset}: {reader.stop.detail}"
         raise ValueError(message)
     return sequence if reader.stop.reason is RunLogStopReason.END and not legacy and typed else 0
+
+
+def _checkpoint_sequence(path: Path, sequence: int) -> int:
+    """Validate only the last checkpoint suffix; repair older offline projections once."""
+    keyframes = path.parent / "keyframes"
+    final = Keyframe.from_binary((keyframes / f"{sequence}.pb").read_bytes())
+    prior = max(
+        (
+            int(p.stem)
+            for p in keyframes.glob("*.pb")
+            if p.stem.isdigit() and int(p.stem) < sequence
+        ),
+        default=0,
+    )
+    offset = (
+        Keyframe.from_binary((keyframes / f"{prior}.pb").read_bytes()).log_offset if prior else 0
+    )
+    with path.open("rb") as stream:
+        first = next(iter(RunLogReader(stream)), None)
+        reader = RunLogReader(stream, offset=offset)
+        last = None
+        for record in reader:
+            if record.seq != prior + 1:
+                message = f"non-dense run.log sequence: {record.seq} after {prior}"
+                raise RunLogConversionError(message)
+            prior, last = record.seq, record
+    if reader.stop.reason is not RunLogStopReason.END or prior != sequence:
+        message = f"checkpoint does not match run.log: {path}"
+        raise RunLogConversionError(message)
+    if first is not None and first.at is not None and last is not None and last.has_field("clock"):
+        wall = first.at.to_seconds()
+        if wall > last.clock and any(
+            v.span is not None and v.span.started_at >= wall
+            for h in final.spans.values()
+            for v in h.versions
+        ):
+            return 0
+    epoch = next((v.epoch for v in reversed(final.epochs) if v.epoch and v.epoch.run), None)
+    if (
+        epoch is not None
+        and epoch.run is not None
+        and not epoch.run.objectives
+        and _has_legacy_objective(
+            path, {s.name for s in epoch.series if s.direction in {Direction.MIN, Direction.MAX}}
+        )
+    ):
+        return 0
+    return sequence
+
+
+def _has_legacy_objective(path: Path, declared: set[str]) -> bool:
+    journal = path.with_name("core-events.jsonl")
+    if not journal.is_file():
+        return False
+    for _, event in _events(journal):
+        if isinstance(event.data, RunStartedData):
+            overview = event.data.overview
+            return bool(overview and overview.objective.metric in declared)
+        if event.type in {CoreEventType.SPAN_STARTED, CoreEventType.SPAN_ENDED}:
+            break
+    return False
 
 
 def _has_checkpoint(directory: Path, sequence: int) -> bool:
@@ -152,9 +228,7 @@ def _writer_is_live(directory: Path, clock: SleepingClock) -> bool:
     path = directory / "run.lock"
     if not path.exists():
         journal = directory / "core-events.jsonl"
-        return (
-            journal.exists() and 0 <= clock.now() - journal.stat().st_mtime < _PRELOCK_QUIET_SECONDS
-        )
+        return journal.exists() and clock.now() - journal.stat().st_mtime < _PRELOCK_QUIET_SECONDS
     try:
         RunLock(path).close()
     except BlockingIOError:
@@ -190,16 +264,21 @@ def _convert_directory(
                 ConversionStatus.SKIPPED, "run is live: a writer holds run.lock"
             )
         with closing(writer):
-            for entry in directory.iterdir():
-                if (
-                    entry.name.startswith(".convert-run-")
-                    and not entry.is_symlink()
-                    and entry.is_dir()
-                ):
-                    shutil.rmtree(entry)
+            _sweep_stages(directory, run_id)
         return _convert_revision(
             directory, run_id, clock=clock, threads=threads, install_sync=install_sync
         )
+
+
+def _sweep_stages(directory: Path, run_id: str) -> None:
+    """Recover killed converters under both locks, without following stage symlinks."""
+    for parent, prefix in (
+        (directory, ".convert-run-"),  # Stages from the first conversion release.
+        (directory.parent.parent, f".convert-{run_id}-"),
+    ):
+        for entry in parent.iterdir():
+            if entry.name.startswith(prefix) and not entry.is_symlink() and entry.is_dir():
+                shutil.rmtree(entry)
 
 
 def _convert_revision(
@@ -255,15 +334,22 @@ def _convert_stopped(
     successful conversion. Corrupt destinations require operator attention.
     """
     destination = directory / "run.log"
-    if sequence := _complete_sequence(destination):
+    journal = directory / "core-events.jsonl"
+    receipt_path = directory / "run.conversion-source.pb"
+    source = journal.stat() if journal.is_file() else None
+    drifted = source is not None and _source_drifted(
+        receipt_path, source.st_size, source.st_mtime_ns
+    )
+    if not drifted and (sequence := _complete_sequence(destination)):
         if _has_checkpoint(directory, sequence):
             return ConversionResult(ConversionStatus.EXISTS, "already converted")
-        with FileRunLogWriter(destination, clock=clock, threads=threads):
+        with FileRunLogWriter(destination, clock=clock, threads=threads, sync=install_sync):
             pass
         return ConversionResult(ConversionStatus.CONVERTED, "repaired run.head and keyframes")
     journal = directory / "core-events.jsonl"
     if not journal.exists():
         return ConversionResult(ConversionStatus.SKIPPED, "journal is missing")
+    source_revision = journal.stat()
     first = None
     has_trace = False
     for _, event in _events(journal):
@@ -278,18 +364,26 @@ def _convert_stopped(
         return ConversionResult(ConversionStatus.SKIPPED, "journal has no events")
     if not has_trace:
         return ConversionResult(ConversionStatus.SKIPPED, "journal predates the run trace")
-    with TemporaryDirectory(prefix=".convert-run-", dir=directory.parent.parent) as temporary:
+    with TemporaryDirectory(prefix=f".convert-{run_id}-", dir=directory.parent.parent) as temporary:
         staged = Path(temporary) / "run.log"
 
         def prepare() -> None:
-            content = FileRunContent(directory / "blobs", directory / "streams")
-            writer = FileRunLogWriter(staged, clock=clock, threads=threads)
+            content = FileRunContent(directory / "blobs", directory / "streams", sync=install_sync)
+            writer = FileRunLogWriter(staged, clock=clock, threads=threads, sync=install_sync)
             with RunLogTee(writer, content, run_id) as tee:
                 for line, _ in _events(journal):
                     tee.append(line)
                 writer.checkpoint()
+            _require_unchanged(journal, source_revision.st_size, source_revision.st_mtime_ns)
 
         install_run_log(staged, destination, prepare=prepare, sync=install_sync)
+    receipt = RunConversionReceipt(
+        journal_size=source_revision.st_size,
+        journal_modified_ns=source_revision.st_mtime_ns,
+        projection_version=_PROJECTION_VERSION,
+    )
+    validate(receipt)
+    atomic_write_bytes(receipt_path, receipt.to_binary())
     return ConversionResult(ConversionStatus.CONVERTED, "converted journal to run.log")
 
 
@@ -304,11 +398,37 @@ class RunConversion:
     cursor: str = ""
 
 
+def _source_drifted(path: Path, size: int, modified_ns: int) -> bool:
+    if not path.is_file():
+        return False
+    receipt = RunConversionReceipt.from_binary(path.read_bytes())
+    validate(receipt)
+    return (receipt.journal_size, receipt.journal_modified_ns, receipt.projection_version) != (
+        size,
+        modified_ns,
+        _PROJECTION_VERSION,
+    )
+
+
+def _require_unchanged(journal: Path, size: int, modified_ns: int) -> None:
+    current = journal.stat()
+    if (current.st_size, current.st_mtime_ns) != (size, modified_ns):
+        message = "journal changed during conversion; retry after its writer stops"
+        raise RunLogConversionError(message)
+
+
 def _attempt(
-    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
+    directory: Path,
+    run_id: str,
+    *,
+    clock: SleepingClock,
+    threads: Threads,
+    install_sync: FileSync | None,
 ) -> ConversionResult:
     try:
-        return _convert_directory(directory, run_id, clock=clock, threads=threads)
+        return _convert_directory(
+            directory, run_id, clock=clock, threads=threads, install_sync=install_sync
+        )
     except (OSError, ValueError, TypeError, ProjectError) as exc:
         return ConversionResult(ConversionStatus.FAILED, str(exc))
 
@@ -328,14 +448,25 @@ def _indexed_target(entry: Path) -> Path | ConversionResult:
         return target
 
 
+@dataclass(frozen=True)
+class ConversionOptions:
+    """A resumable discovery pass's cursor, scope, and optional durability implementation."""
+
+    after_run: str = ""
+    include_host_index: bool = False
+    install_sync: FileSync | None = None
+
+
+_DEFAULT_OPTIONS = ConversionOptions()
+
+
 def iter_conversions(
     project: Project,
     *,
     clock: SleepingClock,
     threads: Threads,
-    after_run: str = "",
-    include_host_index: bool = False,
-) -> Iterator[RunConversion]:
+    options: ConversionOptions = _DEFAULT_OPTIONS,
+) -> Generator[RunConversion]:
     """Convert stopped project runs lazily; include the host index only by explicit opt-in.
 
     Each run is attempted only when the caller asks for the next outcome, so a
@@ -348,7 +479,7 @@ def iter_conversions(
     """
     entries = (
         [(entry, _indexed_target(entry)) for entry in project.indexed_run_directories()]
-        if include_host_index
+        if options.include_host_index
         else []
     )
     seen: dict[Path, str] = {}
@@ -357,10 +488,12 @@ def iter_conversions(
         cursor = f"project:{run_id}"
         directory = project.log_directory_for(project.root, run_id)
         seen[directory.resolve()] = run_id
-        if cursor <= after_run:
+        if cursor <= options.after_run:
             continue
         try:
-            result = convert_run(project, run_id, clock=clock, threads=threads)
+            result = convert_run(
+                project, run_id, clock=clock, threads=threads, install_sync=options.install_sync
+            )
         except (OSError, ValueError, TypeError, ProjectError) as exc:
             result = ConversionResult(ConversionStatus.FAILED, str(exc))
         if (
@@ -374,7 +507,7 @@ def iter_conversions(
         yield RunConversion(run_id, result, cursor=cursor)
     for entry, target in sorted(entries):
         cursor = f"zindex:{entry}"
-        if cursor <= after_run:
+        if cursor <= options.after_run:
             continue
         if isinstance(target, ConversionResult):
             yield RunConversion(str(entry), target, cursor=cursor)
@@ -386,13 +519,20 @@ def iter_conversions(
                 cursor=cursor,
             )
         else:
-            result = _attempt(target, entry.name, clock=clock, threads=threads)
+            result = _attempt(
+                target, entry.name, clock=clock, threads=threads, install_sync=options.install_sync
+            )
             seen[target] = str(entry)
             yield RunConversion(str(entry), result, cursor=cursor)
 
 
 def convert_runs(
-    project: Project, *, clock: SleepingClock, threads: Threads, include_host_index: bool = False
+    project: Project,
+    *,
+    clock: SleepingClock,
+    threads: Threads,
+    include_host_index: bool = False,
+    install_sync: FileSync | None = None,
 ) -> tuple[RunConversion, ...]:
     """Convert every run :func:`iter_conversions` finds; an existing conversion is skipped."""
     return tuple(
@@ -402,6 +542,11 @@ def convert_runs(
         if row.result.status is ConversionStatus.EXISTS
         else row
         for row in iter_conversions(
-            project, clock=clock, threads=threads, include_host_index=include_host_index
+            project,
+            clock=clock,
+            threads=threads,
+            options=ConversionOptions(
+                include_host_index=include_host_index, install_sync=install_sync
+            ),
         )
     )

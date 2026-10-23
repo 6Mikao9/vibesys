@@ -1,4 +1,4 @@
-"""Native discovery pages preserve metadata and reuse the retained-format importer."""
+"""Native discovery pages preserve metadata and observe conversion without doing work."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from tests.server.host_helper_support import fake_host
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import answer_registered_read
 from server.host_saved_runs import page_saved_runs
+from vibesys.api.transport import convert_run
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_proto.api import (
@@ -27,7 +28,7 @@ from vs_proto.api import (
     validate,
 )
 from vs_proto.api import host_payloads as pb
-from vs_runlog.api import RunLock, encode_frame
+from vs_runlog.api import FakeFileSync, RunLock, encode_frame
 from vs_sim.api.testing import ManualClock, SimNetwork, SimThreads
 
 
@@ -49,11 +50,7 @@ def test_discovery_fences_pages_preserves_metadata_and_reports_missing_history(
     root.mkdir()
     entries = [_run(index) for index in range(230)]
     first = page_saved_runs(
-        pb.ListSavedRunsRequest(request_id="first", project=str(root)),
-        root,
-        entries,
-        clock=ManualClock(),
-        threads=SimThreads(),
+        pb.ListSavedRunsRequest(request_id="first", project=str(root)), root, entries
     )
     assert len(first.runs) == 200
     assert first.next_offset == 200
@@ -64,21 +61,15 @@ def test_discovery_fences_pages_preserves_metadata_and_reports_missing_history(
     request = pb.ListSavedRunsRequest(
         request_id="next", project=str(root), offset=first.next_offset, revision=first.revision
     )
-    second = page_saved_runs(request, root, entries, clock=ManualClock(), threads=SimThreads())
+    second = page_saved_runs(request, root, entries)
     assert [row.run_id for row in first.runs + second.runs] == [row.run_id for row in entries]
     assert not second.has_field("next_offset")
     assert all(row.imported == pb.SavedRunImport.AVAILABLE for row in entries)
     with pytest.raises(ValueError, match="revision"):
-        page_saved_runs(
-            request, root, [*entries, _run(999)], clock=ManualClock(), threads=SimThreads()
-        )
+        page_saved_runs(request, root, [*entries, _run(999)])
     with pytest.raises(ValueError, match="offset"):
         page_saved_runs(
-            pb.ListSavedRunsRequest(request_id="bad", project=str(root), offset=999),
-            root,
-            entries,
-            clock=ManualClock(),
-            threads=SimThreads(),
+            pb.ListSavedRunsRequest(request_id="bad", project=str(root), offset=999), root, entries
         )
 
 
@@ -91,11 +82,7 @@ def test_discovery_obeys_the_response_byte_budget(
     root.mkdir()
     entries = [_run(index, "x" * size) for index in range(200)]
     result = page_saved_runs(
-        pb.ListSavedRunsRequest(request_id="bounded", project=str(root)),
-        root,
-        entries,
-        clock=ManualClock(),
-        threads=SimThreads(),
+        pb.ListSavedRunsRequest(request_id="bounded", project=str(root)), root, entries
     )
     assert len(result.to_binary()) <= 1 << 20
     assert len(result.runs) <= 200
@@ -105,7 +92,7 @@ def test_discovery_obeys_the_response_byte_budget(
 
 
 @pytest.mark.parametrize("live", [False, True])
-def test_native_history_is_published_without_rewriting_it(
+def test_native_history_is_listed_without_any_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, live: bool
 ) -> None:
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
@@ -116,21 +103,18 @@ def test_native_history_is_published_without_rewriting_it(
     fixture = Path(__file__).resolve().parents[2] / "proto/testdata/conversion/run.log.gz"
     original = gzip.decompress(fixture.read_bytes())
     path.write_bytes(original)
+    path.with_name("run.head").write_bytes(fixture.with_name("run.head").read_bytes())
     lock = RunLock(path.parent / "run.lock") if live else None
     try:
         result = page_saved_runs(
-            pb.ListSavedRunsRequest(request_id="native", project=str(root)),
-            root,
-            [_run(1)],
-            clock=ManualClock(),
-            threads=SimThreads(),
+            pb.ListSavedRunsRequest(request_id="native", project=str(root)), root, [_run(1)]
         )
     finally:
         if lock is not None:
             lock.close()
     assert result.runs[0].imported == pb.SavedRunImport.AVAILABLE
     assert path.read_bytes() == original
-    assert (Project.indexed_run_directories()[0]).resolve() == path.parent.resolve()
+    assert Project.indexed_run_directories() == ()
 
 
 def test_discovery_includes_native_only_runs_with_no_portable_manifest(
@@ -143,6 +127,7 @@ def test_discovery_includes_native_only_runs_with_no_portable_manifest(
     path.parent.mkdir(parents=True)
     fixture = Path(__file__).resolve().parents[2] / "proto/testdata/conversion/run.log.gz"
     path.write_bytes(gzip.decompress(fixture.read_bytes()))
+    path.with_name("run.head").write_bytes(fixture.with_name("run.head").read_bytes())
     source = FileProjects(FakeGitRepositories().repository, SimThreads(), clock=ManualClock())
     response = source.saved_runs(
         pb.ListSavedRunsRequest(request_id="native-only", project=str(root))
@@ -163,6 +148,7 @@ def test_registry_read_discovers_native_history_through_the_public_host_handler(
     fixture = Path(__file__).resolve().parents[2] / "proto/testdata/conversion/run.log.gz"
     original = gzip.decompress(fixture.read_bytes())
     path.write_bytes(original)
+    path.with_name("run.head").write_bytes(fixture.with_name("run.head").read_bytes())
     threads = SimThreads()
     host = replace(
         fake_host(threads, SimNetwork(threads)),
@@ -249,38 +235,32 @@ def test_old_agent_turn_without_identity_has_a_final_typed_refusal_in_every_list
     fixture = Path(__file__).resolve().parents[1] / "vibesys/run/fixtures/pre-agent-identity.jsonl"
     path.write_bytes(fixture.read_bytes())
 
-    class CountingClock(ManualClock):
-        calls = 0
-
-        def now(self) -> float:
-            self.calls += 1
-            return super().now()
-
-    clock = CountingClock()
+    # Conversion owns the refusal; discovery only reads the persisted observation.
+    os.utime(path, (100, 100))
+    convert_run(
+        Project.open(root),
+        "run-1",
+        clock=ManualClock(start=1000),
+        threads=SimThreads(),
+        install_sync=FakeFileSync(),
+    )
     first = page_saved_runs(
         pb.ListSavedRunsRequest(request_id="first", project=str(root)),
         root,
         [_run(1)],
-        clock=clock,
-        threads=SimThreads(),
     )
     assert first.runs[0].imported == pb.SavedRunImport.UNAVAILABLE
     assert first.runs[0].detail.startswith("cannot convert:")
     assert "agent: Field required" in first.runs[0].detail
     receipt = path.parent / "run.conversion.pb"
     before = receipt.stat().st_mtime_ns
-    calls = clock.calls
-    assert calls > 0
     second = page_saved_runs(
         pb.ListSavedRunsRequest(request_id="again", project=str(root)),
         root,
         [_run(1)],
-        clock=clock,
-        threads=SimThreads(),
     )
     assert second.runs[0].detail == first.runs[0].detail
     assert receipt.stat().st_mtime_ns == before
-    assert clock.calls == calls
     assert not (path.parent / "run.log").exists()
 
 
@@ -299,9 +279,7 @@ def test_listing_keeps_a_recent_prelock_journal_live_without_creating_a_lock(
         pb.ListSavedRunsRequest(request_id="live", project=str(root)),
         root,
         [_run(1)],
-        clock=ManualClock(start=1001),
-        threads=SimThreads(),
     )
     assert result.runs[0].imported == pb.SavedRunImport.UNAVAILABLE
-    assert "live" in result.runs[0].detail
+    assert result.runs[0].detail == "History conversion pending"
     assert {p.name: p.read_bytes() for p in path.parent.iterdir()} == before

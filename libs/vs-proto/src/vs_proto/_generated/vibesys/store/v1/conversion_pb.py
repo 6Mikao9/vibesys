@@ -60,14 +60,58 @@ class RunConversionRefusal(Message[_RunConversionRefusalFields]):
         journal_modified_ns: int
         reason: str
 
+_RunConversionReceiptFields: TypeAlias = Literal["journal_size", "journal_modified_ns", "projection_version"]
+
+class RunConversionReceipt(Message[_RunConversionReceiptFields]):
+    """
+    Provenance of a derived run.log. A resumed converter rebuilds after source
+    drift, including a pre-lock writer that resumed after the quiet-window probe.
+
+    ```proto
+    message vibesys.store.v1.RunConversionReceipt
+    ```
+
+    Attributes:
+        journal_size:
+            ```proto
+            uint64 journal_size = 1;
+            ```
+        journal_modified_ns:
+            ```proto
+            uint64 journal_modified_ns = 2;
+            ```
+        projection_version:
+            ```proto
+            uint32 projection_version = 3;
+            ```
+    """
+
+    __slots__ = ("journal_size", "journal_modified_ns", "projection_version")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            journal_size: int = 0,
+            journal_modified_ns: int = 0,
+            projection_version: int = 0,
+        ) -> None:
+            pass
+
+        journal_size: int
+        journal_modified_ns: int
+        projection_version: int
+
 
 _DESC = file_desc(
-    b'\n!vibesys/store/v1/conversion.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto"\x97\x01\n\x14RunConversionRefusal\x12!\n\x0cjournal_size\x18\x01 \x01(\x04R\x0bjournalSize\x127\n\x13journal_modified_ns\x18\x02 \x01(\x04R\x11journalModifiedNsB\x07\xbaH\x042\x02 \x00\x12#\n\x06reason\x18\x03 \x01(\tR\x06reasonB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n!vibesys/store/v1/conversion.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto"\x97\x01\n\x14RunConversionRefusal\x12!\n\x0cjournal_size\x18\x01 \x01(\x04R\x0bjournalSize\x127\n\x13journal_modified_ns\x18\x02 \x01(\x04R\x11journalModifiedNsB\x07\xbaH\x042\x02 \x00\x12#\n\x06reason\x18\x03 \x01(\tR\x06reasonB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04"\xaa\x01\n\x14RunConversionReceipt\x12!\n\x0cjournal_size\x18\x01 \x01(\x04R\x0bjournalSize\x127\n\x13journal_modified_ns\x18\x02 \x01(\x04R\x11journalModifiedNsB\x07\xbaH\x042\x02 \x00\x126\n\x12projection_version\x18\x03 \x01(\rR\x11projectionVersionB\x07\xbaH\x04*\x02 \x00BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
     ],
     {
         "RunConversionRefusal": RunConversionRefusal,
+        "RunConversionReceipt": RunConversionReceipt,
     },
 )
 

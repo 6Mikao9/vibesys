@@ -1,10 +1,12 @@
 import {describe, expect, test} from 'bun:test';
 import type {HostListing, HostRun, ListedRun, RunDigestEntry} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
   type Clock,
   DASHBOARD_RUNS,
   dashboardRows,
+  projectRunGaps,
   runLabels,
   SIDEBAR_EMPTY,
   type SidebarAction,
@@ -404,4 +406,67 @@ test('a native import refusal stays visible on the run row', () => {
     retry: false,
   });
   expect(row?.row.detail).toBe('Pause this run before importing its history');
+});
+
+test('property: reordered project failures remain visible and retry to a complete listing', () => {
+  for (const seed of SEEDS) {
+    const random = new Seeded(seed);
+    const projects = Array.from({length: 1 + random.int(5)}, (_, index) => `/project-${index}`);
+    const hostRuns = new Map(
+      projects.map((project, index) => [
+        project,
+        Array.from({length: 1 + random.int(5)}, (_, id) => run(`${index}-${id}`, id)),
+      ]),
+    );
+    let step = sidebarStep(SIDEBAR_EMPTY, {
+      type: 'overview',
+      listings: [listed('ssh:host-a')],
+      recent: projects.map(project => opened('ssh:host-a', project, 'remembered')),
+      skippedRecent: [],
+    });
+    const pending = [...step.requests.filter(request => request.kind === 'list-project-runs')];
+    const complete = new Set<string>();
+    while (pending.length > 0) {
+      // Latency is reply ordering, so there is no wall-clock wait or verdict.
+      const at = random.int(pending.length);
+      const request = pending.splice(at, 1)[0];
+      if (!request) throw new Error('missing request');
+      const fails = random.bool();
+      step = sidebarStep(step.state, {
+        type: 'project-runs-listed',
+        ...request,
+        runs: fails ? null : (hostRuns.get(request.project) ?? []),
+        ...(fails ? {error: `refused ${request.project}`} : {}),
+      });
+      if (!fails) complete.add(request.project);
+      const gaps = projectRunGaps(step.state.allRuns);
+      const visible = new Set(dashboardRows(step.state, CLOCK).map(row => row.row.run.runId));
+      for (const project of projects) {
+        if (complete.has(project))
+          expect(hostRuns.get(project)?.every(row => visible.has(row.runId))).toBe(true);
+        else expect(gaps.some(gap => gap.project === project)).toBe(true);
+      }
+    }
+    const refused = projectRunGaps(step.state.allRuns);
+    expect(
+      refused.every(
+        gap => gap.refusal?.kind === 'unreachable' && gap.refusal.detail.includes(gap.project),
+      ),
+    ).toBe(true);
+    step = sidebarStep(step.state, {type: 'refresh-live-digests'});
+    expect(projectRunGaps(step.state.allRuns).map(gap => gap.refusal)).toEqual(
+      refused.map(gap => gap.refusal),
+    );
+    for (const request of step.requests.filter(request => request.kind === 'list-project-runs')) {
+      step = sidebarStep(step.state, {
+        type: 'project-runs-listed',
+        ...request,
+        runs: hostRuns.get(request.project) ?? [],
+      });
+    }
+    expect(projectRunGaps(step.state.allRuns)).toEqual([]);
+    expect(new Set(dashboardRows(step.state, CLOCK).map(row => row.row.run.runId))).toEqual(
+      new Set([...hostRuns.values()].flat().map(row => row.runId)),
+    );
+  }
 });

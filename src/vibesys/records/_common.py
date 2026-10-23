@@ -47,6 +47,8 @@ class Projection:
         self.lengths = dict(state.streams)
         self.waits = dict(state.waits)
         self.intents = dict(state.intents)
+        self.primary_series = state.primary_series
+        self.objective_inferred = state.objective_inferred
         self.metric_values = dict(state.metric_values)
         self.records: list[p.Record] = []
         self.blobs: list[BlobWrite] = []
@@ -98,17 +100,44 @@ class Projection:
         direction: p.Direction = p.Direction.NONE,
         role: p.SeriesRole = p.SeriesRole.REFERENCE,
     ) -> None:
-        if self.header is not None and not any(s.name == point.series for s in self.header.series):
-            header = p.EpochStarted.from_binary(self.header.to_binary())
-            header.series.append(
-                p.MetricSeriesDecl(name=point.series, unit=unit, direction=direction, role=role)
-            )
-            self.emit("declaration_amended", header)
+        self._declare_metric(point.series, unit, direction, role)
         key = (point.series, point.span)
         value = (point.value, point.clock)
         if self.metric_values.get(key) != value:
             self.metric_values[key] = value
             self.emit("metric", point)
+
+    def _declare_metric(
+        self, series: str, unit: str, direction: p.Direction, role: p.SeriesRole
+    ) -> None:
+        if self.header is None:
+            return
+        header = p.EpochStarted.from_binary(self.header.to_binary())
+        run = header.run
+        if run is not None and self.primary_series == series:
+            if not run.objectives:
+                # The oldest journals report readings with no direction. The v1 reader reads an
+                # undirected objective as "maximize", so the converted run does too, until a
+                # reading names its direction.
+                self.objective_inferred = direction is p.Direction.NONE
+                direction = p.Direction.MAX if self.objective_inferred else direction
+                run.objectives.append(p.Objective(series=series, direction=direction))
+                role = p.SeriesRole.OBJECTIVE
+            elif self.objective_inferred and direction in {p.Direction.MIN, p.Direction.MAX}:
+                self.objective_inferred = False
+                run.objectives[0].direction = direction
+                role = p.SeriesRole.OBJECTIVE
+        existing = next((s for s in header.series if s.name == series), None)
+        if existing is None:
+            header.series.append(
+                p.MetricSeriesDecl(name=series, unit=unit, direction=direction, role=role)
+            )
+        elif role is p.SeriesRole.OBJECTIVE:
+            existing.role = role
+            existing.direction = direction
+            existing.unit = unit
+        if header != self.header:
+            self.emit("declaration_amended", header)
 
     def emit(self, field: str, value: Message) -> None:
         if (
@@ -189,6 +218,8 @@ class Projection:
             streams=tuple(self.lengths.items()),
             waits=tuple(self.waits.items()),
             intents=tuple(self.intents.items()),
+            primary_series=self.primary_series,
+            objective_inferred=self.objective_inferred,
             metric_values=tuple(self.metric_values.items()),
             ending=self.ending,
             pending=tuple(self.pending),

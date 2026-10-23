@@ -15,3 +15,11 @@ message RunConversionRefusal {
     max_bytes: 65536
   }];
 }
+
+// Provenance of a derived run.log. A resumed converter rebuilds after source
+// drift, including a pre-lock writer that resumed after the quiet-window probe.
+message RunConversionReceipt {
+  uint64 journal_size = 1;
+  uint64 journal_modified_ns = 2 [(buf.validate.field).uint64.gt = 0];
+  uint32 projection_version = 3 [(buf.validate.field).uint32.gt = 0];
+}

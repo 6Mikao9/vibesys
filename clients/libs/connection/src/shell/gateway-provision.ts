@@ -92,7 +92,10 @@ export function gatewayProcess(
   void process.exit.then(code => {
     const tail = stderr.trim();
     log(`gateway connect exited: ${code}${tail === '' ? '' : `\n${tail}`}`);
-    if (!duplex.destroyed) duplex.destroy(new Error(`gateway connect exited: ${code}`));
+    // The error reaches the one-line failure log, so it carries the stderr tail too.
+    if (!duplex.destroyed) {
+      duplex.destroy(new Error(`gateway connect exited: ${code}${tail === '' ? '' : `: ${tail}`}`));
+    }
   });
   duplex.once('close', () => {
     void retireProcess(process, schedule).outcome;

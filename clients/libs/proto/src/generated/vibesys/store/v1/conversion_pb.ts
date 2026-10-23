@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/conversion.proto.
  */
 export const file_vibesys_store_v1_conversion: GenFile = /*@__PURE__*/
-  fileDesc("CiF2aWJlc3lzL3N0b3JlL3YxL2NvbnZlcnNpb24ucHJvdG8SEHZpYmVzeXMuc3RvcmUudjEibwoUUnVuQ29udmVyc2lvblJlZnVzYWwSFAoMam91cm5hbF9zaXplGAEgASgEEiQKE2pvdXJuYWxfbW9kaWZpZWRfbnMYAiABKARCB7pIBDICIAASGwoGcmVhc29uGAMgASgJQgu6SAhyBhABKICABEJBWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_buf_validate_validate]);
+  fileDesc("CiF2aWJlc3lzL3N0b3JlL3YxL2NvbnZlcnNpb24ucHJvdG8SEHZpYmVzeXMuc3RvcmUudjEibwoUUnVuQ29udmVyc2lvblJlZnVzYWwSFAoMam91cm5hbF9zaXplGAEgASgEEiQKE2pvdXJuYWxfbW9kaWZpZWRfbnMYAiABKARCB7pIBDICIAASGwoGcmVhc29uGAMgASgJQgu6SAhyBhABKICABCJ3ChRSdW5Db252ZXJzaW9uUmVjZWlwdBIUCgxqb3VybmFsX3NpemUYASABKAQSJAoTam91cm5hbF9tb2RpZmllZF9ucxgCIAEoBEIHukgEMgIgABIjChJwcm9qZWN0aW9uX3ZlcnNpb24YAyABKA1CB7pIBCoCIABCQVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_buf_validate_validate]);
 
 /**
  * A final refusal for one immutable revision of a retained JSONL journal.
@@ -42,3 +42,33 @@ export type RunConversionRefusal = Message<"vibesys.store.v1.RunConversionRefusa
  */
 export const RunConversionRefusalSchema: GenMessage<RunConversionRefusal> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_conversion, 0);
+
+/**
+ * Provenance of a derived run.log. A resumed converter rebuilds after source
+ * drift, including a pre-lock writer that resumed after the quiet-window probe.
+ *
+ * @generated from message vibesys.store.v1.RunConversionReceipt
+ */
+export type RunConversionReceipt = Message<"vibesys.store.v1.RunConversionReceipt"> & {
+  /**
+   * @generated from field: uint64 journal_size = 1;
+   */
+  journalSize: bigint;
+
+  /**
+   * @generated from field: uint64 journal_modified_ns = 2;
+   */
+  journalModifiedNs: bigint;
+
+  /**
+   * @generated from field: uint32 projection_version = 3;
+   */
+  projectionVersion: number;
+};
+
+/**
+ * Describes the message vibesys.store.v1.RunConversionReceipt.
+ * Use `create(RunConversionReceiptSchema)` to create a new message.
+ */
+export const RunConversionReceiptSchema: GenMessage<RunConversionReceipt> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_conversion, 1);

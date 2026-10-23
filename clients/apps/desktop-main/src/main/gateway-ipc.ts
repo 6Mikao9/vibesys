@@ -115,7 +115,7 @@ export function gatewayEnd(error?: unknown): Extract<GatewayReply, {end: true}> 
 }
 
 /** One bounded line per failed call: host, method and status, never request or reply bytes. */
-export function gatewayFailureLine(failure: GatewayCallFailure): string {
+function gatewayFailureLine(failure: GatewayCallFailure): string {
   const status = failure.code === undefined ? 'no status' : `code ${failure.code}`;
   return `gateway ${failure.host} ${failure.method} failed (${status}): ${failure.error.slice(0, 512)}`;
 }

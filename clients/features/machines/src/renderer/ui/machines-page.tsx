@@ -147,6 +147,7 @@ function MachineCard(props: {
   readonly machine: Machine;
   readonly dispatch: Dispatch;
   readonly runs: number;
+  readonly incomplete: boolean;
   readonly showRuns: (host: HostKey) => void;
   readonly openSettings: (host: HostKey) => void;
 }): JSX.Element {
@@ -166,15 +167,15 @@ function MachineCard(props: {
           <Fix state={state} machine={machine} dispatch={dispatch} />
           <Button size="sm" text="Settings" press={() => props.openSettings(machine.host)} />
         </Row>
-        {hardware === null && runs === 0 ? null : (
+        {hardware === null && runs === 0 && !props.incomplete ? null : (
           <Row gap="space-5" wrap>
             {hardware === null ? null : <Text>{hardware}</Text>}
             <Busy machine={machine} />
-            {runs === 0 ? null : (
+            {runs === 0 && !props.incomplete ? null : (
               <Button
                 variant="quiet"
                 size="sm"
-                text={runs === 1 ? '1 run' : `${runs} runs`}
+                text={`${runs === 1 ? '1 run' : `${runs} runs`}${props.incomplete ? ' (incomplete)' : ''}`}
                 press={() => props.showRuns(machine.host)}
               />
             )}
@@ -194,6 +195,7 @@ export function MachinesPage(props: {
   readonly state: MachinesState;
   readonly dispatch: Dispatch;
   readonly runCounts: ReadonlyMap<HostKey, number>;
+  readonly incompleteHosts?: ReadonlySet<HostKey>;
   readonly showRuns: (host: HostKey) => void;
   readonly openSettings: (host: HostKey) => void;
 }): JSX.Element {
@@ -222,6 +224,7 @@ export function MachinesPage(props: {
             machine={machine}
             dispatch={dispatch}
             runs={props.runCounts.get(machine.host) ?? 0}
+            incomplete={props.incompleteHosts?.has(machine.host) ?? false}
             showRuns={props.showRuns}
             openSettings={props.openSettings}
           />

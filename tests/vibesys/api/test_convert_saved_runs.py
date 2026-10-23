@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 
 from vibesys.api.host_operations.api import serve_convert_saved_runs
 from vibesys.api.transport import (
+    ConversionOptions,
     ConversionResult,
     ConversionStatus,
     RunConversion,
@@ -23,7 +24,7 @@ from vs_core.api import Span, SpanStatus, SpanType
 from vs_project.api import Project
 from vs_proto.api import FailureCategory, MutateRequest, MutateResponse, Oneof, validate
 from vs_proto.api import host_payloads as pb
-from vs_runlog.api import RunLock
+from vs_runlog.api import FakeFileSync, RunLock
 from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
@@ -62,6 +63,7 @@ def legacy_run(project: Project, run_id: str) -> Path:
         ),
     )
     journal.close()
+    (directory / "run.lock").touch()
     return directory
 
 
@@ -89,7 +91,10 @@ def payload(project: str, request_id: str = "convert-a", after_run: str = "") ->
 def real(clock: ManualClock) -> Callable[[Project, str], Iterator[RunConversion]]:
     """The shipping converter on simulated time."""
     return lambda opened, after_run: iter_conversions(
-        opened, clock=clock, threads=SimThreads(), after_run=after_run
+        opened,
+        clock=clock,
+        threads=SimThreads(),
+        options=ConversionOptions(after_run=after_run, install_sync=FakeFileSync()),
     )
 
 
@@ -170,7 +175,12 @@ def test_a_call_stops_before_its_cap_and_repeats_make_progress(project: Project)
     per_conversion = (_CAP_SECONDS - _RESERVE_SECONDS) * 0.6
 
     def slow(opened: Project, after_run: str) -> Iterator[RunConversion]:
-        for row in iter_conversions(opened, clock=clock, threads=SimThreads(), after_run=after_run):
+        for row in iter_conversions(
+            opened,
+            clock=clock,
+            threads=SimThreads(),
+            options=ConversionOptions(after_run=after_run, install_sync=FakeFileSync()),
+        ):
             if row.result.status is ConversionStatus.CONVERTED:
                 clock.advance(per_conversion)
             yield row
@@ -251,6 +261,7 @@ def test_a_bad_envelope_is_invalid_input(envelope: bytes, tmp_path: Path) -> Non
 def test_prelock_live_journal_is_deferred_without_creating_a_lock(project: Project) -> None:
     directory = legacy_run(project, "prelock")
     journal = directory / "core-events.jsonl"
+    (directory / "run.lock").unlink()
     os.utime(journal, (1000, 1000))
     before = snapshot(directory)
     clock = ManualClock(start=1001)
@@ -315,15 +326,28 @@ def test_iterator_cursor_skips_previously_attempted_failed_and_skipped_runs(
         path = Project.event_journal_path_for(project.root, run_id)
         path.parent.mkdir(parents=True)
         path.write_bytes(content)
+        (path.parent / "run.lock").touch()
     legacy_run(project, "c")
     clock = ManualClock()
-    rows = list(iter_conversions(project, clock=clock, threads=SimThreads()))
+    rows = list(
+        iter_conversions(
+            project,
+            clock=clock,
+            threads=SimThreads(),
+            options=ConversionOptions(install_sync=FakeFileSync()),
+        )
+    )
     assert [row.result.status for row in rows[:3]] == [
         ConversionStatus.SKIPPED,
         ConversionStatus.FAILED,
         ConversionStatus.CONVERTED,
     ]
     resumed = list(
-        iter_conversions(project, clock=clock, threads=SimThreads(), after_run=rows[1].cursor)
+        iter_conversions(
+            project,
+            clock=clock,
+            threads=SimThreads(),
+            options=ConversionOptions(after_run=rows[1].cursor, install_sync=FakeFileSync()),
+        )
     )
     assert [row.run for row in resumed if row.alias_of is None] == ["c"]

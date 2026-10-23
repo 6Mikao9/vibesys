@@ -251,11 +251,15 @@ export class Hosts {
   >();
   /** Advances before desired-set changes, fencing reads against the desired-host union. */
   #generation = 0;
+  readonly #listings = new Set<AbortController>();
+  #disposed = false;
 
   constructor(deps: HostsDeps) {
     this.#deps = deps;
     deps.manager.onDisposing(() => {
+      this.#disposed = true;
       for (const key of this.#conversions.keys()) this.#stopConversions(key);
+      for (const listing of this.#listings) listing.abort();
     });
   }
 
@@ -654,11 +658,15 @@ export class Hosts {
     if (await this.#transportV2(id)) {
       if (!this.#deps.savedRuns) throw new Error('saved-run registry is missing');
       void this.#convertRuns(id, project);
-      return this.#deps.savedRuns.list(
-        id,
-        project,
-        this.#conversionScope(hostKey(id)).abort.signal,
-      );
+      const listing = new AbortController();
+      this.#listings.add(listing);
+      if (this.#disposed) listing.abort();
+      try {
+        return await this.#deps.savedRuns.list(id, project, listing.signal);
+      } finally {
+        this.#listings.delete(listing);
+        listing.abort();
+      }
     }
     await using lease = await this.connection(id);
     try {
@@ -667,15 +675,6 @@ export class Hosts {
     } catch (error) {
       throw plain(error, 'Could not list the runs of the project');
     }
-  }
-
-  #conversionScope(key: HostKey) {
-    let scope = this.#conversions.get(key);
-    if (scope === undefined) {
-      scope = {abort: new AbortController(), projects: new Map<string, Promise<void>>()};
-      this.#conversions.set(key, scope);
-    }
-    return scope;
   }
 
   #stopConversions(key: HostKey): void {
@@ -687,7 +686,8 @@ export class Hosts {
   #convertRuns(id: HostId, project: string): Promise<void> {
     const conversion = this.#deps.runConversion;
     if (conversion === undefined) return Promise.resolve();
-    const scope = this.#conversionScope(hostKey(id));
+    const scope = this.#conversions.get(hostKey(id));
+    if (scope === undefined || scope.abort.signal.aborted) return Promise.resolve();
     const signal = scope.abort.signal;
     const known = scope.projects.get(project);
     if (known !== undefined) return known;
@@ -962,8 +962,10 @@ export class Hosts {
     const push = this.#deps.push;
     let stopped = false;
     const startRuns = (): void => {
-      if (stopped) return;
-      const signal = this.#conversionScope(key).abort.signal;
+      if (stopped || this.#disposed || this.#conversions.has(key)) return;
+      const scope = {abort: new AbortController(), projects: new Map<string, Promise<void>>()};
+      this.#conversions.set(key, scope);
+      const signal = scope.abort.signal;
       void this.#startRuns(key, signal).catch((error: unknown) => {
         if (!signal.aborted) this.#deps.log(error instanceof Error ? error.message : String(error));
       });

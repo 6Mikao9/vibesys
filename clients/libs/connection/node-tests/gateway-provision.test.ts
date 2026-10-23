@@ -335,12 +335,16 @@ test('the connect process stderr reaches the app log as a bounded tail when it e
     // Pipes end before the exit, as a real child's do; the exit then destroys stdin.
     const child = pipeHeldProcess();
     const lines: string[] = [];
+        let fail: (message: string) => void = () => {};
+    const errored = new Promise<string>(resolve => {
+      fail = resolve;
+    });
     const logged = new Promise<void>(resolve => {
       const duplex = gatewayProcess(child.process, clock.schedule, line => {
         lines.push(line);
         resolve();
       });
-      duplex.on('error', () => {});
+      duplex.on('error', error => fail(error.message));
       duplex.resume();
     });
     child.stderr.end(`${'x'.repeat(size)}serve: listen failed`);
@@ -351,6 +355,9 @@ test('the connect process stderr reaches the app log as a bounded tail when it e
     expect(lines).toHaveLength(1);
     const [line = ''] = lines;
     expect(line.startsWith('gateway connect exited: 1')).toBe(true);
+    const message = await errored;
+    expect(message.startsWith('gateway connect exited: 1: ')).toBe(true);
+    expect(message.endsWith('serve: listen failed')).toBe(true);
     expect(line.endsWith('serve: listen failed')).toBe(true);
     expect(line.length).toBeLessThanOrEqual(
       'gateway connect exited: 1\n'.length + GATEWAY_STDERR_BYTES,

@@ -95,8 +95,10 @@ def fixtures(project: Project) -> dict[str, bytes]:
         + b"\n"
         for i, (kind, data, text) in enumerate(bodies, 1)
     )
-    project.event_journal_path_for(project.root, run_id).write_bytes(journal)
-    convert_run(project, run_id, clock=ManualClock(), threads=SimThreads())
+    source = project.event_journal_path_for(project.root, run_id)
+    source.write_bytes(journal)
+    os.utime(source, (100, 100))
+    convert_run(project, run_id, clock=ManualClock(start=1000), threads=SimThreads())
     head = RunHead.from_binary((directory / "run.head").read_bytes())
     head.clear_field("process")
     log, records, expected = pinned_conversion(

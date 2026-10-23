@@ -1,8 +1,7 @@
-"""Saved-run discovery projection and idempotent import through the transport owner.
+"""Saved-run discovery projection independent of history conversion.
 
 The project catalog supplies metadata; this module never derives run facts.
-``page_saved_runs`` fences pages by that catalog and publishes readable runs in
-its existing host index. This command module loads only for saved-run discovery.
+``page_saved_runs`` fences pages by that catalog without reading or importing journals. This command module loads only for saved-run discovery.
 """
 
 from __future__ import annotations
@@ -16,56 +15,49 @@ if TYPE_CHECKING:
 
     from vs_project.api import Project
     from vs_proto.api import host_payloads as pb
-    from vs_sim.api import SleepingClock, Threads
 
 __all__ = ["page_saved_runs"]
 
 
-def _import(project: Project, run: pb.SavedRun, clock: SleepingClock, threads: Threads) -> None:
-    transport = import_module("vibesys.api.transport")
-    project_api = import_module("vs_project.api")
-    pb = import_module("vs_proto.api").host_payloads
-    assert_run_unlocked = import_module("vs_runlog.api").assert_run_unlocked
-
+def _availability(project: Project, run: pb.SavedRun) -> None:
+    """Read one bounded head or refusal; conversion and publication have their own owner."""
+    wire = import_module("vs_proto.api")
+    pb = wire.host_payloads
     path = project.run_log_path_for(project.root, run.run_id)
+    head = path.with_name("run.head")
+    refusal = path.with_name("run.conversion.pb")
     try:
-        if (path.parent / "run.lock").exists():
-            assert_run_unlocked(path)
-    except RuntimeError:
-        if path.is_file():
-            project.publish_run_for(project.root, run.run_id)
-            run.imported = pb.SavedRunImport.AVAILABLE
+        if head.is_file():
+            value = wire.RunHead.from_binary(head.read_bytes())
+            wire.validate(value)
+            if path.is_file():
+                run.imported = pb.SavedRunImport.AVAILABLE
+                return
+        run.imported = pb.SavedRunImport.UNAVAILABLE
+        if refusal.is_file():
+            value = wire.RunConversionRefusal.from_binary(refusal.read_bytes())
+            wire.validate(value)
+            run.detail = value.reason
         else:
-            run.imported = pb.SavedRunImport.UNAVAILABLE
-            run.detail = "Pause this run before importing its history"
-        return
-    try:
-        result = transport.convert_run(project, run.run_id, clock=clock, threads=threads)
-    except (OSError, ValueError, TypeError, project_api.ProjectError) as error:
+            run.detail = (
+                "History conversion pending"
+                if path.with_name("core-events.jsonl").is_file()
+                else "journal is missing"
+            )
+    except (OSError, ValueError) as error:
         run.imported = pb.SavedRunImport.UNAVAILABLE
         run.detail = str(error)
-        return
-    run.imported = (
-        pb.SavedRunImport.AVAILABLE
-        if result.status
-        in {transport.ConversionStatus.CONVERTED, transport.ConversionStatus.EXISTS}
-        else pb.SavedRunImport.UNAVAILABLE
-    )
-    run.detail = result.reason
 
 
 def page_saved_runs(
     request: pb.ListSavedRunsRequest,
     root: Path,
     runs: list[pb.SavedRun],
-    *,
-    clock: SleepingClock,
-    threads: Threads,
 ) -> pb.ListSavedRunsResponse:
     """Return at most 200 rows and 1 MiB; refuse continuation after catalog drift.
 
-    Import preserves original journals and positional recovery state. A refused
-    import stays in the listing with its reason, rather than disappearing.
+    Listing reads at most one head or refusal per run, never the journal or
+    conversion. Unavailable history stays listed with a reason.
     """
     project_type = import_module("vs_project.api").Project
     pb = import_module("vs_proto.api").host_payloads
@@ -88,7 +80,7 @@ def page_saved_runs(
     project = project_type.open(root)
     for index in range(request.offset, min(request.offset + 200, len(runs))):
         run = pb.SavedRun.from_binary(runs[index].to_binary())
-        _import(project, run, clock, threads)
+        _availability(project, run)
         response.runs.append(run)
         if index + 1 < len(runs):
             response.next_offset = index + 1

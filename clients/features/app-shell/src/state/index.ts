@@ -30,3 +30,5 @@ export {
   sidebarInvariants,
   sidebarStep,
 } from './sidebar.js';
+
+export {projectRunGaps} from './all-runs.js';

@@ -6,6 +6,7 @@ import {RUN_EVENT_TYPES_BY_KINDS, type RunSummary} from '@vibesys/contracts/host
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {remember, SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Hosts, type SshConfigFilesystem} from './index.js';
 
@@ -2779,6 +2780,7 @@ for (const enabled of [false, true]) {
 }
 
 test('a v2 run list starts one conversion pass per project without retry storms', async () => {
+  const logged = Promise.withResolvers<void>();
   const link = new FakeLink();
   const events: string[] = [];
   const logs: string[] = [];
@@ -2813,11 +2815,17 @@ test('a v2 run list starts one conversion pass per project without retry storms'
         return next();
       },
     },
-    message => logs.push(message),
+    message => {
+      logs.push(message);
+      if (message.includes('newer checkout')) logged.resolve();
+    },
   );
   await using _manager = subject.manager;
+  await subject.hosts.host(LOCAL, 'owner');
+  await subject.manager.existing('local')?.ready();
   for (const project of ['/srv/a', '/srv/a', '/srv/a', '/srv/b', '/srv/b', '/srv/c'])
     await subject.hosts.projectRuns(LOCAL, project);
+  await logged.promise;
   expect(events).toEqual([
     'convert /srv/a',
     'list /srv/a',
@@ -2901,6 +2909,8 @@ test('listing finishes while conversion is held and disposal aborts the host sig
       return held.promise;
     },
   });
+  await subject.hosts.host(LOCAL, 'owner');
+  await subject.manager.existing('local')?.ready();
   const listed = subject.hosts.projectRuns(LOCAL, '/project');
   const signal = await started.promise;
   expect(await listed).toEqual([]);
@@ -2989,3 +2999,98 @@ for (const exit of ['retire', 'switch', 'disconnect', 'needs-update'] as const) 
     expect(calls[1]?.aborted).toBe(false);
   });
 }
+
+test('property: generated host scopes own conversion and preserve in-flight listings', async () => {
+  for (const seed of SEEDS) {
+    const random = new Seeded(seed);
+    const clock = new FakeClock();
+    const link = new FakeLink();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
+      filesystem: new FakeSettingsFilesystem(),
+      log: () => {},
+    });
+    const manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: clock.scheduleTimeout,
+      // A recovery's attempts count until the connection is proven, so every generated flap needs a slot.
+      config: {...CONFIG, delaysMs: Array.from({length: 16}, () => 1)},
+      log: () => {},
+    });
+    const conversions: AbortSignal[] = [];
+    const listings: {signal: AbortSignal; finish: () => void}[] = [];
+    const promises: Promise<unknown>[] = [];
+    let listingStarted = Promise.withResolvers<void>();
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/src',
+      sshConfigPath: '/missing',
+      transportV2: async () => true,
+      runs: {start: () => {}, cancel: () => {}},
+      savedRuns: {
+        list: async (_host, _project, signal) => {
+          const held = Promise.withResolvers<readonly import('@vibesys/hosts').ListedRun[]>();
+          listings.push({signal, finish: () => held.resolve([])});
+          listingStarted.resolve();
+          return held.promise;
+        },
+      },
+      runConversion: {
+        convert: async (_host, _project, signal) => {
+          conversions.push(signal);
+          return {kind: 'needs-update'};
+        },
+      },
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    let connected = false;
+    let disposed = false;
+    try {
+      // Every history starts with the reported ownerless path.
+      promises.push(hosts.projectRuns(LOCAL, '/project'));
+      await listingStarted.promise;
+      expect(conversions).toHaveLength(0);
+      for (let step = 0; step < 12; step++) {
+        const operation = random.pick(['connect', 'list', 'flap', 'stop', 'dispose'] as const);
+        if (operation === 'connect' && !disposed) {
+          await hosts.host(LOCAL, 'owner');
+          await manager.existing('local')?.ready();
+          connected = true;
+        } else if (operation === 'list' && !disposed) {
+          listingStarted = Promise.withResolvers<void>();
+          promises.push(hosts.projectRuns(LOCAL, `/project-${step % 3}`));
+          await listingStarted.promise;
+        } else if (operation === 'flap' && connected && !disposed) {
+          const connection = manager.existing('local');
+          if (!connection) throw new Error('missing connection');
+          const changed = phaseReached(connection, 'reconnecting');
+          link.helper.drop();
+          await changed;
+          expect(conversions.every(signal => signal.aborted)).toBe(true);
+          clock.advanceBy(1);
+          await connection.ready();
+        } else if (operation === 'stop' && !disposed) {
+          await hosts.retireOwner('owner');
+          connected = false;
+          expect(conversions.every(signal => signal.aborted)).toBe(true);
+        } else if (operation === 'dispose' && !disposed) {
+          await manager[Symbol.asyncDispose]();
+          disposed = true;
+          expect(conversions.every(signal => signal.aborted)).toBe(true);
+        }
+        if (!disposed) expect(listings.every(listing => !listing.signal.aborted)).toBe(true);
+      }
+    } finally {
+      await manager[Symbol.asyncDispose]();
+      expect(conversions.every(signal => signal.aborted)).toBe(true);
+      for (const listing of listings) listing.finish();
+      await Promise.allSettled(promises);
+    }
+  }
+});

@@ -182,6 +182,7 @@ export type SidebarAction =
       readonly host: HostKey;
       readonly project: string;
       readonly runs: readonly ListedRun[] | null;
+      readonly error?: string;
     };
 
 /** What the sidebar asks of the main process. */
@@ -252,7 +253,7 @@ export function digestKey(run: RunRef): string {
 /** The next state for `action`, and the requests it makes. */
 export function sidebarStep(state: SidebarState, action: SidebarAction): SidebarStep {
   const step = baseStep(state, action);
-  const listed = askAllRuns(step.state);
+  const listed = askAllRuns(step.state, action.type === 'refresh-live-digests');
   const asked = askDigests(listed.state);
   const live = askLiveDigests(asked.state, action.type === 'refresh-live-digests');
   return {
@@ -401,8 +402,8 @@ function askLiveDigests(state: SidebarState, refresh: boolean): SidebarStep {
 }
 
 /** The project listings the dashboard still needs: every known project's runs, on every screen. */
-function askAllRuns(state: SidebarState): SidebarStep {
-  const asked = askProjectRuns(state.allRuns, state.listings, state.recent);
+function askAllRuns(state: SidebarState, retryFailed: boolean): SidebarStep {
+  const asked = askProjectRuns(state.allRuns, state.listings, state.recent, retryFailed);
   return asked.requests.length === 0
     ? same(state)
     : {state: {...state, allRuns: asked.all}, requests: asked.requests};

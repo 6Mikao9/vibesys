@@ -20,6 +20,7 @@ export function runsKnown(state: SidebarState, machines: readonly HostKey[] | nu
   if (machines.some(host => !state.listings.some(listing => listing.host === host))) {
     return 'unknown';
   }
+  if (Object.values(state.allRuns.projects).some(slot => slot.kind === 'failed')) return 'some';
   const loading = Object.values(state.allRuns.projects).some(slot => slot.kind === 'loading');
   return loading ? 'unknown' : 'none';
 }

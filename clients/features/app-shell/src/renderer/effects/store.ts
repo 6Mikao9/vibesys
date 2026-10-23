@@ -9,6 +9,7 @@ import {createStore, type Store} from '@vibesys/store';
 import {
   initialSidebar,
   liveRows,
+  projectRunGaps,
   type ShellActions,
   type SidebarAction,
   type SidebarRequest,
@@ -52,6 +53,7 @@ function perform(
         host,
         project,
         runs: result.ok ? result.value : null,
+        ...(result.ok ? {} : {error: result.error}),
       }),
     );
     return;
@@ -82,7 +84,9 @@ export function createSidebarStore(
   // While any run is live its digest is due again after each interval; the next waits on this one.
   let refreshing = false;
   const keepLiveDigestsFresh = (): void => {
-    if (refreshing || liveRows(store.getState()).length === 0) return;
+    const state = store.getState();
+    if (refreshing || (liveRows(state).length === 0 && projectRunGaps(state.allRuns).length === 0))
+      return;
     refreshing = true;
     schedule(() => {
       refreshing = false;

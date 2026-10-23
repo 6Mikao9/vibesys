@@ -95,6 +95,7 @@ def started(projection: Projection) -> None:
     overview = data.overview
     objective = None if overview is None else overview.objective
     evaluator = None if overview is None else overview.benchmarks.evaluator
+    projection.primary_series = None if objective is None else objective.metric
     objectives = (
         []
         if objective is None

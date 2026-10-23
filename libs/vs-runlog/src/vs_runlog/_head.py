@@ -3,6 +3,8 @@
 from vs_proto.api import (
     AgentTurnAttrs,
     Direction,
+    GateAttrs,
+    GateSubject,
     HeadlineObjective,
     Keyframe,
     RunHead,
@@ -52,7 +54,10 @@ def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead 
             head.objective.best_value = (
                 max(values) if objective.direction == Direction.MAX else min(values)
             )
-            input_value = next((p.value for p in readings if not p.has_field("span")), None)
+            input_value = next(
+                (p.value for p in readings if not p.has_field("span") or _is_input(state, p.span)),
+                None,
+            )
             if input_value is not None:
                 head.objective.input_value = input_value
             head.chart_points = readings[-256:]
@@ -74,3 +79,13 @@ def _add_usage(total: TokenUsage | None, usage: TokenUsage) -> TokenUsage:
         if usage.has_field(field):
             setattr(result, field, (getattr(result, field) or 0) + value)
     return result
+
+
+def _is_input(state: Keyframe, span_id: str) -> bool:
+    history = state.spans.get(span_id)
+    if history is None or not history.versions:
+        return False
+    span = history.versions[-1].span
+    if span is None or span.label is None or span.label.kind != "gate" or span.label.attrs is None:
+        return False
+    return GateAttrs.from_binary(span.label.attrs.value).subject is GateSubject.INPUT
