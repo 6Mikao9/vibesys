@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 from vibesys.events import CoreEvent, CoreEventType
@@ -26,6 +27,8 @@ ANNOUNCEMENTS = frozenset(
 # Chat is a session's own log, not the run's: the journeys seed it through the session tail.
 SESSION_FACTS = frozenset({"chat", "chat_thread_created", "steer_proposed"})
 # The frontend envelope's decorations, which no core event carries.
+# Any wall-clock time is past this many seconds since the epoch; a synthetic run counts from zero.
+_WALL_SECONDS = 1_000_000_000
 DECORATIONS = ("protocol_version", "span_id", "diagnostic", "chat_thread_id")
 
 
@@ -94,12 +97,32 @@ def _units(fixture: dict[str, Any]) -> dict[str, str]:
     return units
 
 
+def _wall_clock_spans(fixture: dict[str, Any]) -> bool:
+    """Whether every span of the fixture is stamped with wall-clock seconds."""
+    starts = [
+        event["data"]["span"]["started_at"]
+        for event in fixture["events"]
+        if (event.get("data") or {}).get("span")
+    ]
+    return bool(starts) and all(start > _WALL_SECONDS for start in starts)
+
+
 def replay_of(fixture: dict[str, Any]) -> ClientReplay:
     """The records, blobs and streams the shipping projection makes of a fixture's events."""
     replay = ClientReplay()
     units = _units(fixture)
     streams: dict[str, bytearray] = {}
-    state = MappingState(str(fixture["runId"]), native_intents=True, project_root="/work/queue-rs")
+    # A recorded run's spans carry wall-clock times, as a live run's do: its run clock starts at its
+    # first event. Synthetic fixtures count seconds from zero and are left as they are.
+    wall = _wall_clock_spans(fixture)
+    origin = datetime.fromisoformat(fixture["events"][0]["timestamp"]).timestamp()
+    state = MappingState(
+        str(fixture["runId"]),
+        native_intents=True,
+        project_root="/work/queue-rs",
+        wall_span_clock=wall,
+        clock_epochs=((origin, 0),) if wall else (),
+    )
     for original in fixture["events"]:
         event = core_event(original)
         if event is None:
