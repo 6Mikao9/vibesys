@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from entrypoints.host import run
@@ -53,8 +54,10 @@ def test_bulk_command_reports_skips_failures_and_summary(
     empty = Project.log_directory_for(root, "empty")
     empty.mkdir(parents=True)
     (empty / "core-events.jsonl").touch()
+    for journal in (directory / "core-events.jsonl", empty / "core-events.jsonl"):
+        os.utime(journal, (100, 100))
     code, output, error = run(
-        ["convert-runs", "--project", "project"], cwd=tmp_path, clock=ManualClock()
+        ["convert-runs", "--project", "project"], cwd=tmp_path, clock=ManualClock(start=1000)
     )
     assert code == 1
     assert error == ""

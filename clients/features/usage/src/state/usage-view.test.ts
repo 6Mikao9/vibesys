@@ -121,12 +121,13 @@ describe('usageView', () => {
       const loaded = loadedBy(seed);
       const view = usageView(loaded);
       const spent = sumCents(loaded.sources.map(source => source.usage.spentUsd));
-      const partial =
+      expect(view.tiles[0]?.figure).toBe(dollars(spent / 100));
+      // A total over less than the whole is never bare: a status chip says what is missing.
+      const incomplete =
         loaded.unreachable > 0 ||
         loaded.unsupported > 0 ||
         loaded.sources.some(source => source.leftOut > 0 || source.usage.missingRuns.length > 0);
-      expect(view.tiles[0]?.figure).toBe(`${dollars(spent / 100)}${partial ? ' (partial)' : ''}`);
-      expect(view.tiles.every(tile => tile.figure.includes('(partial)') === partial)).toBe(true);
+      if (incomplete) expect(view.status.length).toBeGreaterThan(0);
       expect(sumCents(view.runs.map(run => run.costUsd))).toBe(spent);
       const omitted = view.agentsOmitted;
       const agents = sumCents(view.agents.map(agent => agent.costUsd));
@@ -326,7 +327,6 @@ describe('usageView', () => {
           usage: {
             ...base,
             spentUsd: 12,
-            missingRuns: [],
             spendPerHourUsd: 1.25,
             unpricedTurns: 0,
             turns: 7,

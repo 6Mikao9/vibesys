@@ -10,6 +10,7 @@ from vibesys.run.runlog_conversion import (
     convert_runs,
     iter_conversions,
     observe_conversion,
+    prelock_writer_is_live,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "convert_runs",
     "iter_conversions",
     "observe_conversion",
+    "prelock_writer_is_live",
 ]

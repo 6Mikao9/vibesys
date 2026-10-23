@@ -154,29 +154,25 @@ function tiles(loaded: UsageLoaded): readonly UsageTile[] {
     NO_TOKENS,
   );
   const total = totalTokens(tally);
-  const partial =
-    loaded.unreachable > 0 ||
-    loaded.unsupported > 0 ||
-    loaded.sources.some(source => source.leftOut > 0 || source.usage.missingRuns.length > 0);
   return [
     {
       name: 'Spent',
-      figure: `${dollars(spent)}${partial ? ' (partial)' : ''}`,
+      figure: dollars(spent),
       detail: turnsWords(turns),
     },
     {
       name: 'Per hour now',
-      figure: `${dollars(sum(answers.map(answer => answer.spendPerHourUsd)))}/h${partial ? ' (partial)' : ''}`,
+      figure: `${dollars(sum(answers.map(answer => answer.spendPerHourUsd)))}/h`,
       detail: null,
     },
     {
       name: 'Tokens',
-      figure: `${total === null ? UNKNOWN : compactTokens(total)}${partial ? ' (partial)' : ''}`,
+      figure: total === null ? UNKNOWN : compactTokens(total),
       detail: tokensDetail(tally),
     },
     {
       name: 'Per new best',
-      figure: `${bests === 0 ? NONE : dollars(spent / bests)}${partial ? ' (partial)' : ''}`,
+      figure: bests === 0 ? NONE : dollars(spent / bests),
       detail: bests === 0 ? null : `${bests} new ${bests === 1 ? 'best' : 'bests'}`,
     },
   ];

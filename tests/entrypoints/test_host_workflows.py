@@ -224,6 +224,8 @@ def test_saved_run_conversion_is_a_registered_mutation(host_root: Path, sim: Sim
             )
         ),
     )
+    # A run that just finished has no writer, however fresh its journal is.
+    journal.emit(CoreEventType.RUN_FINISHED)
     request = MutateRequest(
         checkout="/src/checkout",
         method=Oneof(

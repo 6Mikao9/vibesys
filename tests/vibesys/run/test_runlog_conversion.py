@@ -24,6 +24,7 @@ from vibesys.api.transport import (
     convert_run,
     convert_runs,
     iter_conversions,
+    prelock_writer_is_live,
 )
 from vibesys.events import (
     AgentOutputChunkData,
@@ -1070,3 +1071,43 @@ def test_conversion_recovers_generated_run_trees_after_kill_cancel_and_writer_ra
             if mode in {"stopped", "late-writer", "prelock-live", "prelock-future", "modern-live"}:
                 # A journal the converter saw whole, or a writer that finished, is fully mirrored.
                 assert len(records) == _mapped_records(tree.journal(run_id))
+
+
+@settings(max_examples=examples(pr=6, nightly=100))
+@given(
+    age=st.integers(min_value=-5000, max_value=5000),
+    writer=st.sampled_from(["lock-held", "lock-free", "no-lock"]),
+    ended=st.booleans(),
+)
+def test_liveness_is_decided_on_the_injected_clock_over_mtime_and_writer_state(
+    age: int, writer: str, *, ended: bool
+) -> None:
+    """A held lock is live; else an ended journal is not; else only a journal quiet for 300 s."""
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as env:
+        project, journal = journal_at(Path(temporary), env)
+        record_trace(journal)
+        if ended:
+            journal.emit(CoreEventType.RUN_FINISHED)
+        journal.close()
+        directory = Project.log_directory_for(project.root, "run-1")
+        if writer == "no-lock":
+            (directory / "run.lock").unlink()
+        now = 10_000
+        source = directory / "core-events.jsonl"
+        os.utime(source, (now - age, now - age))
+        lock = RunLock(directory / "run.lock") if writer == "lock-held" else None
+        try:
+            result = convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(start=now),
+                threads=SimThreads(),
+                install_sync=FakeFileSync(),
+            )
+        finally:
+            if lock is not None:
+                lock.close()
+        quiet = prelock_writer_is_live(modified=now - age, now=now, ended=ended) is False
+        live = writer == "lock-held" or (writer == "no-lock" and not quiet)
+        assert (result.status is ConversionStatus.SKIPPED) == live
+        assert prelock_writer_is_live(modified=now - age, now=now, ended=False) == (age < 300)

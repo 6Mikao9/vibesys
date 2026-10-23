@@ -223,12 +223,46 @@ def convert_run(
     return result
 
 
+_TERMINAL_EVENTS = frozenset({CoreEventType.RUN_FINISHED, CoreEventType.RUN_FAILED})
+_TAIL_BYTES = 1 << 16
+
+
+def prelock_writer_is_live(*, modified: float, now: float, ended: bool) -> bool:
+    """Whether a journal with no ``run.lock`` may still be written, judged on the injected clock.
+
+    A journal whose last event ended the run has no writer. Any other journal is live while its
+    modification time is within the quiet window of ``now``, or ahead of it (a skewed writer).
+    """
+    return not ended and now - modified < _PRELOCK_QUIET_SECONDS
+
+
+def _ends_with_terminal_event(journal: Path) -> bool:
+    """Whether the journal's last complete line is a run-ending event."""
+    with journal.open("rb") as stream:
+        stream.seek(0, 2)
+        size = stream.tell()
+        stream.seek(max(0, size - _TAIL_BYTES))
+        tail = stream.read()
+    lines = tail.rstrip().splitlines()
+    cut_off = len(tail) == _TAIL_BYTES and len(lines) == 1
+    if not lines or cut_off:
+        return False
+    event = decode_json(
+        lines[-1], CoreEvent, source=str(journal), max_bytes=JOURNAL_EVENT_MAX_BYTES
+    )
+    return not isinstance(event, Unreadable) and event.type in _TERMINAL_EVENTS
+
+
 def _writer_is_live(directory: Path, clock: SleepingClock) -> bool:
-    """Probe modern writer ownership and conservatively defer recent pre-lock journals."""
+    """Probe modern writer ownership; judge a pre-lock journal by its last event and the clock."""
     path = directory / "run.lock"
     if not path.exists():
         journal = directory / "core-events.jsonl"
-        return journal.exists() and clock.now() - journal.stat().st_mtime < _PRELOCK_QUIET_SECONDS
+        return journal.exists() and prelock_writer_is_live(
+            modified=journal.stat().st_mtime,
+            now=clock.now(),
+            ended=_ends_with_terminal_event(journal),
+        )
     try:
         RunLock(path).close()
     except BlockingIOError:
