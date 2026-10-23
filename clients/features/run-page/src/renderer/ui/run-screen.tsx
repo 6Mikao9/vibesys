@@ -117,7 +117,6 @@ function reason(offer: Offer): {disabledReason?: string} {
 
 /** The chat panel the app hosts beside the run: whether it is open, the button's press, the panel. */
 export interface RunChatSlot {
-  readonly minimumMain?: 'wide';
   readonly open: boolean;
   readonly toggle: () => void;
   readonly panel: ReactNode;
@@ -133,11 +132,11 @@ function RunFacts(props: {readonly header: ReturnType<typeof headerView>}): JSX.
   const {header} = props;
   return (
     <>
-      <FactLine fit="parent" wrap>
+      <FactLine fit="parent">
         <Fact>
           <Chip label={header.status.label} tone={header.status.tone} dot />
         </Fact>
-        <Fact title={header.subtitle}>
+        <Fact shrink title={header.subtitle}>
           <Text variant="code" tone="muted">
             {header.subtitle}
           </Text>
@@ -185,47 +184,49 @@ function Header(props: {
     {id: 'again', label: 'Run again with changes', press: () => dispatch({type: 'run-again'})},
   ];
   return (
-    <Row justify="between" align="start" wrap>
-      {/* Grown from no width: the actions keep the title's row and the title's lines wrap instead. */}
-      <Stack gap="space-2" grow>
-        <Text as="h1" variant="heading">
-          {header.title}
-        </Text>
-        <RunFacts header={header} />
-      </Stack>
-      <Row gap="space-2">
-        {props.toolbar}
-        {chat === undefined ? null : (
-          <Button
-            variant={chat.open ? 'primary' : 'secondary'}
-            icon="chat"
-            label="Chat"
-            expanded={chat.open}
-            press={chat.toggle}
-            {...(chat.unavailable === undefined ? {} : {disabledReason: chat.unavailable})}
-          />
-        )}
-        {header.pause.shown ? (
-          <Button
-            variant="secondary"
-            text="Pause"
-            press={() => dispatch({type: 'pause'})}
-            {...reason(header.pause)}
-          />
-        ) : null}
-        {header.pauseNow.shown ? (
-          <Button
-            variant="danger"
-            text="Pause now"
-            press={() => dispatch({type: 'ask-pause-now'})}
-            {...reason(header.pauseNow)}
-          />
-        ) : null}
-        {state.readOnly === true ? null : (
-          <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
-        )}
+    <Stack gap="space-2">
+      <Row justify="between" align="start">
+        {/* Grown from no width: the actions keep the title's row and the title's lines wrap instead. */}
+        <Stack gap="space-2" grow>
+          <Text as="h1" variant="heading">
+            {header.title}
+          </Text>
+          <RunFacts header={header} />
+        </Stack>
+        <Row gap="space-2">
+          {chat === undefined ? null : (
+            <Button
+              variant={chat.open ? 'primary' : 'secondary'}
+              icon="chat"
+              label="Chat"
+              expanded={chat.open}
+              press={chat.toggle}
+              {...(chat.unavailable === undefined ? {} : {disabledReason: chat.unavailable})}
+            />
+          )}
+          {header.pause.shown ? (
+            <Button
+              variant="secondary"
+              text="Pause"
+              press={() => dispatch({type: 'pause'})}
+              {...reason(header.pause)}
+            />
+          ) : null}
+          {header.pauseNow.shown ? (
+            <Button
+              variant="danger"
+              text="Pause now"
+              press={() => dispatch({type: 'ask-pause-now'})}
+              {...reason(header.pauseNow)}
+            />
+          ) : null}
+          {state.readOnly === true ? null : (
+            <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
+          )}
+        </Row>
       </Row>
-    </Row>
+      {props.toolbar}
+    </Stack>
   );
 }
 
@@ -480,11 +481,7 @@ export function RunScreen(props: {
 }): JSX.Element {
   const {chat, ...rest} = props;
   return (
-    <Dock
-      label="Chat"
-      {...(chat?.minimumMain ? {minimumMain: chat.minimumMain} : {})}
-      side={chat?.open === true ? chat.panel : null}
-    >
+    <Dock label="Chat" side={chat?.open === true ? chat.panel : null}>
       <RunScreenBody {...rest} chat={chat} />
     </Dock>
   );

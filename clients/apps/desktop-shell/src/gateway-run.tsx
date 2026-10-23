@@ -82,7 +82,7 @@ export function GatewayRun(props: {
         else if (action.type === 'open-window') props.navigation.openWindow();
         else page.dispatch(action);
       }}
-      chat={{...sessions, minimumMain: 'wide'}}
+      chat={sessions}
       toolbar={intents.controls}
       supplemental={
         snapshot.context.error ? <Text tone="err">{snapshot.context.error}</Text> : null
