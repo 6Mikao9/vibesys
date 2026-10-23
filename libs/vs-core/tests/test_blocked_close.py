@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
-from hypothesis import example, given, settings
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -492,3 +492,52 @@ def test_the_executors_next_answer_to_a_record_the_close_ended_is_judged_like_a_
     ]
     at_the_end, after_it = (_judged(run, answer) for answer in answers)
     assert at_the_end == after_it
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=20, nightly=200))
+@example(accepted=False, named=True, answered=True, same_number=True)
+@example(accepted=False, named=True, answered=True, same_number=False)
+@given(
+    accepted=st.booleans(),
+    named=st.booleans(),
+    answered=st.booleans(),
+    same_number=st.booleans(),
+)
+def test_an_executor_that_only_says_it_cannot_tell_never_contradicts_a_record_the_close_ended(
+    *, accepted: bool, named: bool, answered: bool, same_number: bool
+) -> None:
+    """A restarted executor finds the request begun and unsealed, and says nothing more.
+
+    It reports the effect as begun with no recorded result: unknown, unaccepted, naming no
+    resource. Whatever the closed record held (a resource it had named, an acceptance, a
+    number of its own), that answer claims nothing for or against it, so the record stays as it
+    was and the late answer cannot halt the host that resumed the run (the typed contradiction).
+    """
+    state = _record(
+        core.LifecycleClass.IDEMPOTENT_WRITE,
+        _SILENT_ANSWERS[0],
+        accepted=accepted,
+        named=named,
+        answered=answered,
+    )
+    run = _close_after(state, restart=False, late_by=1.0, stop_first=True)
+    closed = _original(run)
+    ended = closed.observation
+    assert ended is not None
+    # A record nothing waited on is left blocked by the close, not ended by it.
+    assume(closed.phase == core.RequestPhase.COMPLETED)
+    blank = core.Observation(
+        event_id=core.EventId(root="later-host:begun-unsealed"),
+        request_id=closed.request_id,
+        scope=closed.request.scope,
+        admission_id=closed.request.admission_id,
+        sequence=ended.sequence + (0 if same_number else 1),
+        observed_at=run.run.now_at,
+        status=core.ObservationStatus.UNKNOWN,
+        accepted=False,
+        terminal=False,
+        diagnostic="the effect began and has no recorded result",
+    )
+    after = core.step(run, core.RequestObserved(observation=blank)).state
+    assert _original(after) == closed

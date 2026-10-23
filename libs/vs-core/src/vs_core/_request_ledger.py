@@ -575,6 +575,23 @@ _DID_NOT_SUCCEED = frozenset(
 )
 
 
+def _blank(answer: Observation) -> bool:
+    """Whether an answer is an executor saying it cannot tell, and nothing else.
+
+    Unknown, not accepted, not finished, naming no resource, child or release: a restarted
+    executor that finds a request begun and unsealed reports exactly this. It proves nothing
+    for or against the record it is about, so it can contradict none.
+    """
+    return (
+        answer.status == ObservationStatus.UNKNOWN
+        and not answer.accepted
+        and not answer.terminal
+        and not answer.released
+        and answer.resource_id is None
+        and not answer.children
+    )
+
+
 def _says_nothing_of(closed: Observation, later: Observation) -> bool:
     """Whether a late answer that shares the closed record's number only says it cannot tell.
 
@@ -590,10 +607,13 @@ def _claims_nothing(closed: Observation, later: Observation) -> bool:
     """Whether a later answer is an executor that cannot say, about a closed record.
 
     An executor that cannot say reports itself unaccepted, even of a job it once took (it lost
-    its record of a submission that never reached the cluster). Such an answer claims nothing,
-    so it neither contradicts the disposition nor proves a release.
+    its record of a submission that never reached the cluster), or says only that it cannot
+    tell (`_blank`: a request it finds begun and unsealed). Such an answer claims nothing, so it
+    neither contradicts the disposition nor proves a release.
     """
-    return later.status == ObservationStatus.UNKNOWN and later.accepted != closed.accepted
+    return later.status == ObservationStatus.UNKNOWN and (
+        later.accepted != closed.accepted or _blank(later)
+    )
 
 
 def _agrees(closed: Observation, later: Observation) -> bool:
