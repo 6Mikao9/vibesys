@@ -166,7 +166,6 @@ def fake_search[C](
     spans: tuple[SpanKind, ...] = (),
     *,
     snapshot: type[Any] | None = None,
-    resumed_under: Callable[[Any, C], Any] | None = None,
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """``@search`` over the fake namespace: renders are answered by ``FlowRun``."""
     return search(
@@ -176,7 +175,6 @@ def fake_search[C](
         roles=roles,
         spans=spans,
         snapshot=snapshot,
-        resumed_under=resumed_under,
     )
 
 

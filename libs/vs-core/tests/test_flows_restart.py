@@ -8,6 +8,7 @@ the results of the decisions that were in flight are dropped.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
@@ -252,6 +253,7 @@ class Resting(core.Value):
 
 
 def _taking_the_width(snapshot: Resting, config: Config) -> Resting:
+    del snapshot
     return Resting(width=config.width)
 
 
@@ -267,9 +269,8 @@ def _widths_seen_after_a_restart(
         await ask(ctx, "c")
 
     def search_of(root: Callable[..., Coroutine[Any, Any, None]]) -> SearchDef[Config]:
-        return fake_search("flows", Config, ROLES, snapshot=Resting, resumed_under=resumed_under)(
-            root
-        )
+        declared = fake_search("flows", Config, ROLES, snapshot=Resting)(root)
+        return replace(declared, resumed_under=resumed_under)
 
     run = FlowRun.start(search_of(v1), Config(width=recorded))
     stale = run.expect_turn("a")
