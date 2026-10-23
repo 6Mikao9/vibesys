@@ -103,6 +103,10 @@ button.vs-crumb:focus-visible {
 /* Too narrow for a list and the idea it opened side by side (the detail would wrap words and clip
    its tabs): the opened pane takes the row, and its close button brings the list back. */
 @container (max-width: 640px) {
+  /* The Ideas list also carries the running ideas; keep it readable when Now cannot fit beside it. */
+  .vs-panes > .vs-pane[data-width="master"] + .vs-pane[data-width="list"] {
+    display: none;
+  }
   .vs-panes > .vs-pane[data-width="master"]:has(+ .vs-pane[data-width="fill"]) {
     display: none;
   }
