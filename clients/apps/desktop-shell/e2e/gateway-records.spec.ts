@@ -111,7 +111,8 @@ test('the host switch survives missing legacy history and usage retains its mode
   await expect(toggle).not.toBeChecked();
   await expect(page.getByRole('button', {name: 'Pause', exact: true})).toHaveCount(0);
   await toggle.check();
-  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeVisible();
+  await expect(page.getByText('Could not load this run', {exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toHaveCount(0);
 });
 
 test('store Run app-window contact sheet', async ({page}) => {

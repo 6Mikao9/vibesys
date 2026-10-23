@@ -233,11 +233,22 @@ test('the run level says what will appear before anything is measured, and keeps
   await expect(page.getByText('No ideas yet')).toBeVisible();
 });
 
-test('every ended run offers Resume', async ({page}) => {
+test('an ended run offers Resume only when it is resumable', async ({page}) => {
   const stopped = server('stopped', {
     outcome: 'stopped',
     reason: 'Stopped by you.',
     resumable: false,
+  });
+  await open(page, {...SEED, listings: [listed([], [stopped])]});
+  await expect(page.getByText('Stopped by you.')).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
+});
+
+test('a resumable ended run offers Resume and View logs', async ({page}) => {
+  const stopped = server('stopped', {
+    outcome: 'stopped',
+    reason: 'Stopped by you.',
+    resumable: true,
   });
   await open(page, {...SEED, listings: [listed([], [stopped])]});
   await expect(page.getByText('Stopped by you.')).toBeVisible();
