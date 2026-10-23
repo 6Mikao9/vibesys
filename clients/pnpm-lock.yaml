@@ -427,9 +427,6 @@ importers:
       '@vibesys/run-fixtures':
         specifier: workspace:*
         version: link:../../libs/run-fixtures
-      '@vibesys/transport':
-        specifier: workspace:*
-        version: link:../../libs/transport
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
