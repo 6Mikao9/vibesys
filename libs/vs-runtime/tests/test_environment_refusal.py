@@ -126,7 +126,16 @@ def test_a_benchmark_whose_host_refused_is_a_refusal_whatever_it_wrote(
     )
 
 
-@given(output=_REFUSALS, exit_code=st.integers(min_value=1, max_value=255))
+# The statuses of a stage the clock or a kill stopped (124, 137) judge nothing whatever the
+# evaluator printed: `test_verdict_charges_candidate` covers them.
+_STOPPED = (124, 137)
+
+
+@given(
+    output=_REFUSALS,
+    exit_code=st.integers(min_value=1, max_value=255).filter(lambda code: code not in _STOPPED),
+)
+@example(output=_DISK, exit_code=1)
 def test_an_accuracy_check_that_failed_for_any_other_reason_is_the_candidates(
     output: str, exit_code: int
 ) -> None:

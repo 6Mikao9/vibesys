@@ -19,11 +19,7 @@ from vs_runtime.api.infrastructure import (
     signal_of,
 )
 
-_KINDS = (
-    BenchmarkFailureKind.WORKLOAD,
-    BenchmarkFailureKind.INFRASTRUCTURE,
-    BenchmarkFailureKind.AMBIGUOUS,
-)
+_KINDS = tuple(BenchmarkFailureKind)
 _BOUND = st.integers(min_value=1, max_value=5)
 _SIGNALS = st.sampled_from(TerminalSignal)
 _RECORDS = st.sampled_from(RecordState)
@@ -193,7 +189,9 @@ def test_a_plan_rejects_a_cause_that_is_not_a_regular_expression(causes: list[st
 @given(kinds=st.lists(st.sampled_from((*_KINDS, None)), max_size=5))
 def test_a_job_failure_follows_its_worst_stage(kinds: list[BenchmarkFailureKind | None]) -> None:
     failure = job_failure(kinds)
-    if not kinds or BenchmarkFailureKind.INFRASTRUCTURE in kinds:
+    machinery = (BenchmarkFailureKind.INFRASTRUCTURE, BenchmarkFailureKind.ENVIRONMENT_REFUSED)
+    if not kinds or any(kind in kinds for kind in machinery):
+        # a host's refusal reaches core, when no backend waited it out, as the machinery's
         assert failure is MeasurementFailure.INFRASTRUCTURE
     elif None in kinds:
         assert failure is MeasurementFailure.UNKNOWN

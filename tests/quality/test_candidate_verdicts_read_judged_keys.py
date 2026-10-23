@@ -30,7 +30,10 @@ def _product_files() -> list[Path]:
 
 
 def _reads_trusted_keys(path: Path) -> bool:
-    tree = ast.parse(path.read_text())
+    text = path.read_text()
+    if "trusted_keys" not in text:
+        return False
+    tree = ast.parse(text)
     return any(
         isinstance(node, ast.Call)
         and (
