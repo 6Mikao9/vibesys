@@ -2,7 +2,7 @@
 # with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
 # every saved document, or raises the version.
 shape RuntimeRecord[FlowState]
-version 42.1
+version 43.1
 $root {"additionalProperties":false,"type":"object"}
 $root.delivery_cursor required {"minimum":0,"type":"integer"}
 $root.envelope required {"$ref":"#/$defs/RunEnvelope_FlowState_"}
@@ -369,17 +369,11 @@ Comparison {"additionalProperties":false,"type":"object"}
 Comparison.base required {"$ref":"#/$defs/RevisionRef"}
 Comparison.base_input required {"minLength":1,"type":"string"}
 Comparison.base_samples required {"minimum":0,"type":"integer"}
-Comparison.base_value required {"type":"number"}
 Comparison.candidate required {"$ref":"#/$defs/RevisionRef"}
 Comparison.candidate_input required {"minLength":1,"type":"string"}
 Comparison.candidate_samples required {"minimum":0,"type":"integer"}
-Comparison.candidate_value required {"type":"number"}
-Comparison.direction required {"enum":["max","min"],"type":"string"}
-Comparison.metric required {"minLength":1,"type":"string"}
-Comparison.noise required {"minimum":0.0,"type":"number"}
-Comparison.ratio required {"type":"number"}
+Comparison.objectives required {"items":{"$ref":"#/$defs/ObjectiveComparison"},"minItems":1,"type":"array"}
 Comparison.scope required {"$ref":"#/$defs/Scope"}
-Comparison.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 Comparison.verdict required {"$ref":"#/$defs/ComparisonVerdict"}
 ComparisonSettled {"additionalProperties":false,"type":"object"}
 ComparisonSettled.base_input required {"minLength":1,"type":"string"}
@@ -535,6 +529,9 @@ EvaluationHistoryAvailability {"enum":["complete","unavailable"],"type":"string"
 EvaluationHistoryCursor {"additionalProperties":false,"type":"object"}
 EvaluationHistoryCursor.ordinal optional {"$ref":"#/$defs/Count","default":0}
 EvaluationHistoryCursor.submission_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
+EvaluationLease {"additionalProperties":false,"type":"object"}
+EvaluationLease.key required {"minLength":1,"type":"string"}
+EvaluationLease.retain optional {"default":false,"type":"boolean"}
 EvaluationRequest {"discriminator":{"mapping":{"cancel_owned_job":"#/$defs/CancelOwnedJob","collect_evidence":"#/$defs/CollectEvidence","inspect_owned_job":"#/$defs/InspectOwnedJob","observe_owned_job":"#/$defs/ObserveOwnedJob","submit_measurement":"#/$defs/SubmitMeasurement"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/SubmitMeasurement"},{"$ref":"#/$defs/ObserveOwnedJob"},{"$ref":"#/$defs/InspectOwnedJob"},{"$ref":"#/$defs/CancelOwnedJob"},{"$ref":"#/$defs/CollectEvidence"}]}
 EvaluationStageOutcome {"enum":["passed","failed","unknown"],"type":"string"}
 EvaluationStageResult {"additionalProperties":false,"type":"object"}
@@ -557,6 +554,9 @@ EvaluationTerminalFacts.accuracy_passed optional {"default":false,"type":"boolea
 EvaluationTerminalFacts.failed_benchmark optional {"anyOf":[{"$ref":"#/$defs/BenchmarkFailure"},{"type":"null"}],"default":null}
 EvaluationTerminalFacts.stages optional {"default":[],"items":{"$ref":"#/$defs/EvaluationStageResult"},"type":"array"}
 EvaluationTerminalFacts.traceback_signature optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
+EvaluationTiming {"additionalProperties":false,"type":"object"}
+EvaluationTiming.admitted_at optional {"anyOf":[{"minimum":0.0,"type":"number"},{"type":"null"}],"default":null}
+EvaluationTiming.queued_at required {"minimum":0.0,"type":"number"}
 EventCursor {"additionalProperties":false,"type":"object"}
 EventCursor.sequence required {"$ref":"#/$defs/Count"}
 EventId {"additionalProperties":false,"type":"object"}
@@ -584,7 +584,7 @@ EvidenceRef.kind required {"$ref":"#/$defs/EvidenceKind"}
 EvidenceRef.observation_sequence required {"$ref":"#/$defs/Count"}
 EvidenceRef.provenance required {"enum":["trusted","self-report"],"type":"string"}
 EvidenceRef.purpose required {"enum":["baseline","local-validation","official","profile"],"type":"string"}
-EvidenceRef.reading optional {"anyOf":[{"$ref":"#/$defs/Reading"},{"type":"null"}],"default":null}
+EvidenceRef.readings optional {"default":[],"items":{"$ref":"#/$defs/Reading"},"type":"array"}
 EvidenceRef.reused_from optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 EvidenceRef.scope required {"$ref":"#/$defs/Scope"}
 EvidenceRef.source_request required {"$ref":"#/$defs/RequestId"}
@@ -884,6 +884,7 @@ JobObserved.progress optional {"anyOf":[{"$ref":"#/$defs/JobProgress"},{"type":"
 JobObserved.resource_id required {"$ref":"#/$defs/ResourceId"}
 JobProgress {"additionalProperties":false,"type":"object"}
 JobProgress.estimated_start_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
+JobProgress.evaluation_timing optional {"anyOf":[{"$ref":"#/$defs/EvaluationTiming"},{"type":"null"}],"default":null}
 JobProgress.observation_sequence required {"$ref":"#/$defs/Count"}
 JobProgress.observed_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 JobProgress.pending_reason optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
@@ -956,6 +957,7 @@ Measure.compared optional {"default":false,"type":"boolean"}
 Measure.decision_id required {"$ref":"#/$defs/DecisionId"}
 Measure.kind optional {"const":"measure","default":"measure","type":"string"}
 Measure.plan required {"$ref":"#/$defs/MeasurementPlan"}
+Measure.reuse_only optional {"default":false,"type":"boolean"}
 Measure.scope required {"$ref":"#/$defs/Scope"}
 MeasurementFailure {"enum":["workload","infrastructure","ambiguous","unknown","run_environment_unavailable"],"type":"string"}
 MeasurementFinished {"additionalProperties":false,"type":"object"}
@@ -980,6 +982,7 @@ MeasurementPlan.accuracy_stage optional {"anyOf":[{"minLength":1,"type":"string"
 MeasurementPlan.candidate required {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"$ref":"#/$defs/SnapshotResultRef"}]}
 MeasurementPlan.dedicated_measurement_resources optional {"default":false,"type":"boolean"}
 MeasurementPlan.environment_digest required {"type":"string"}
+MeasurementPlan.evaluation_lease optional {"anyOf":[{"$ref":"#/$defs/EvaluationLease"},{"type":"null"}],"default":null}
 MeasurementPlan.evaluator_digest required {"type":"string"}
 MeasurementPlan.measured_input optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
 MeasurementPlan.policy required {"enum":["ordered","parallel"],"type":"string"}
@@ -995,6 +998,7 @@ MeasurementRequested.compared optional {"default":false,"type":"boolean"}
 MeasurementRequested.decision_id required {"$ref":"#/$defs/DecisionId"}
 MeasurementRequested.kind optional {"const":"measurement_requested","default":"measurement_requested","type":"string"}
 MeasurementRequested.plan required {"$ref":"#/$defs/MeasurementPlan"}
+MeasurementRequested.reuse_only optional {"default":false,"type":"boolean"}
 MeasurementRequested.scope required {"$ref":"#/$defs/Scope"}
 MeasurementResult {"additionalProperties":false,"type":"object"}
 MeasurementResult.decision_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -1029,7 +1033,25 @@ MessageDelivered.kind optional {"const":"message_delivered","default":"message_d
 MessageDropped {"additionalProperties":false,"type":"object"}
 MessageDropped.drop required {"$ref":"#/$defs/InputDropped"}
 MessageDropped.kind optional {"const":"message_dropped","default":"message_dropped","type":"string"}
+NoiseSample {"additionalProperties":false,"type":"object"}
+NoiseSample.value required {"type":"number"}
 NullValue {"type":"null"}
+ObjectiveComparison {"additionalProperties":false,"type":"object"}
+ObjectiveComparison.base_value required {"type":"number"}
+ObjectiveComparison.candidate_value required {"type":"number"}
+ObjectiveComparison.direction required {"enum":["max","min"],"type":"string"}
+ObjectiveComparison.metric required {"minLength":1,"type":"string"}
+ObjectiveComparison.noise required {"minimum":0.0,"type":"number"}
+ObjectiveComparison.ratio required {"type":"number"}
+ObjectiveComparison.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
+ObjectiveComparison.verdict required {"$ref":"#/$defs/ComparisonVerdict"}
+ObjectiveNoise {"additionalProperties":false,"type":"object"}
+ObjectiveNoise.baseline_values optional {"default":[],"items":{"$ref":"#/$defs/NoiseSample"},"type":"array"}
+ObjectiveNoise.floor required {"exclusiveMaximum":1.0,"minimum":0.0,"type":"number"}
+ObjectiveNoise.provenance required {"minLength":1,"type":"string"}
+ObjectiveNoise.relative_noise required {"exclusiveMaximum":1.0,"minimum":0.0,"type":"number"}
+ObjectiveNoise.revision optional {"default":1,"minimum":1,"type":"integer"}
+ObjectiveNoise.schema_version optional {"default":1,"minimum":1,"type":"integer"}
 Observation {"additionalProperties":false,"type":"object"}
 Observation.accepted optional {"default":false,"type":"boolean"}
 Observation.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -1527,7 +1549,7 @@ Sample.gates required {"items":{"type":"string"},"type":"array"}
 Sample.host required {"minLength":1,"type":"string"}
 Sample.measured_input required {"minLength":1,"type":"string"}
 Sample.observed_at required {"minimum":0.0,"type":"number"}
-Sample.reading required {"$ref":"#/$defs/Reading"}
+Sample.readings required {"items":{"$ref":"#/$defs/Reading"},"minItems":1,"type":"array"}
 Sample.run required {"$ref":"#/$defs/RequestId"}
 Sample.scope required {"$ref":"#/$defs/Scope"}
 SchedulingState {"additionalProperties":false,"type":"object"}
@@ -1793,6 +1815,7 @@ SubmitMeasurement.scope required {"$ref":"#/$defs/Scope"}
 TaskObjective {"additionalProperties":false,"type":"object"}
 TaskObjective.direction required {"enum":["max","min"],"type":"string"}
 TaskObjective.name required {"minLength":1,"type":"string"}
+TaskObjective.noise optional {"anyOf":[{"$ref":"#/$defs/ObjectiveNoise"},{"type":"null"}],"default":null}
 TaskStage {"additionalProperties":false,"type":"object"}
 TaskStage.execution_seconds required {"minimum":0.0,"type":"number"}
 TaskStage.stage_id required {"minLength":1,"type":"string"}

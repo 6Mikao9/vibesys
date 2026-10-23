@@ -40,7 +40,6 @@ from vibesys.orchestration.dynamic.search.api import (
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate, core_protocol_variables
 from vs_core.api import (
-    ComparisonPolicy,
     EvidenceId,
     EvidenceKind,
     InvocationId,
@@ -452,16 +451,10 @@ def variables(
     agent_evaluation: bool = False,
     notes: str = "",
     agent_git_writable: bool = True,
-    noise_declared: bool = False,
 ) -> dict[str, object]:
-    """What the render owner passes the template: run-level variables, then the context's own.
-
-    ``noise_declared`` is whether the run's task declares its per-run noise, which the core
-    protocol's comparison rule reads.
-    """
-    policy = ComparisonPolicy(noise_floor=0.02 if noise_declared else 0.0)
+    """What the render owner passes the template: run-level variables, then the context's own."""
     return {
-        **core_protocol_variables(policy),
+        **core_protocol_variables(),
         **run_prompt_variables(
             domain_sections=EMPTY_DOMAIN_SECTIONS,
             objective=OBJECTIVE,

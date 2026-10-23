@@ -159,7 +159,7 @@ async def test_host_profile_stores_named_revision_readings_without_promotion_fac
         facts = target.evaluation_result
         assert facts is not None
         assert not facts.accuracy_passed
-        assert ref.reading is None
+        assert ref.readings == ()
         entry = ReceiptEvidenceLedger(store).lookup(ref.key)
         assert entry is not None
         assert entry.purpose == "profile"

@@ -574,7 +574,9 @@ class Host:
                     status=ObservationStatus.FAILED
                     if self._benchmark_fails(stage.stage_id, candidate, is_input=is_input)
                     else self._status_of(stage.stage_id, is_input=is_input),
-                    reading=_HEADLINE if _KINDS[stage.stage_id] is EvidenceKind.BENCHMARK else None,
+                    readings=(_HEADLINE,)
+                    if _KINDS[stage.stage_id] is EvidenceKind.BENCHMARK
+                    else (),
                 )
                 for index, stage in enumerate(plan.stages)
             )
@@ -612,7 +614,7 @@ class Host:
                 environment_digest=refs[0].environment_digest,
                 provenance="trusted",
                 status=ObservationStatus.SUCCEEDED,
-                reading=_HEADLINE,
+                readings=(_HEADLINE,),
             )
             for index, _ in enumerate(self.input_samples)
             if refs

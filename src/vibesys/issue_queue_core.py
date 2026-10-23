@@ -64,7 +64,6 @@ from vs_core.api import (
     MeasurementRecipe,
     OperationRegistry,
     RevisionRef,
-    policy_of,
 )
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_prompts.api import TemplateRenderer
@@ -220,7 +219,7 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         facts=facts,
         limits=limits_for(budget(config), context),
         deadline_seconds=run_deadline_at(context.max_run_seconds),
-        prompt_variables=core_protocol_variables(policy_of(facts))
+        prompt_variables=core_protocol_variables()
         | {
             "facts": context.facts,
             "objective": facts.objective,

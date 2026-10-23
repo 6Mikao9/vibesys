@@ -452,20 +452,22 @@ async def test_repeated_runs_of_one_input_aggregate_and_a_lucky_run_is_not_picke
         assert len(values) in (4, 5), "the agent's runs, and one more only when needed"
         last = _final(played)
         assert last.candidate_samples == len(values)
-        assert last.candidate_value == pytest.approx(sum(values) / len(values))
-        assert last.candidate_value != max(values)
+        assert last.objectives[0].candidate_value == pytest.approx(sum(values) / len(values))
+        assert last.objectives[0].candidate_value != max(values)
         state = played.process.shell.record.envelope.core
         (answer,) = (
             item
             for item in state.evaluation.evidence
             if item.purpose == "official" and item.kind is EvidenceKind.BENCHMARK
         )
-        assert answer.reading is not None
-        assert answer.reading.value == last.candidate_value, "ranking reads what was compared"
+        assert answer.readings, "the official record states a reading"
+        assert answer.readings[0].value == last.objectives[0].candidate_value, (
+            "ranking reads what was compared"
+        )
         peeked = played.writer.seen[-1]
         assert peeked is not None
         assert peeked["candidate_samples"] == 4
-        assert peeked["candidate_value"] == pytest.approx(sum(values[:4]) / 4)
+        assert peeked["objectives"][0]["candidate_value"] == pytest.approx(sum(values[:4]) / 4)
 
 
 async def test_a_resumed_process_measures_with_the_identity_its_run_began_with(
@@ -533,7 +535,7 @@ async def test_the_run_events_carry_what_core_compared(tmp_path: Path) -> None:
             assert data.base_samples == comparison.base_samples
         told = played.writer.seen[-1]
         assert told is not None
-        assert told["ratio"] == emitted[-1].ratio
+        assert told["objectives"][0]["ratio"] == emitted[-1].objectives[0].ratio
 
 
 async def test_an_egregious_count_of_evaluations_is_warned_of_once_and_none_is_refused(
@@ -589,11 +591,11 @@ async def test_the_agent_is_told_only_the_comparison_its_fresh_base_samples_make
     async with play(tmp_path, script, setting=Setting(pace=STALING)) as played:
         state = played.process.shell.record.envelope.core
         assert len(played.cluster.runs[BASE_SPEED]) == 2, "the stale base was measured again"
-        assert {c.candidate_value for c in played.comparisons} >= {played.cluster.runs[130.0][0]}, (
-            "the first candidate, whose base went stale while it ran, was compared too"
-        )
+        assert {c.objectives[0].candidate_value for c in played.comparisons} >= {
+            played.cluster.runs[130.0][0]
+        }, "the first candidate, whose base went stale while it ran, was compared too"
         last = _final(played)
-        assert last.candidate_value == played.cluster.runs[140.0][0]
+        assert last.objectives[0].candidate_value == played.cluster.runs[140.0][0]
         assert last.base_samples == 1, "only the fresh base run counts"
         told = played.writer.seen[-1]
         assert told is not None, "the tool reported no comparison to the agent"

@@ -44,6 +44,7 @@ from vs_core.api import (
     AttemptId,
     Comparison,
     ComparisonVerdict,
+    ObjectiveComparison,
     RevisionRef,
     Scope,
     WaitEnd,
@@ -454,42 +455,54 @@ def test_a_resumed_turn_says_whether_its_wait_timed_out_and_what_was_retained(
         assert context.retained.revision_id.root in text
 
 
-_COMPARISONS = st.builds(
-    Comparison,
-    scope=st.just(Scope(owner=AttemptId(root="attempt"), generation=0)),
-    metric=st.sampled_from(["throughput", "latency_ms"]),
+_OBJECTIVES = st.builds(
+    ObjectiveComparison,
+    metric=st.sampled_from(["throughput", "latency_ms", "ttft_s"]),
     unit=st.sampled_from([None, "tokens/s", "ms"]),
     direction=st.sampled_from(["max", "min"]),
-    candidate=st.text("0123456789abcdef", min_size=7, max_size=12).map(RevisionRef.of_git_commit),
-    candidate_input=st.sampled_from(["sha256:one", "sha256:two", "sha256:three"]),
-    base=st.text("0123456789abcdef", min_size=7, max_size=12).map(RevisionRef.of_git_commit),
-    base_input=st.just("sha256:base"),
     candidate_value=st.floats(0.5, 1e4, allow_nan=False).map(lambda x: round(x, 3)),
     base_value=st.floats(0.5, 1e4, allow_nan=False).map(lambda x: round(x, 3)),
     ratio=st.floats(0.1, 10.0, allow_nan=False).map(lambda x: round(x, 4)),
     noise=st.floats(0.0, 1.0, allow_nan=False).map(lambda x: round(x, 4)),
     verdict=st.sampled_from(ComparisonVerdict),
+)
+_COMPARISONS = st.builds(
+    Comparison,
+    scope=st.just(Scope(owner=AttemptId(root="attempt"), generation=0)),
+    candidate=st.text("0123456789abcdef", min_size=7, max_size=12).map(RevisionRef.of_git_commit),
+    candidate_input=st.sampled_from(["sha256:one", "sha256:two", "sha256:three"]),
+    base=st.text("0123456789abcdef", min_size=7, max_size=12).map(RevisionRef.of_git_commit),
+    base_input=st.just("sha256:base"),
+    verdict=st.sampled_from(ComparisonVerdict),
     candidate_samples=st.integers(1, 6),
     base_samples=st.integers(1, 6),
+    objectives=st.lists(_OBJECTIVES, min_size=1, max_size=3, unique_by=lambda o: o.metric).map(
+        tuple
+    ),
 )
 
 
 _PINNED_COMPARISON = Comparison(
     scope=Scope(owner=AttemptId(root="attempt"), generation=0),
-    metric="throughput",
-    unit="tokens/s",
-    direction="max",
     candidate=RevisionRef.of_git_commit("abcdef0"),
     candidate_input="sha256:candidate",
     base=RevisionRef.of_git_commit("0fedcba"),
     base_input="sha256:base",
-    candidate_value=100.3,
-    base_value=100.0,
-    ratio=1.003,
-    noise=0.0,
     verdict=ComparisonVerdict.WITHIN_NOISE,
     candidate_samples=1,
     base_samples=1,
+    objectives=(
+        ObjectiveComparison(
+            metric="throughput",
+            unit="tokens/s",
+            direction="max",
+            candidate_value=100.3,
+            base_value=100.0,
+            ratio=1.003,
+            noise=0.05,
+            verdict=ComparisonVerdict.WITHIN_NOISE,
+        ),
+    ),
 )
 
 
@@ -498,28 +511,24 @@ _PINNED_COMPARISON = Comparison(
     context=CONTEXTS[CoreProtocolTemplate.RESUME],
     comparisons=st.lists(_COMPARISONS, max_size=3, unique_by=lambda c: c.candidate_input),
     settling=st.sets(st.sampled_from(["sha256:one", "sha256:two", "sha256:three"])),
-    noise_declared=st.booleans(),
 )
 @example(
     context=ResumeFacts(agent="implementer", retained=None, ended_by=None),
     comparisons=[_PINNED_COMPARISON],
     settling=set(),
-    noise_declared=False,
 )
 @example(
     context=ResumeFacts(agent="implementer", retained=None, ended_by=None),
     comparisons=[_PINNED_COMPARISON],
     settling={_PINNED_COMPARISON.candidate_input},
-    noise_declared=True,
 )
 def test_a_resumed_turn_states_each_comparison_the_framework_made_and_none_it_did_not(
-    context: BaseModel, comparisons: list[Comparison], settling: set[str], *, noise_declared: bool
+    context: BaseModel, comparisons: list[Comparison], settling: set[str]
 ) -> None:
     """Each comparison, and the rule its verdict was reached by, as core applies it.
 
-    Before, the resume said a verdict meant "two noises" for every task, although a task that
-    declares no per-run noise gets no verdict before ``MIN_SAMPLES_WITHOUT_FLOOR`` runs a side
-    and is then judged by Welch's t test. The rule now comes from the run's comparison policy.
+    The resume states each objective's verdict and the dominance rule over them, the same for
+    every task: the noise is declared, else read from the runs, else a stated default.
     A comparison core still runs is marked provisional, and the agent is told a repeat call
     reads the comparison as held then (before, it was told only not to repeat the call, so it
     never learned where a provisional comparison ended).
@@ -529,14 +538,14 @@ def test_a_resumed_turn_states_each_comparison_the_framework_made_and_none_it_di
     facts = ResumeFacts.model_validate(
         context.model_dump() | {"comparisons": tuple(comparisons), "settling": pending}
     )
-    text = render(CoreProtocolTemplate.RESUME, facts, noise_declared=noise_declared)
+    text = render(CoreProtocolTemplate.RESUME, facts)
 
     assert ("compared each measured candidate with its base" in text) is bool(comparisons)
     prose = " ".join(text.split())
     if comparisons:
-        assert ("exceeds 2 noises" in prose) is noise_declared
-        assert (f"at least {MIN_SAMPLES_WITHOUT_FLOOR} runs" in prose) is not noise_declared
-        assert "two noises" not in prose
+        assert "exceeds 2 noises" in prose
+        assert "dominates its base" in prose
+        assert f"up to {MIN_SAMPLES_WITHOUT_FLOOR} runs each" in prose
         assert "the value stored then is the one it is ranked by" in prose
         assert "returns the evaluation already made with its comparison as held now" in prose
         assert "Do not duplicate" not in prose
@@ -545,9 +554,11 @@ def test_a_resumed_turn_states_each_comparison_the_framework_made_and_none_it_di
         assert f"**{item.verdict.value.replace('_', ' ')}**" in text
         assert item.candidate.revision_id.root[:7] in text
         assert item.base.revision_id.root[:7] in text
-        assert f"{item.ratio:.4f}" in text
-        assert f"{item.noise:.4f}" in text
-        assert f"{'higher' if item.direction == 'max' else 'lower'} is better" in text
+        for objective in item.objectives:
+            assert objective.metric in text
+            assert f"{objective.ratio:.4f}" in text
+            assert f"{objective.noise:.4f}" in text
+            assert f"{'higher' if objective.direction == 'max' else 'lower'} is better" in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

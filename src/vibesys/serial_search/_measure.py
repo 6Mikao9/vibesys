@@ -20,7 +20,6 @@ from vibesys.serial_search._closing import beats_input, failed_gate
 from vibesys.serial_search._plan_view import MeasurementNoise
 from vs_core.api.search import (
     Comparison,
-    ComparisonPolicy,
     EvidenceKind,
     EvidenceRef,
     Failed,
@@ -33,7 +32,6 @@ from vs_core.api.search import (
     Value,
     Workspace,
     effect_resolution,
-    terms_policy,
     trusted_keys,
 )
 
@@ -89,7 +87,7 @@ async def measure_gates(
     gate = ctx.operation_span
     result = await _gated(ctx, ws, revision, found)
     if isinstance(result, Gated) and not isinstance(compared, Failed):
-        noise = _noise_of(compared.comparison, terms_policy(terms))
+        noise = _noise_of(compared.comparison)
         result = result.model_copy(
             update={
                 "readings": _settled(result.readings, compared.comparison),
@@ -105,36 +103,36 @@ async def measure_gates(
 def _settled(
     readings: tuple[AcceptedReading, ...], comparison: Comparison | None
 ) -> tuple[AcceptedReading, ...]:
-    """``readings`` with the benchmark's headline stated by the settled comparison.
+    """``readings`` with the benchmark's rows stated by the settled comparison.
 
     The record the gate read states the mean of the samples held when the official check was
     answered, and the runs a close call earns land after it. The comparison, awaited until
-    none is under way, holds them all, so its candidate value is the one figure the round
-    reports, ranks by and labels its gate with. The record's other rows are the answering run's
-    own (a sample holds the headline only), and a comparison of another metric changes nothing.
+    none is under way, holds them all, so its candidate value of each objective is the one figure
+    the round reports, ranks by and labels its gate with. A row the comparison does not judge
+    (another metric) keeps the answering run's own value.
     """
     reading = reading_of(readings, EvidenceKind.BENCHMARK)
     if comparison is None or reading is None or not reading.metrics:
         return readings
-    headline, *rest = reading.metrics
-    if headline.name != comparison.metric:
-        return readings
-    stated = headline.model_copy(update={"value": comparison.candidate_value})
-    settled = reading.model_copy(update={"metrics": (stated, *rest)})
+    stated = {item.metric: item.candidate_value for item in comparison.objectives}
+    metrics = tuple(
+        row.model_copy(update={"value": stated[row.name]}) if row.name in stated else row
+        for row in reading.metrics
+    )
+    settled = reading.model_copy(update={"metrics": metrics})
     return tuple(settled if item is reading else item for item in readings)
 
 
-def _noise_of(comparison: Comparison | None, policy: ComparisonPolicy) -> MeasurementNoise | None:
-    """The noise a comparison states, or None when there is none or it estimates no noise.
+def _noise_of(comparison: Comparison | None) -> MeasurementNoise | None:
+    """The noise a comparison states of its headline objective, or None when it has none.
 
-    A comparison over too few runs (no declared floor and fewer than three a side) or over runs
-    that read alike has no estimate of its noise, so it states none.
+    An objective that cannot be judged (a base mean of zero) states none.
     """
-    resolution = None if comparison is None else effect_resolution(comparison, policy)
+    resolution = None if comparison is None else effect_resolution(comparison)
     if comparison is None or resolution is None:
         return None
     return MeasurementNoise(
-        noise=comparison.noise,
+        noise=comparison.objectives[0].noise,
         resolution=resolution,
         candidate_samples=comparison.candidate_samples,
         base_samples=comparison.base_samples,

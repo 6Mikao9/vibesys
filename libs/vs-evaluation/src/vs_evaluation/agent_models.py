@@ -181,23 +181,16 @@ class EvaluationStageOutcome(BaseModel):
         )
 
 
-class EvaluationComparison(BaseModel):
-    """The framework's comparison of a candidate with its base, as the agent is told it.
+class EvaluationObjective(BaseModel):
+    """How a candidate stands against its base on one objective, as the agent is told it.
 
     Every number is the framework's: the candidate's mean over its samples and the base's mean
-    over its own, their ``ratio`` (candidate over base), the ``noise`` (one standard error of
-    that ratio) and the ``verdict`` it reached. ``better`` and ``worse`` need the difference to
-    exceed a critical number of noises in the metric's direction (``max`` or ``min`` is
-    better): two under a task's declared per-run noise; without one, Welch's t test at 95%,
-    and no verdict until each side holds ``MIN_SAMPLES_WITHOUT_FLOOR`` (3) runs that do not
-    all read alike (the rule is in ``vs_core._comparison``). Anything closer is
-    ``within_noise``. Until then the verdict is ``inconclusive``: the samples held give no
-    estimate of the noise, so the ratio says nothing yet (it is not noise), and the framework
-    takes more runs of both sides itself while a run can still change that. ``base_commit`` is the revision the base was measured at. More runs of
-    the same candidate content add samples and narrow the noise. It describes the samples held
-    when it is given: a candidate is ranked by the value stored at its official measurement,
-    which later runs do not move. ``settling`` says it is provisional: a run of either side
-    that will feed it has not ended, so it may still change.
+    over its own, their ``ratio`` (candidate over base) and the ``noise`` (one standard error of
+    that ratio). ``better`` and ``worse`` need the difference to exceed two noises in the
+    objective's direction (``max`` or ``min`` is better); anything closer is ``within_noise``.
+    The noise is the objective's declared per-run variation, else what the samples show, else a
+    stated default (the rule is in ``vs_core._dominance``). ``inconclusive`` means the base's
+    mean is zero, so there is no ratio to judge.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -208,6 +201,27 @@ class EvaluationComparison(BaseModel):
     base_value: FiniteFloat
     ratio: FiniteFloat
     noise: FiniteFloat = Field(ge=0)
+    verdict: Literal["better", "within_noise", "worse", "inconclusive"]
+
+
+class EvaluationComparison(BaseModel):
+    """The framework's comparison of a candidate with its base, as the agent is told it.
+
+    It judges every objective the benchmark reports (``objectives``, headline first), and the
+    ``verdict`` is the one result over them: ``better`` when no objective is worse and at
+    least one is better (the candidate dominates its base), ``worse`` when any is worse beyond
+    its noise (a tradeoff is a regression on the objective that lost), ``within_noise`` when
+    every objective is inside its noise, and ``inconclusive`` when one cannot be judged. Only a
+    ``within_noise`` result is undecided: the framework takes more runs of both sides itself
+    while a run can still change that. ``base_commit`` is the revision the base was measured
+    at. More runs of the same candidate content add samples and narrow the noise. It describes
+    the samples held when it is given: a candidate is ranked by the value stored at its
+    official measurement, which later runs do not move. ``settling`` says it is provisional: a
+    run of either side that will feed it has not ended, so it may still change.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    objectives: tuple[EvaluationObjective, ...] = Field(min_length=1)
     verdict: Literal["better", "within_noise", "worse", "inconclusive"]
     base_commit: str = Field(min_length=1)
     candidate_samples: int = Field(ge=1)

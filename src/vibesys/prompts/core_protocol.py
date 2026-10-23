@@ -11,14 +11,11 @@ own prompt-context union.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from pydantic import Field
 
-from vs_core.api import MIN_SAMPLES_WITHOUT_FLOOR, VERDICT_NOISES, Value
-
-if TYPE_CHECKING:
-    from vs_core.api import ComparisonPolicy
+from vs_core.api import DEFAULT_RELATIVE_NOISE, MIN_SAMPLES_WITHOUT_FLOOR, VERDICT_NOISES, Value
 
 
 class CoreProtocolTemplate(StrEnum):
@@ -39,28 +36,28 @@ class ComparisonRule(Value):
     """How core reaches a comparison's verdict, as the core protocol templates state it.
 
     ``resume.j2`` renders it, so the agent is told the rule core applies
-    (`vs_core._comparison`) for the run's task, not a fixed text that drifts from it.
+    (`vs_core._dominance`), not a fixed text that drifts from it.
     """
 
-    noise_declared: bool
-    """Whether the task declares the per-run noise of its headline metric (above 0)."""
     verdict_noises: float = Field(gt=0)
-    """Under a declared noise, how many noises a difference must exceed for a verdict."""
+    """How many noises a difference must exceed for an objective to be better or worse."""
+    default_noise: float = Field(gt=0)
+    """The relative noise of one run assumed where the task declares none and the runs show none."""
     min_runs: int = Field(ge=1)
-    """Without a declared noise, the runs each side needs before any verdict."""
+    """The runs each side is taken to when the result stays within noise and the task declares none."""
 
 
-def core_protocol_variables(policy: ComparisonPolicy) -> dict[str, object]:
-    """The run-level variables the core protocol templates read, from the run's comparison policy.
+def core_protocol_variables() -> dict[str, object]:
+    """The run-level variables the core protocol templates read.
 
     Every strategy on the core lifecycle adds them to its own run-level variables, from
-    ``vs_core.api.policy_of(facts)``, as it adds the core protocol directory to its template
+    the rule core applies, as it adds the core protocol directory to its template
     roots.
     """
     return {
         "comparison_rule": ComparisonRule(
-            noise_declared=policy.headline_floor_declared,
             verdict_noises=VERDICT_NOISES,
+            default_noise=DEFAULT_RELATIVE_NOISE,
             min_runs=MIN_SAMPLES_WITHOUT_FLOOR,
         )
     }

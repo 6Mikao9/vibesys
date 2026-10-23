@@ -934,14 +934,34 @@ class InputMeasurementFailedData(EventPayload):
     compared: bool = False
 
 
-class MeasurementComparedData(EventPayload):
-    """A candidate's measurement was compared with its base's: ratio, noise and verdict.
+class ComparedObjective(EventPayload):
+    """How a candidate stands against its base on one objective of a comparison.
 
-    Emitted when core records a comparison (and again when more samples change it). ``ratio``
-    is the candidate's mean over the base's, as measured, and ``direction`` says which way is
-    better; ``noise`` is one standard error of that ratio, and ``verdict`` needs two of them.
-    The values are means over ``candidate_samples`` and ``base_samples`` runs of one measured
-    input each, and ``base_commit`` is the revision the base was measured at.
+    ``ratio`` is the candidate's mean over the base's, as measured, and ``direction`` says which
+    way is better; ``noise`` is one standard error of that ratio, and ``verdict`` needs two of
+    them (``vs_core._dominance``).
+    """
+
+    metric: str
+    unit: str | None = None
+    direction: Literal["max", "min"]
+    candidate_value: FiniteFloat
+    base_value: FiniteFloat
+    ratio: FiniteFloat
+    noise: FiniteFloat
+    verdict: ComparisonVerdict
+
+
+class MeasurementComparedData(EventPayload):
+    """A candidate's measurement was compared with its base's on every objective.
+
+    Emitted when core records a comparison (and again when more samples change it).
+    ``verdict`` is the one result over all of the ``objectives``: ``better`` when none is worse
+    and one is better beyond its noise (the candidate dominates the base), ``worse`` when one is
+    worse beyond its noise. The flat ``metric`` to ``noise`` fields repeat the headline
+    objective, the first of ``objectives``. The values are means over ``candidate_samples`` and
+    ``base_samples`` runs of one measured input each, and ``base_commit`` is the revision the
+    base was measured at.
     """
 
     kind: Literal["measurement_compared"] = "measurement_compared"
@@ -957,6 +977,7 @@ class MeasurementComparedData(EventPayload):
     verdict: ComparisonVerdict
     candidate_samples: int
     base_samples: int
+    objectives: tuple[ComparedObjective, ...] = ()
     source: FrameworkSource = FrameworkSource.GATES
 
 

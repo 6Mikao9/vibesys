@@ -38,6 +38,7 @@ from vs_core.api import (
     Measure,
     MeasurementFinished,
     MeasurementResult,
+    ObjectiveComparison,
     Observation,
     ObservationStatus,
     Operation,
@@ -54,7 +55,7 @@ from vs_core.api import (
     ValidateLocalBase,
     Withdraw,
 )
-from vs_core.api.search import TaskObjective, TaskStage, TaskTerms, effect_verdict, terms_policy
+from vs_core.api.search import TaskObjective, TaskStage, TaskTerms, effect_verdict
 from vs_core.testing.builders import initial_state
 from vs_issue_tracker.api import FakeRoadmap, PutRoadmapItems, ReadRoadmap
 
@@ -342,7 +343,7 @@ class SerialHost:
                     environment_digest=plan.environment_digest,
                     provenance="trusted",
                     status=self._status_of(stage.stage_id, is_input=is_input),
-                    reading=self._answer(candidate, stage.stage_id, is_input=is_input),
+                    readings=self._answer(candidate, stage.stage_id, is_input=is_input),
                 )
                 for index, stage in enumerate(plan.stages)
             )
@@ -361,7 +362,7 @@ class SerialHost:
             MeasurementFinished(decision=asked.decision, result=result, comparison=comparison),
         )
 
-    def _answer(self, candidate: RevisionRef, stage: str, *, is_input: bool) -> Reading | None:
+    def _answer(self, candidate: RevisionRef, stage: str, *, is_input: bool) -> tuple[Reading, ...]:
         """The headline core's ledger states for an official benchmark record when it is stored.
 
         For a compared candidate that is the mean of the one run held: its first run's
@@ -369,9 +370,9 @@ class SerialHost:
         """
         compared = candidate.revision_id.root in self.comparisons
         if is_input or KINDS[stage] is not EvidenceKind.BENCHMARK or not compared:
-            return None
+            return ()
         value = self.throughputs.get(candidate.revision_id.root, CANDIDATE_THROUGHPUT)
-        return Reading(metric="throughput", value=value, direction="max")
+        return (Reading(metric="throughput", value=value, direction="max"),)
 
     def _record(self, refs: tuple[EvidenceRef, ...]) -> None:
         """Core's ledger takes ``refs``; the run's view states it."""
@@ -388,8 +389,11 @@ class SerialHost:
             update={
                 "candidate_samples": 1,
                 "base_samples": 1,
-                "noise": 0.0,
-                "verdict": ComparisonVerdict.INCONCLUSIVE,
+                "verdict": ComparisonVerdict.WITHIN_NOISE,
+                "objectives": tuple(
+                    item.model_copy(update={"verdict": ComparisonVerdict.WITHIN_NOISE})
+                    for item in settled.objectives
+                ),
             }
         )
         self.landing[settled.candidate_input] = settled
@@ -408,10 +412,15 @@ class SerialHost:
             self.ledger = [
                 ref.model_copy(
                     update={
-                        "reading": ref.reading.model_copy(update={"value": settled.candidate_value})
+                        "readings": (
+                            ref.readings[0].model_copy(
+                                update={"value": settled.objectives[0].candidate_value}
+                            ),
+                            *ref.readings[1:],
+                        )
                     }
                 )
-                if ref.reading is not None
+                if ref.readings
                 and ref.candidate == settled.candidate
                 and ref.scope == settled.scope
                 else ref
@@ -446,22 +455,32 @@ class SerialHost:
         runs = MIN_SAMPLES_WITHOUT_FLOOR
         undecided = Comparison(
             scope=scope,
-            metric="throughput",
-            direction="max",
             candidate=candidate,
             candidate_input=f"input-{candidate.revision_id.root}",
             base=FACTS.baseline,
             base_input="input-base",
-            candidate_value=INPUT_THROUGHPUT * ratio,
-            base_value=INPUT_THROUGHPUT,
-            ratio=ratio,
-            noise=noise,
             verdict=ComparisonVerdict.WITHIN_NOISE,
             candidate_samples=runs,
             base_samples=runs,
+            objectives=(
+                ObjectiveComparison(
+                    metric="throughput",
+                    direction="max",
+                    candidate_value=INPUT_THROUGHPUT * ratio,
+                    base_value=INPUT_THROUGHPUT,
+                    ratio=ratio,
+                    noise=noise,
+                    verdict=ComparisonVerdict.WITHIN_NOISE,
+                ),
+            ),
         )
-        verdict = _AS_COMPARED[effect_verdict(undecided, 1.0, terms_policy(TERMS))]
-        return undecided.model_copy(update={"verdict": verdict})
+        verdict = _AS_COMPARED[effect_verdict(undecided, 1.0)]
+        return undecided.model_copy(
+            update={
+                "verdict": verdict,
+                "objectives": (undecided.objectives[0].model_copy(update={"verdict": verdict}),),
+            }
+        )
 
     def _status_of(self, stage: str, *, is_input: bool) -> ObservationStatus:
         broken = is_input and self.baseline == "failed-workload" and stage == "benchmark"
@@ -520,8 +539,8 @@ class SerialHost:
             value = (
                 INPUT_THROUGHPUT
                 if ref.purpose == "baseline"
-                else ref.reading.value  # the headline is the ledger's, as production decodes it
-                if ref.reading is not None
+                else ref.readings[0].value  # the headline is the ledger's, as production decodes it
+                if ref.readings
                 else self.throughputs.get(ref.candidate.revision_id.root, CANDIDATE_THROUGHPUT)
             )
             metrics = (MetricRow(name="throughput", value=value, direction="max", unit="tokens/s"),)

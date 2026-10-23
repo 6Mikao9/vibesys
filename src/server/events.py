@@ -856,6 +856,19 @@ class MeasurementVerdict(StrEnum):
     INCONCLUSIVE = "inconclusive"
 
 
+class ComparedObjective(EventPayload):
+    """How a candidate stands against its base on one objective. See ``vibesys.events``."""
+
+    metric: str
+    unit: str | None = None
+    direction: Literal["max", "min"]
+    candidate_value: FiniteFloat
+    base_value: FiniteFloat
+    ratio: FiniteFloat
+    noise: FiniteFloat
+    verdict: MeasurementVerdict
+
+
 class MeasurementComparedData(EventPayload):
     """A candidate's measurement was compared with its base's. See ``vibesys.events``."""
 
@@ -872,6 +885,7 @@ class MeasurementComparedData(EventPayload):
     verdict: MeasurementVerdict
     candidate_samples: int
     base_samples: int
+    objectives: tuple[ComparedObjective, ...] = ()
     source: FrameworkSource = FrameworkSource.GATES
 
 

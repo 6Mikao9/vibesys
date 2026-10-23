@@ -14,7 +14,6 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.multi._host import PLANNER, config
-from tests.vibesys.serial_search._host import TERMS
 from tests.vibesys.vibesys_flows import across_restarts
 
 import vs_core.api as core
@@ -83,11 +82,3 @@ def test_the_latest_comparison_states_the_noise(
 
     assert shown is not None
     assert shown.noise == second
-
-
-@across_restarts
-def test_a_comparison_that_estimates_no_noise_states_none(*, restarting: bool) -> None:
-    """Runs that read alike show no noise, which is no measurement that there is none."""
-    assert core.terms_policy(TERMS).headline_floor_declared is False
-
-    assert next_designer(restarting=restarting, noises=(0.0,)).measurement_noise is None

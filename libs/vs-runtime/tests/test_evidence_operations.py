@@ -473,11 +473,10 @@ async def test_the_headline_a_reader_decodes_is_the_one_cores_ledger_states(
 ) -> None:
     """An official record states the mean of its samples; ranking must read that, not one run.
 
-    The runtime's record holds the run's own value. Core's ledger reference states the headline
-    reading (for an official measurement, the comparison's candidate value), and the decoded
-    headline is that reading whenever it names the headline metric, else the run's value. A
-    record's other objectives are the answering run's own values, always: a sample holds only
-    the headline, so there is no mean of them to state (the rule `reading_mapping` documents).
+    The runtime's record holds the run's own value. Core's ledger reference states a reading of
+    each objective (for an official measurement, the comparison's candidate value), and the
+    decoded value of a metric is the ledger's reading of it whenever it names that metric, else
+    the run's value.
     """
     ledger = FakeEvidenceLedger()
     single = _evidence(0, value=run)
@@ -490,14 +489,15 @@ async def test_the_headline_a_reader_decodes_is_the_one_cores_ledger_states(
         }
     )
     ledger.record(RequestId(root=SOURCE), evidence, "official")
-    reading = None if stated is None else Reading(metric=metric, value=stated, direction="max")
-    ref = _ref(evidence).model_copy(update={"reading": reading})
+    readings = () if stated is None else (Reading(metric=metric, value=stated, direction="max"),)
+    ref = _ref(evidence).model_copy(update={"readings": readings})
     outcome = await InterpretEvidenceOwner(ledger).execute(_Interpret(evidence=(ref,)), _context())
     decoded = _Readings.model_validate(outcome)
     headline, other = decoded.readings[0].metrics
     named = stated is not None and metric == evidence.metrics[0].name
     assert headline.value == (stated if named else run)
-    assert (other.name, other.value) == ("latency", secondary)
+    stated_other = stated is not None and metric == "latency"
+    assert (other.name, other.value) == ("latency", stated if stated_other else secondary)
 
 
 @settings(max_examples=examples(pr=5, nightly=40), deadline=None)

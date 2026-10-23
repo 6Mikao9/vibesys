@@ -9,6 +9,7 @@ from vibesys.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
     AgentExecutionStartedData,
+    ComparedObjective,
     CoreEvent,
     CoreEventType,
     EventStatus,
@@ -468,23 +469,37 @@ def _emit_winner_selected(
 def _emit_comparisons(events: EventJournal, comparisons: tuple[Comparison, ...]) -> None:
     """Emit ``MEASUREMENT_COMPARED`` for each comparison core newly logged."""
     for comparison in comparisons:
+        headline = comparison.objectives[0]
         events.emit(
             CoreEventType.MEASUREMENT_COMPARED,
             status=EventStatus.COMPLETED,
             data=MeasurementComparedData(
-                metric=comparison.metric,
-                unit=comparison.unit,
-                direction=comparison.direction,
+                metric=headline.metric,
+                unit=headline.unit,
+                direction=headline.direction,
                 candidate_commit=comparison.candidate.git_commit
                 or comparison.candidate.revision_id.root,
                 base_commit=comparison.base.git_commit or comparison.base.revision_id.root,
-                candidate_value=comparison.candidate_value,
-                base_value=comparison.base_value,
-                ratio=comparison.ratio,
-                noise=comparison.noise,
+                candidate_value=headline.candidate_value,
+                base_value=headline.base_value,
+                ratio=headline.ratio,
+                noise=headline.noise,
                 verdict=comparison.verdict,
                 candidate_samples=comparison.candidate_samples,
                 base_samples=comparison.base_samples,
+                objectives=tuple(
+                    ComparedObjective(
+                        metric=item.metric,
+                        unit=item.unit,
+                        direction=item.direction,
+                        candidate_value=item.candidate_value,
+                        base_value=item.base_value,
+                        ratio=item.ratio,
+                        noise=item.noise,
+                        verdict=item.verdict,
+                    )
+                    for item in comparison.objectives
+                ),
             ),
         )
 

@@ -388,7 +388,7 @@ def _core_kind(kind: StageKind) -> EvidenceKind:
 def headline_first(names: Iterable[str], headline: str | None) -> tuple[str, ...]:
     """*names* with *headline* first and the rest sorted.
 
-    A benchmark record's first metric is its headline (:func:`_reading`). Sorting every
+    A benchmark record's first metric is its headline (:func:`_readings`). Sorting every
     name alphabetically would headline a different axis than the one the task declared.
     """
     ordered = sorted(names)
@@ -398,16 +398,15 @@ def headline_first(names: Iterable[str], headline: str | None) -> tuple[str, ...
     return tuple(ordered)
 
 
-def _reading(item: TrustedEvidence) -> Reading | None:
-    """The headline reading of a benchmark record: its first metric, as the record states it."""
-    if item.kind is not StageKind.BENCHMARK or not item.metrics:
-        return None
-    headline = item.metrics[0]
-    return Reading(
-        metric=headline.name,
-        value=headline.value,
-        direction=headline.direction,
-        unit=headline.unit,
+def _readings(item: TrustedEvidence) -> tuple[Reading, ...]:
+    """Every objective a benchmark record reports, headline first, as the record states them."""
+    if item.kind is not StageKind.BENCHMARK:
+        return ()
+    return tuple(
+        Reading(
+            metric=metric.name, value=metric.value, direction=metric.direction, unit=metric.unit
+        )
+        for metric in item.metrics
     )
 
 
@@ -453,7 +452,7 @@ def _evidence(
                     ArtifactRef(artifact_id=ArtifactId(root=a.path), digest=a.digest.value)
                     for a in item.artifacts
                 ),
-                reading=_reading(item),
+                readings=_readings(item),
                 unmet_requirement=item.unmet_requirement,
             )
         )

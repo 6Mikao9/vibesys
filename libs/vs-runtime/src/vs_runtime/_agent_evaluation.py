@@ -115,6 +115,7 @@ from vs_evaluation.api import (
     RECEIPT_LINE,
     AgentEvaluationCall,
     EvaluationComparison,
+    EvaluationObjective,
     EvaluationStageOutcome,
     RunStoppingReply,
     SocketFailure,
@@ -289,13 +290,19 @@ def _comparison_of(
 def agent_comparison(comparison: Comparison, *, settling: bool) -> EvaluationComparison:
     """One core comparison as the wire contract the agent reads (the one projection)."""
     return EvaluationComparison(
-        metric=comparison.metric,
-        unit=comparison.unit,
-        direction=comparison.direction,
-        candidate_value=comparison.candidate_value,
-        base_value=comparison.base_value,
-        ratio=comparison.ratio,
-        noise=comparison.noise,
+        objectives=tuple(
+            EvaluationObjective(
+                metric=item.metric,
+                unit=item.unit,
+                direction=item.direction,
+                candidate_value=item.candidate_value,
+                base_value=item.base_value,
+                ratio=item.ratio,
+                noise=item.noise,
+                verdict=item.verdict.value,
+            )
+            for item in comparison.objectives
+        ),
         verdict=comparison.verdict.value,
         base_commit=comparison.base.revision_id.root,
         candidate_samples=comparison.candidate_samples,

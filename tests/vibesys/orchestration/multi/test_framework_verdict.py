@@ -12,7 +12,6 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.multi._host import PLANNER, config
-from tests.vibesys.serial_search._host import TERMS
 from tests.vibesys.serial_search._replies import plan_reply
 from tests.vibesys.vibesys_flows import across_restarts
 
@@ -81,21 +80,26 @@ def test_the_recorded_outcome_is_what_the_pure_verdict_derives_from_the_comparis
 ) -> None:
     host_comparison = core.Comparison(
         scope=core.Scope(owner=core.AttemptId(root="a"), generation=0),
-        metric="throughput",
-        direction="max",
         candidate=RevisionRef.of_git_commit(CANDIDATE),
         candidate_input="x",
         base=RevisionRef.of_git_commit("base"),
         base_input="y",
-        candidate_value=ratio,
-        base_value=1.0,
-        ratio=ratio,
-        noise=noise,
         verdict=core.ComparisonVerdict.WITHIN_NOISE,
         candidate_samples=core.MIN_SAMPLES_WITHOUT_FLOOR,
         base_samples=core.MIN_SAMPLES_WITHOUT_FLOOR,
+        objectives=(
+            core.ObjectiveComparison(
+                metric="throughput",
+                direction="max",
+                candidate_value=ratio,
+                base_value=1.0,
+                ratio=ratio,
+                noise=noise,
+                verdict=core.ComparisonVerdict.WITHIN_NOISE,
+            ),
+        ),
     )
-    expected = OUTCOME[core.effect_verdict(host_comparison, bar, core.terms_policy(TERMS))]
+    expected = OUTCOME[core.effect_verdict(host_comparison, bar)]
     assert played(restarting=restarting, bar=bar, ratio=ratio, noise=noise) == expected
 
 

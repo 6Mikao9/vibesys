@@ -93,11 +93,11 @@ def _rejected_readings() -> Mapping[str, object]:
 def reading_mapping(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str, object]:
     """The one projection of an accepted record into the fields a reader decodes.
 
-    The headline metric's value is the one core's ledger states (``ref.reading``): for an
-    official measurement that is the mean of the samples answering it, the value its comparison
-    with the base states, so whoever ranks candidates reads that number and not one run's.
-    Every other metric is the record's own, the answering run's: a sample holds only the
-    headline reading, so core states no mean of the others (`vs_core._comparison.as_answer`).
+    Every metric's value is the one core's ledger states (``ref.readings``): for an official
+    measurement that is the mean of the samples answering it, the value its comparison with the
+    base states, so whoever ranks candidates reads that number and not one run's
+    (`vs_core._comparison.as_answer`). A metric the ledger states no reading of keeps the
+    record's own value.
     """
     partial = evidence.partial_measurement
     progress = None if partial is None else partial.progress
@@ -110,11 +110,11 @@ def reading_mapping(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str,
         "metrics": tuple(
             {
                 "name": metric.name,
-                "value": _stated(ref, metric.name, metric.value, headline=index == 0),
+                "value": _stated(ref, metric.name, metric.value),
                 "direction": metric.direction or "max",
                 "unit": metric.unit,
             }
-            for index, metric in enumerate(evidence.metrics)
+            for metric in evidence.metrics
         ),
         "partial": None
         if partial is None
@@ -138,12 +138,9 @@ def reading_mapping(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str,
     }
 
 
-def _stated(ref: EvidenceRef, name: str, value: float, *, headline: bool) -> float:
-    """A metric's value as core's ledger states it: the headline from ``ref.reading``."""
-    stated = ref.reading
-    if headline and stated is not None and stated.metric == name:
-        return stated.value
-    return value
+def _stated(ref: EvidenceRef, name: str, value: float) -> float:
+    """A metric's value as core's ledger states it, from ``ref.readings``."""
+    return next((item.value for item in ref.readings if item.metric == name), value)
 
 
 class RetainRevisionOwner:
