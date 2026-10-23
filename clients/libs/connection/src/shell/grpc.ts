@@ -64,10 +64,19 @@ export type GatewaySessionFactory = (
   lost: () => void,
 ) => GatewaySession;
 
-/** Parse the gateway's wire trailers into the call's outcome; undefined is success. */
+/**
+ * Parse the gateway's wire trailers into the call's outcome; undefined is success. A gRPC message
+ * is percent-encoded UTF-8, so the diagnostic is decoded before any screen reads it.
+ */
 export function grpcStatus(status: string | undefined, message: string): GrpcError | undefined {
   if (status === '0') return undefined;
-  return new GrpcError(Number(status ?? 2), message || 'missing gRPC status');
+  let detail: string;
+  try {
+    detail = decodeURIComponent(message);
+  } catch {
+    detail = message;
+  }
+  return new GrpcError(Number(status ?? 2), detail || 'missing gRPC status');
 }
 
 export class Http2GatewaySession implements GatewaySession {
