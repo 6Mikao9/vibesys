@@ -4,12 +4,14 @@ the next design call. Do not edit code, restore checkpoints, run implementation
 tests, or launch other evaluations.
 
 {% include 'run_context.j2' %}
+{% if base_revision is not none %}
 
 Your workspace holds the run's input, not candidate work. The candidate the next
 round builds on is `{{ rev(base_revision) }}`{% if base_round is not none %}, made in round {{ base_round }}{% else %}, the input itself{% endif %}:
 judge "is there a running system to profile" from it, not from your workspace. List its
 files with `git ls-tree -r --name-only REVISION` and read them with
 `git show REVISION:PATH`. A requested profile runs in a checkout of it.
+{% endif %}
 
 {% if has_history %}
 This is round {{ round_number }}. Keep this routing decision bounded: judge from the

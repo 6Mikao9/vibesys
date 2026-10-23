@@ -39,8 +39,11 @@ class PreRoundPrompt(RolePromptContext):
 
     template: Literal[PromptTemplate.PRE_ROUND] = PromptTemplate.PRE_ROUND
     round_number: int = Field(gt=0)
-    base_revision: RevisionRef
-    """The round's base: the best revision so far, the input while none beat it."""
+    base_revision: RevisionRef | None = None
+    """The round's base: the best revision so far, the input while none beat it.
+
+    None only in prompts saved before routers were shown the base; every new round sets it.
+    """
     base_round: int | None = None
     """The round whose idea made ``base_revision``; None when it is the input."""
     has_history: bool

@@ -212,12 +212,33 @@ def test_the_routing_prompt_renders_for_every_context(context: PreRoundPrompt, k
     assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, context, profiler_kind=kind)
 
 
+def test_a_routing_prompt_saved_before_the_base_was_shown_still_decodes() -> None:
+    """Regression: a required ``base_revision`` made a paused run's saved state undecodable.
+
+    Resume decodes every stored turn request; a router prompt written before the field existed
+    must still validate, so the field has a default.
+    """
+    saved = {
+        "template": "pre_round",
+        "round_number": 1,
+        "has_history": False,
+        "regression_kind": None,
+        "regression_round": None,
+        "exhaustion_feedback": None,
+        "exhaustion_round": None,
+    }
+    restored = PreRoundPrompt.model_validate(saved)
+    assert restored.base_revision is None
+    assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, restored, profiler_kind="neuron")
+
+
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_PRE_ROUND)
 def test_the_routing_prompt_points_at_the_base_revision_not_the_input_in_the_workspace(
     context: PreRoundPrompt,
 ) -> None:
     """The run root holds the input until adoption; the router must judge the round's base."""
+    assert context.base_revision is not None
     text = _render(PromptTemplate.PRE_ROUND, context, profiler_kind="neuron")
     assert "Your workspace holds the run's input, not candidate work" in text
     assert f"`{context.base_revision.revision_id.root}`" in text
