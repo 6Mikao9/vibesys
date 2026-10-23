@@ -70,6 +70,14 @@ export function nativeFixtureScript(fixture: RunFixture): string {
   ensure([fixture]);
   const directory = join(cache, hash(JSON.stringify(fixture)));
   const replay = fromBinary(ClientReplaySchema, readFileSync(join(directory, 'replay.pb')));
+  return nativeReplayScript(fixture, replay);
+}
+
+/** Serve Python-produced records through the same gateway for recorded and declarative fixtures. */
+export function nativeReplayScript(
+  fixture: RunFixture,
+  replay: import('@bufbuild/protobuf').MessageShape<typeof ClientReplaySchema>,
+): string {
   const groups = new Map(
     replay.batches.map(batch => [
       Number(batch.sourceSequence),

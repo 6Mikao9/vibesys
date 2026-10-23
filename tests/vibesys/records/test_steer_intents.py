@@ -25,7 +25,7 @@ STATES = {
 
 
 @pytest.mark.regression
-@example(state=SteerDeliveryState.DROPPED, control="a", reason="no turn")
+@example(state=SteerDeliveryState.DROPPED, control="control-a", reason="not delivered")
 @given(
     state=st.sampled_from(sorted(STATES, key=str)),
     control=st.from_regex(r"[a-z][a-z0-9-]{0,20}", fullmatch=True),
