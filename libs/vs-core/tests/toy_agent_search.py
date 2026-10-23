@@ -267,15 +267,20 @@ _IN_FLIGHT = frozenset(
 
 
 def _control(
-    action: Literal["pause", "resume"],
+    action: Literal["pause", "pause_now", "resume", "stop"],
     now_at: float,
     owner: core.PauseOwner = core.PauseOwner.QUOTA,
 ) -> core.RunControlEvent:
-    control = (
-        core.ControlInput(control_id=core.ControlId(root=action), action=action, owner=owner)
-        if action == "pause"
-        else core.ControlInput(control_id=core.ControlId(root=action), action=action, when="now")
-    )
+    root = core.ControlId(root=action)
+    match action:
+        case "pause":
+            control = core.ControlInput(control_id=root, action=action, owner=owner)
+        case "resume":
+            control = core.ControlInput(control_id=root, action=action, when="now")
+        case "stop":
+            control = core.ControlInput(control_id=root, action=action, mode=core.StopMode.CANCEL)
+        case "pause_now":
+            control = core.ControlInput(control_id=root, action=action)
     return core.RunControlEvent(control=control, now_at=now_at)
 
 
@@ -309,6 +314,11 @@ class ToyHost:
     pause_owner: core.PauseOwner = core.PauseOwner.QUOTA
     """Who pauses. A quota pause holds the run in place. An operator pause drains it and parks
     it; the operator then relaunches it as a successor epoch."""
+    pause_now: bool = False
+    """The operator's pause is Pause now: it cancels what is unfinished instead of draining it."""
+    escalate_at: int | None = None
+    """The operator stops the run, cancelling, just before the n-th request answers (from 0), if
+    the run is draining then: a stop during a Pause escalates it."""
     paused_with: str | None = None
     """The kind of the request the pause came before, once the operator paused."""
     parked: list[core.CoreState] = field(default_factory=list)
@@ -350,9 +360,13 @@ class ToyHost:
         ordinal = self._requests
         self._requests += 1
         run = state.run
+        if ordinal == self.escalate_at and run.status == core.RunStatus.DRAINING:
+            return (_control("stop", run.now_at),)
         if ordinal != self.pause_at or run.status != core.RunStatus.RUNNING or run.result:
             return ()
         self.paused_with = type(request).__name__
+        if self.pause_now:
+            return (_control("pause_now", run.now_at),)
         return (_control("pause", run.now_at, self.pause_owner),)
 
     def operator(self, state: core.CoreState) -> tuple[core.CoreEvent, ...]:
@@ -364,7 +378,11 @@ class ToyHost:
         if state.run.status == core.RunStatus.PARKED:
             self.parked.append(state)
             epoch = state.records.recovery.epoch + 1
-            return (core.EpochResumed(epoch=epoch, now_at=state.run.now_at),)
+            relaunch = core.EpochResumed(epoch=epoch, now_at=state.run.now_at)
+            # A stop that stands is lifted by the operator's Resume, as the product's relaunch does.
+            if core.requested_stop_mode(state.run) is not None:
+                return (relaunch, _control("resume", state.run.now_at))
+            return (relaunch,)
         if state.run.status != core.RunStatus.PAUSED:
             return ()
         if core.project(state).next_observe_at is not None or any(
