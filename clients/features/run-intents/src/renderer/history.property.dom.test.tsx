@@ -366,14 +366,76 @@ function expectedButtons(facts: {
   return buttons;
 }
 
+interface Facts {
+  lifecycleEpoch: number;
+  kind: Kind;
+  resumable: boolean;
+  liveness: {epoch: number; value: RunLiveness};
+  tailEpoch: number;
+}
+
+function tailRecords(
+  facts: Facts,
+  step: Extract<Step, {kind: 'tail'}>,
+  index: number,
+  seq: bigint,
+) {
+  const epoch = Math.max(facts.tailEpoch, step.epoch);
+  const records: StoreRecord[] = [];
+  if (epoch > facts.tailEpoch)
+    records.push(
+      create(RecordSchema, {seq: seq + 1n, epoch, body: {case: 'epochStarted', value: {epoch}}}),
+    );
+  records.push(
+    create(RecordSchema, {
+      seq: seq + BigInt(records.length) + 1n,
+      epoch,
+      body: {
+        case: 'intent',
+        value: {
+          controlId: `step-${index}`,
+          action: step.action,
+          step: step.applied ? IntentStep.APPLIED : IntentStep.REFUSED,
+        },
+      },
+    }),
+  );
+  return records;
+}
+
+function livenessPacket(epoch: number, value: RunLiveness) {
+  return toBinary(
+    WatchRunsResponseSchema,
+    create(WatchRunsResponseSchema, {runId: 'run-1', liveness: value, head: {epoch}}),
+  );
+}
+
+/** Answer a Resume the user could press, if the screen offers one, with a refusal. */
+async function acknowledge(container: HTMLElement, bridge: FakeGatewayBridge) {
+  const resume = [...container.querySelectorAll('button')].find(
+    button => button.textContent === 'Resume' && !button.disabled,
+  );
+  const before = bridge.calls.length;
+  if (resume) await act(async () => resume.click());
+  const call = bridge.calls.at(-1);
+  if (!resume || bridge.calls.length === before || !call) return;
+  const result = {
+    case: 'relaunch' as const,
+    value: {outcome: {case: 'refusal' as const, value: RelaunchRefusal.LOCKED}},
+  };
+  await act(async () =>
+    call.resolve(toBinary(HostCallResponseSchema, create(HostCallResponseSchema, {result}))),
+  );
+}
+
 async function verifyInterleaving(steps: readonly Step[]) {
   const bridge = new FakeGatewayBridge();
   const clock = new FakeClock();
   const container = document.createElement('div');
   const root = createRoot(container);
-  const facts = {
+  const facts: Facts = {
     lifecycleEpoch: 1,
-    kind: 'running' as Kind,
+    kind: 'running',
     resumable: true,
     liveness: {epoch: 0, value: RunLiveness.UNSPECIFIED},
     tailEpoch: 0,
@@ -396,92 +458,44 @@ async function verifyInterleaving(steps: readonly Step[]) {
         />,
       ),
     );
-  const buttons = () =>
-    [...container.querySelectorAll('button')]
+  const stream = (suffix: string) => {
+    const open = bridge.streams.filter(s => s.method.endsWith(suffix) && !s.cancelled).at(-1);
+    if (!open) throw new Error(`${suffix} required`);
+    return open;
+  };
+  const check = () => {
+    const shown = [...container.querySelectorAll('button')]
       .map(button => button.textContent ?? '')
       .filter(text => ['Pause', 'Pause now', 'Guidance', 'Resume'].includes(text));
-  const check = () => {
-    expect(buttons().sort()).toEqual(expectedButtons(facts).sort());
+    expect(shown.sort()).toEqual(expectedButtons(facts).sort());
     expect(
       historyRows(container).filter(text => text.endsWith('· Applied')).length,
     ).toBeLessThanOrEqual(1);
+  };
+  // Each stream is ordered by itself; only the streams interleave with one another.
+  const apply = async (step: Step, index: number) => {
+    if (step.kind === 'lifecycle') {
+      facts.lifecycleEpoch = Math.max(facts.lifecycleEpoch, step.epoch);
+      facts.kind = step.state;
+      facts.resumable = step.resumable;
+      await render();
+    } else if (step.kind === 'tail') {
+      const records = tailRecords(facts, step, index, seq);
+      seq = records.at(-1)?.seq ?? seq;
+      facts.tailEpoch = Math.max(facts.tailEpoch, step.epoch);
+      await act(async () => stream('/Tail').receive(packet(records)));
+    } else if (step.kind === 'liveness') {
+      facts.liveness = {epoch: Math.max(facts.liveness.epoch, step.epoch), value: step.value};
+      await act(async () =>
+        stream('/WatchRuns').receive(livenessPacket(facts.liveness.epoch, step.value)),
+      );
+    } else await acknowledge(container, bridge);
   };
   try {
     await render();
     check();
     for (const [index, step] of steps.entries()) {
-      // Each stream is ordered by itself; only the streams interleave with one another.
-      if (step.kind === 'lifecycle') {
-        facts.lifecycleEpoch = Math.max(facts.lifecycleEpoch, step.epoch);
-        facts.kind = step.state;
-        facts.resumable = step.resumable;
-        await render();
-      } else if (step.kind === 'tail') {
-        const epoch = Math.max(facts.tailEpoch, step.epoch);
-        const records: StoreRecord[] = [];
-        if (epoch > facts.tailEpoch)
-          records.push(
-            create(RecordSchema, {seq: ++seq, epoch, body: {case: 'epochStarted', value: {epoch}}}),
-          );
-        records.push(
-          create(RecordSchema, {
-            seq: ++seq,
-            epoch,
-            body: {
-              case: 'intent',
-              value: {
-                controlId: `step-${index}`,
-                action: step.action,
-                step: step.applied ? IntentStep.APPLIED : IntentStep.REFUSED,
-              },
-            },
-          }),
-        );
-        facts.tailEpoch = epoch;
-        await act(async () => activeStream(bridge).receive(packet(records)));
-      } else if (step.kind === 'liveness') {
-        facts.liveness = {
-          epoch: Math.max(facts.liveness.epoch, step.epoch),
-          value: step.value,
-        };
-        const stream = bridge.streams
-          .filter(s => s.method.endsWith('/WatchRuns') && !s.cancelled)
-          .at(-1);
-        if (!stream) throw new Error('WatchRuns required');
-        await act(async () =>
-          stream.receive(
-            toBinary(
-              WatchRunsResponseSchema,
-              create(WatchRunsResponseSchema, {
-                runId: 'run-1',
-                liveness: step.value,
-                head: {epoch: facts.liveness.epoch},
-              }),
-            ),
-          ),
-        );
-      } else {
-        const resume = [...container.querySelectorAll('button')].find(
-          button => button.textContent === 'Resume' && !button.disabled,
-        );
-        const before = bridge.calls.length;
-        if (resume) await act(async () => resume.click());
-        const call = bridge.calls.at(-1);
-        if (resume && bridge.calls.length > before && call)
-          await act(async () =>
-            call.resolve(
-              toBinary(
-                HostCallResponseSchema,
-                create(HostCallResponseSchema, {
-                  result: {
-                    case: 'relaunch',
-                    value: {outcome: {case: 'refusal', value: RelaunchRefusal.LOCKED}},
-                  },
-                }),
-              ),
-            ),
-          );
-      }
+      await apply(step, index);
       check();
     }
   } finally {

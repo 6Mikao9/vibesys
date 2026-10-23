@@ -1,6 +1,8 @@
 import {RunLiveness} from '@vibesys/proto';
-import type {RunIntentAction} from './index.js';
 import type {RelaunchLiveness, RelaunchObservation, RelaunchTarget} from './relaunch.js';
+
+/** The actions the visible controls offer. */
+export type RunIntentAction = 'pause' | 'pauseNow' | 'steer';
 
 /** Everything the host has said about the writer: each fact carries the epoch it describes. */
 export interface WriterFacts {

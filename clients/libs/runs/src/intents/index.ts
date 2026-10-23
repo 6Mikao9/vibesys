@@ -19,6 +19,7 @@ import {
   TailResponseSchema,
   TerminateRunOutcome,
 } from '@vibesys/proto';
+import type {RunIntentAction} from './controls.js';
 import {refusalMessage} from './refusal.js';
 
 export type {IntentState, PostIntentRequest, PostIntentResponse} from '@vibesys/proto';
@@ -60,7 +61,7 @@ export function addressedIntent(
 /** The visible controls' defaults. The host surface accepts every typed intent. */
 export function runIntent(
   identity: RunReference & Pick<PostIntentRequest, 'requestId' | 'expectedEpoch'>,
-  action: 'pause' | 'pauseNow' | 'steer',
+  action: RunIntentAction,
   text = '',
 ): PostIntentRequest {
   switch (action) {
@@ -77,8 +78,6 @@ export function runIntent(
       });
   }
 }
-
-export type RunIntentAction = Parameters<typeof runIntent>[1];
 
 /** Take ownership before a mutable generated request enters control state. */
 export function copyIntent(request: PostIntentRequest): PostIntentRequest {
@@ -200,6 +199,13 @@ export function intentTailResponse(bytes: Uint8Array): readonly IntentOutcome[] 
 }
 
 export {
+  type RunIntentAction,
+  relaunchTarget,
+  type WriterControls,
+  type WriterFacts,
+  writerControls,
+} from './controls.js';
+export {
   copyRelaunch,
   copyRelaunchObservation,
   hostRelaunchRequest,
@@ -218,9 +224,3 @@ export {
   relaunchRequest,
   sameRelaunchObservation,
 } from './relaunch.js';
-export {
-  relaunchTarget,
-  type WriterControls,
-  type WriterFacts,
-  writerControls,
-} from './controls.js';
