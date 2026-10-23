@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Locator, type Page, test} from '@playwright/test';
+import type {RunFixture} from '@vibesys/run-fixtures';
 import {
   type FakeBridgeSeed,
   type FakeWindows,
@@ -8,16 +9,14 @@ import {
   installFakeProjectRuns,
   installFakeWindows,
 } from './fake-bridge.js';
-import {installFakeLive, moreTurnEvents, turnReplyEvent} from './fake-live.js';
-import {installFakeRun} from './fake-run.js';
-import {type FakeServerSeed, installFakeServer} from './fake-server.js';
-import {judgeEvents, RUN_ID, traceEvents, turnEvents, W5_GATE} from './fake-trace.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {appendJourney, journeyFixture, journeyScript, transitionJourney} from './journey-world.js';
+import {nativeFixtureScript} from './native-fixture.js';
 import {STARTED_AT} from './started-at.js';
 
 /**
- * The Run screen's levels against the Fake bridge and a fake run server whose stream carries a
- * dynamic run's span events and W5's turn: the run level (the hero, the ideas, Now), an idea, a
+ * The Run screen's levels against the Fake bridge and native gateway records, including
+ * a dynamic run and W5's transcript: the run level (the hero, the ideas, Now), an idea, a
  * step and a step's item, reached by click, walked back by Escape, the breadcrumb and the
  * browser's Back, with no page scroll at any level. Checked in the Ink theme at 1440×900;
  * `LEVEL_SHOTS` names a directory to save the screens in (the app's main region only).
@@ -28,6 +27,7 @@ interface FakeHostWindow extends Window {
 }
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
+const RUN_ID = '20261015-163047';
 const INSTANCE = '00000000000a';
 
 function server(phase: string, end: unknown = null): Record<string, unknown> {
@@ -66,56 +66,7 @@ const SEED: FakeBridgeSeed = {
   ],
 };
 
-const SPAN_EVENTS = traceEvents();
-const TURN_EVENTS = turnEvents(SPAN_EVENTS.length);
-const EVENTS = [
-  ...SPAN_EVENTS,
-  ...TURN_EVENTS,
-  ...judgeEvents(SPAN_EVENTS.length + TURN_EVENTS.length),
-];
-
-const SERVER: FakeServerSeed = {
-  runId: RUN_ID,
-  batch: {
-    type: 'event_batch',
-    events: EVENTS,
-    through_sequence: EVENTS.length,
-    store_id: 'store-1',
-    history_after_sequence: 0,
-  },
-  snapshot: {run_id: RUN_ID, sequence: 0, status: 'running'},
-};
-
-const LOGS = {
-  streams: [
-    {
-      id: 's1',
-      owner: {kind: 'run_narration'},
-      command: 'vibesys run',
-      retained_start: 0,
-      size: 0,
-      outcome: null,
-    },
-    {
-      id: 's3',
-      owner: {
-        kind: 'gate_stage',
-        execution_id: 'w5',
-        gate: 'benchmark',
-        attempt: 1,
-        span_id: W5_GATE,
-      },
-      command: 'vibesys-queue benchmark',
-      retained_start: 0,
-      size: 0,
-      outcome: null,
-    },
-  ],
-  text: {
-    s1: '{"at":"2026-10-15T16:00:01+00:00","level":"info","message":"round 2 started"}\n',
-    s3: 'vibesys-queue benchmark, 3 repetitions\nrepetition 1: 41.2 Mops/s\n',
-  },
-};
+const SERVER = journeyFixture('trace');
 
 const shots = process.env['LEVEL_SHOTS'];
 
@@ -128,16 +79,17 @@ async function check(page: Page, name: string): Promise<void> {
   if (shots !== undefined) await page.getByRole('main').screenshot({path: `${shots}/${name}.png`});
 }
 
-async function openRun(page: Page, live = false, server: FakeServerSeed = SERVER): Promise<void> {
+async function openRun(page: Page, live = false, server: RunFixture = SERVER): Promise<void> {
   await addInitScripts(page, [
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
-    initScript(installFakeRun, LOGS),
-    initScript(installFakeServer, server),
-    ...(live
-      ? [initScript(installFakeLive, undefined), initScript(installFakeWindows, undefined)]
-      : []),
+    live
+      ? journeyScript('live')
+      : server === SERVER
+        ? journeyScript('trace')
+        : nativeFixtureScript(server),
+    ...(live ? [initScript(installFakeWindows, undefined)] : []),
   ]);
   await page.goto('./shell.html');
   await page
@@ -497,7 +449,7 @@ const LONG_BASE =
 test('an idea’s header stays on clean lines without lineage at 900 and 1500 px', async ({page}) => {
   const long = JSON.parse(
     JSON.stringify(SERVER).replaceAll('Lock-free ring with per-slot sequence numbers', LONG_BASE),
-  ) as FakeServerSeed;
+  ) as RunFixture;
   await openRun(page, false, long);
   await page
     .getByRole('listbox', {name: 'Ideas'})
@@ -557,6 +509,7 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
       ),
     ],
   );
+  await transitionJourney(page, 'trace', 'stopped');
   await expect(page.getByText('Stopped by you.')).toBeVisible();
   await check(page, 'ink-run-ended');
   // The banner's View logs is a zoom the address follows too.
@@ -690,17 +643,13 @@ test('a live turn keeps its scroll position and its element as events arrive', a
     .getByRole('option', {name: /implementer/i})
     .first()
     .click();
-  const emit = (events: readonly unknown[]) =>
-    page.evaluate(events => (window as unknown as FakeHostWindow).fakeHost.emit(events), events);
-  let sequence = EVENTS.length;
-  const more = (from: number, count: number) => {
-    const events = moreTurnEvents('op:w6-turn', sequence, from, count);
+  let sequence = journeyFixture('live').liveAfter ?? 0;
+  const more = (_from: number, count: number) => {
+    const after = sequence;
     sequence += count;
-    return emit(events);
+    return appendJourney(page, after, sequence);
   };
   await more(0, 12);
-  sequence += 1;
-  await emit([turnReplyEvent('op:w6-turn', sequence)]);
   const turn = page.getByRole('region', {name: 'Agent turn'});
 
   // Thinking and text come first, and the reply shows every one of its fields, with no collapse.
@@ -717,6 +666,9 @@ test('a live turn keeps its scroll position and its element as events arrive', a
   await expect.poll(gap).toBeLessThan(2);
 
   // Scrolled away, it stays where it is: the same element, and no scroll event moved it.
+  await expect
+    .poll(() => turn.evaluate(element => element.scrollHeight - element.clientHeight))
+    .toBeGreaterThan(400);
   await turn.evaluate(element => {
     const seen: number[] = [];
     Object.assign(window, {scrolls: seen});
@@ -747,4 +699,7 @@ test('a live turn keeps its scroll position and its element as events arrive', a
     )
     .toEqual(['https://example.com/notes/11']);
   expect(page.url()).toBe(url);
+  await more(0, 1); // The real turn closes only after its last transcript chunk.
+  await expect(turn).toContainText('Padded both counters');
+  await expect(turn.getByRole('button', {name: /Show all fields/})).toHaveCount(0);
 });

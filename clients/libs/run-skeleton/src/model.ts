@@ -11,6 +11,7 @@ import {
   SpanHistorySchema,
   SpanVersionSchema,
   type Record as StoreRecord,
+  StreamKind,
 } from '@vibesys/proto';
 import {validateKeyframe} from './keyframe.js';
 
@@ -167,4 +168,16 @@ export function absorbFailures(state: Skeleton, found: readonly StoreRecord[]): 
     failures = [...failures.filter(item => item.epoch !== record.epoch), record];
   }
   return {...state, failures};
+}
+
+/** The transcript stream the run recorded for this span, if it has produced content. */
+export function transcriptStreamFor(
+  skeleton: Skeleton | undefined,
+  span: string | null,
+): string | null {
+  if (span === null) return null;
+  return (
+    skeleton?.streams.find(stream => stream.kind === StreamKind.TRANSCRIPT && stream.span === span)
+      ?.id ?? null
+  );
 }

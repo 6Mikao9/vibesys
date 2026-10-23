@@ -8,9 +8,9 @@ import {
   installFakeProjectRuns,
   installFakeWindows,
 } from './fake-bridge.js';
-import {installFakeRun} from './fake-run.js';
-import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {journeyScript} from './journey-world.js';
+import {installGatewayOnly} from './retired-run-bridge.js';
 import {drawnUnderWindowControls, listed, SEED, server} from './world.js';
 
 /**
@@ -27,18 +27,6 @@ const WINDOW_SEED: FakeBridgeSeed = {
   listings: [listed([server('00000000000a', RUN_ID, 'running')], [])],
 };
 
-const SERVER: FakeServerSeed = {
-  runId: RUN_ID,
-  batch: {
-    type: 'event_batch',
-    events: [{timestamp: '2026-10-15T16:30:51Z', type: 'server_ready', sequence: 1}],
-    through_sequence: 1,
-    store_id: 'store-1',
-    history_after_sequence: 0,
-  },
-  snapshot: {run_id: RUN_ID, sequence: 1, status: 'running'},
-};
-
 /** Every page in `context`, the run windows too, gets the Fake bridge before its scripts. */
 async function install(context: BrowserContext): Promise<void> {
   await addInitScripts(context, [
@@ -47,8 +35,8 @@ async function install(context: BrowserContext): Promise<void> {
     initScript(installFakeNewRun, WINDOW_SEED),
     initScript(installFakeProjectRuns, WINDOW_SEED),
     initScript(installFakeWindows, undefined),
-    initScript(installFakeRun, {streams: [], text: {}}),
-    initScript(installFakeServer, SERVER),
+    initScript(installGatewayOnly, undefined),
+    journeyScript('empty'),
   ]);
 }
 
@@ -97,8 +85,22 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   }));
   expect(row).toEqual({height: 40, drag: 'drag'});
   // The run is live in its window (it attached there), and the main window let it go.
-  await expect.poll(() => commands(runWindow)).toContain('attach 00000000000a');
-  await expect.poll(() => commands(page)).toContain('release');
+  expect(await commands(runWindow)).toEqual([]);
+  await expect
+    .poll(() =>
+      runWindow.evaluate(() =>
+        (window as unknown as {fakeGateway: {active(): number}}).fakeGateway.active(),
+      ),
+    )
+    .toBeGreaterThan(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as {fakeGateway: {active(): number}}).fakeGateway.active(),
+      ),
+    )
+    .toBe(0);
+  expect(await commands(page)).toEqual([]);
   // It is its own window already: it does not offer another.
   await runWindow.getByRole('button', {name: 'More actions'}).click();
   await expect(runWindow.getByRole('menuitem', {name: 'Open in new window'})).toHaveCount(0);

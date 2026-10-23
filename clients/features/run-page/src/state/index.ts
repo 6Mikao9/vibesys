@@ -13,6 +13,7 @@ export {
   type GatewayInput,
   type GatewayLogInput,
   type GatewayRunContext,
+  type GatewayTranscriptInput,
   gatewayRunMachine,
 } from './gateway-machine.js';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';

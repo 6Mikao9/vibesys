@@ -59,7 +59,14 @@ describe('published run-state surface', () => {
       'projectPerformance',
       'recordsBenchmark',
     ]);
-    expect(Object.keys(transcript).sort()).toEqual(['DEFAULT_CHAT_THREAD_ID', 'transcriptBySpan']);
+    expect(Object.keys(transcript).sort()).toEqual([
+      'DEFAULT_CHAT_THREAD_ID',
+      'appendNativeTranscript',
+      'emptyNativeTranscript',
+      'nativeTranscriptEntries',
+      'nativeTranscriptHashes',
+      'transcriptBySpan',
+    ]);
   });
 
   it('rejects writes throughout a development projection without corrupting another snapshot', () => {

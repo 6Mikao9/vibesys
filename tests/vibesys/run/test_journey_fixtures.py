@@ -1,6 +1,7 @@
 """The browser's native records cannot drift from the shipping Python projection."""
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -37,3 +38,12 @@ def test_every_native_journey_tracks_its_source() -> None:
         for path in sorted(ROOT.glob("*.pb"))
     )
     assert actual == expected, "Native replay bytes differ: regenerate the journey goldens"
+
+
+def test_recorded_world_uses_the_native_trace_source() -> None:
+    source = json.loads((ROOT / "trace.json").read_text())
+    queue = json.loads(
+        (ROOT.parents[3] / "libs/run-fixtures/src/data/queue-rs-live.json").read_text()
+    )
+    assert queue["events"] == source["events"], "Regenerate the native journey fixtures"
+    assert queue["objective"] == source["objective"]

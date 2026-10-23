@@ -13,7 +13,9 @@
     "src/skeleton/**/*.ts"
   ],
   "references": [
-    {"path": "../contracts/tsconfig.lib.json"},
+    {
+      "path": "../contracts/tsconfig.lib.json"
+    },
     {
       "path": "./tsconfig.lib.json"
     },
@@ -22,6 +24,9 @@
     },
     {
       "path": "../contracts/tsconfig.host-helper.json"
+    },
+    {
+      "path": "./tsconfig.transcript.json"
     }
   ],
   "exclude": [

@@ -1,6 +1,6 @@
 /** Browser fixture for the same protobuf port ABI the Electron preload exposes. */
 
-import {fromBinary, toBinary} from '@bufbuild/protobuf';
+import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   type GatewayBridge,
   GatewayError,
@@ -12,10 +12,12 @@ import {
 import {
   HostCallRequestSchema,
   RecordSchema,
+  RunLiveness,
   SkeletonResponseSchema,
   TailRequestSchema,
   TailResponseSchema,
   TailStreamRequestSchema,
+  TailStreamResponseSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {foldSkeleton, observeRun, seedSkeleton} from '@vibesys/run-skeleton';
@@ -32,16 +34,24 @@ class FixtureGateway {
   readonly streams = new Set<Receive>();
   readonly ended = new Set<(error?: string) => void>();
   readonly watchers = new Set<Receive>();
-  readonly held = new Set<Receive>();
   readonly history: number[][];
+  readonly held = new Set<Receive>();
+  readonly logs = new Map<string, {data: Uint8Array; subscribers: Map<Receive, number>}>();
   readonly observations: ReturnType<typeof fixtureObservations>;
   readonly chat: ChatPeer;
   active = 0;
+  currentObservation: number[];
 
   constructor(readonly input: WireFixture) {
     this.history = [input.tail];
+    this.currentObservation = input.watchRuns;
     this.observations = fixtureObservations(input);
     this.chat = new ChatPeer(input.chat);
+    for (const [id, bytes] of Object.entries(input.streams ?? {}))
+      this.logs.set(id, {
+        data: fromBinary(TailStreamResponseSchema, new Uint8Array(bytes)).data,
+        subscribers: new Map(),
+      });
   }
 
   unary = (host: string, method: string, request: Uint8Array) => {
@@ -96,6 +106,14 @@ class FixtureGateway {
       postIntent(host: string, bytes: number[]): Promise<number[]>;
     };
     const operation = fromBinary(HostCallRequestSchema, request).method;
+    if (
+      operation.case === 'postIntent' &&
+      this.input.behavior?.refuseActions?.includes(operation.value.intent.case ?? '')
+    )
+      return {
+        result: Promise.reject(new Error('The run did not take the command')),
+        cancel: () => undefined,
+      };
     if (!peer.postIntent && operation.case === 'chatMessage')
       return settled(
         this.chat.message(
@@ -121,16 +139,31 @@ class FixtureGateway {
       else for (const entry of this.history) receive(new Uint8Array(entry));
     } else if (method === methods.watchRuns) {
       this.watchers.add(receive);
-      receive(this.observations.decode(new Uint8Array(this.input.watchRuns)));
-    } else if (method === methods.log)
-      receive(
-        new Uint8Array(
-          this.input.streams?.[fromBinary(TailStreamRequestSchema, bytes).streamId] ??
-            this.input.log,
-        ),
-      );
+      receive(this.observations.decode(new Uint8Array(this.currentObservation)));
+    } else if (method === methods.log) return this.subscribeLog(bytes, receive);
     else throw new Error('Unknown stream');
     return () => undefined;
+  }
+
+  private subscribeLog(bytes: Uint8Array, receive: Receive): () => void {
+    const request = fromBinary(TailStreamRequestSchema, bytes);
+    const log = this.logs.get(request.streamId);
+    if (!log) throw new Error(`Unknown stream: ${request.streamId}`);
+    const offset = Number(request.fromOffset);
+    if (offset > log.data.length) throw new Error('Stream offset is beyond its committed end');
+    receive(
+      toBinary(
+        TailStreamResponseSchema,
+        create(TailStreamResponseSchema, {
+          data: log.data.slice(offset),
+          nextOffset: BigInt(log.data.length),
+        }),
+      ),
+    );
+    log.subscribers.set(receive, log.data.length);
+    return () => {
+      log.subscribers.delete(receive);
+    };
   }
 
   controls() {
@@ -139,6 +172,28 @@ class FixtureGateway {
         for (const receive of this.held)
           for (const entry of this.history) receive(new Uint8Array(entry));
         this.held.clear();
+      },
+      appendStreams: (streams: Record<string, number[]>) => {
+        for (const [id, bytes] of Object.entries(streams)) {
+          const log = this.logs.get(id) ?? {
+            data: new Uint8Array(),
+            subscribers: new Map<Receive, number>(),
+          };
+          log.data = new Uint8Array([...log.data, ...bytes]);
+          this.logs.set(id, log);
+          for (const [receive, offset] of log.subscribers) {
+            receive(
+              toBinary(
+                TailStreamResponseSchema,
+                create(TailStreamResponseSchema, {
+                  data: log.data.slice(offset),
+                  nextOffset: BigInt(log.data.length),
+                }),
+              ),
+            );
+            log.subscribers.set(receive, log.data.length);
+          }
+        }
       },
       appendChat: (bytes: number[]) => {
         this.chat.append(bytes);
@@ -151,12 +206,26 @@ class FixtureGateway {
       calls: () => this.calls,
       active: () => this.active,
       observe: (bytes: number[]) => {
+        this.currentObservation = bytes;
         for (const receive of this.watchers)
           receive(this.observations.decode(new Uint8Array(bytes)));
       },
       append: (bytes: number[]) => {
         this.observations.append(bytes);
         this.history.push(bytes);
+        const response = fromBinary(
+          WatchRunsResponseSchema,
+          new Uint8Array(this.currentObservation),
+        );
+        const current = this.observations.current();
+        if (response.head) {
+          response.head.epoch = current.epoch;
+          response.head.lifecycle = current.lifecycle;
+          response.head.committedSeq = current.throughSeq;
+        }
+        if (current.lifecycle?.state.case === 'ended') response.liveness = RunLiveness.ENDED;
+        this.currentObservation = [...toBinary(WatchRunsResponseSchema, response)];
+        for (const receive of this.watchers) receive(new Uint8Array(this.currentObservation));
         for (const receive of this.streams) receive(new Uint8Array(bytes));
       },
     };
@@ -230,6 +299,10 @@ function fixtureObservations(input: WireFixture) {
   };
   return {
     decode,
+    current: () => {
+      const skeleton = foldSkeleton(seedSkeleton(), records);
+      return {...observeRun(skeleton), throughSeq: skeleton.throughSeq ?? 0n};
+    },
     append(bytes: number[]): void {
       records.push(
         ...fromBinary(TailResponseSchema, new Uint8Array(bytes)).records.map(record =>

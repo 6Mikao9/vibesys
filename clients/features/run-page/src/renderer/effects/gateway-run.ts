@@ -2,11 +2,13 @@
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import type {GatewayReader} from '@vibesys/run-skeleton/reader';
 import {decodeRecordRows} from '@vibesys/run-state/records';
+import {appendNativeTranscript, emptyNativeTranscript} from '@vibesys/run-state/transcript';
 import {createActor, fromCallback, fromPromise} from 'xstate';
 import {
   type GatewayEvent,
   type GatewayInput,
   type GatewayLogInput,
+  type GatewayTranscriptInput,
   gatewayRunMachine,
 } from '../../state/index.js';
 
@@ -47,6 +49,16 @@ export function startGatewayRun(
           } catch {
             if (!signal.aborted) input.receive({type: 'log-failed'});
           }
+        }),
+        transcript: fromPromise<void, GatewayTranscriptInput>(async ({input, signal}) => {
+          let transcript = emptyNativeTranscript();
+          await ports.reader.binary(input.runId, input.streamId, signal, bytes => {
+            if (signal.aborted) return;
+            transcript = appendNativeTranscript(transcript, bytes);
+            input.receive({type: 'transcript', spanId: input.spanId, transcript});
+          });
+          if (!signal.aborted && transcript.pending.length > 0)
+            throw new Error('Truncated transcript');
         }),
       },
     }),

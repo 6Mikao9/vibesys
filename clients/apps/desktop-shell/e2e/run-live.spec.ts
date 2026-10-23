@@ -1,15 +1,15 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {Controls} from './chat-controls.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
   installFakeMachines,
   installFakeProjectRuns,
 } from './fake-bridge.js';
-import {installFakeRun} from './fake-run.js';
-import {prototypeRun} from './fake-run-data.js';
-import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {journeyFixture, journeyScript, transitionJourney} from './journey-world.js';
+import {installGatewayOnly} from './retired-run-bridge.js';
 import {STARTED_AT} from './started-at.js';
 
 /**
@@ -63,18 +63,6 @@ const SEED: FakeBridgeSeed = {
   ],
 };
 
-const SERVER: FakeServerSeed = {
-  runId: RUN_ID,
-  batch: {
-    type: 'event_batch',
-    events: [{timestamp: '2026-10-15T16:30:51Z', type: 'server_ready', sequence: 1}],
-    through_sequence: 1,
-    store_id: 'store-1',
-    history_after_sequence: 0,
-  },
-  snapshot: {run_id: RUN_ID, sequence: 1, status: 'running'},
-};
-
 const shots = process.env['RUN_PAGE_SHOTS'];
 
 async function commands(page: Page): Promise<string[]> {
@@ -97,8 +85,8 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
-    initScript(installFakeRun, {streams: [], text: {}}),
-    initScript(installFakeServer, prototypeRun(RUN_ID)),
+    initScript(installGatewayOnly, undefined),
+    journeyScript('prototype'),
   ]);
   await page.goto('./shell.html');
   await page
@@ -126,8 +114,8 @@ test('a run that has tried no idea yet says what will appear, not a guess', asyn
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
-    initScript(installFakeRun, {streams: [], text: {}}),
-    initScript(installFakeServer, SERVER),
+    initScript(installGatewayOnly, undefined),
+    journeyScript('empty'),
   ]);
   await page.goto('./shell.html');
   await page
@@ -139,12 +127,14 @@ test('a run that has tried no idea yet says what will appear, not a guess', asyn
 });
 
 test('a live run drains from the header over its session, and is let go', async ({page}) => {
+  const controls = new Controls(page, journeyFixture('empty'));
+  await controls.attach();
   await addInitScripts(page, [
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
-    initScript(installFakeRun, {streams: [], text: {}}),
-    initScript(installFakeServer, SERVER),
+    initScript(installGatewayOnly, undefined),
+    journeyScript('empty'),
   ]);
   await page.goto('./shell.html');
   const nav = page.getByRole('navigation', {name: 'VibeSys'});
@@ -155,11 +145,19 @@ test('a live run drains from the header over its session, and is let go', async 
 
   const pause = page.getByRole('button', {name: 'Pause', exact: true});
   await expect(pause).toBeEnabled();
-  await expect.poll(() => commands(page)).toEqual([`attach ${INSTANCE}`]);
+  expect(await commands(page)).toEqual([]);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as {fakeGateway: {active(): number}}).fakeGateway.active(),
+      ),
+    )
+    .toBeGreaterThan(0);
   await pause.click();
-  await expect.poll(() => commands(page)).toContain('command.control:pause');
+  await expect.poll(() => controls.posted.map(request => request.intent.case)).toEqual(['pause']);
 
   await push(page, listed([server('paused', 'user')]));
+  await transitionJourney(page, 'empty', 'parked');
   await expect(page.getByRole('main').getByText('Paused by you')).toBeVisible();
   await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
   await expect(page.getByRole('button', {name: 'Pause now', exact: true})).toBeEnabled();
@@ -167,5 +165,12 @@ test('a live run drains from the header over its session, and is let go', async 
   if (shots !== undefined) await page.screenshot({path: `${shots}/ink-live-paused.png`});
 
   await nav.getByRole('button', {name: 'Settings'}).click();
-  await expect.poll(() => commands(page)).toContain('release');
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as {fakeGateway: {active(): number}}).fakeGateway.active(),
+      ),
+    )
+    .toBe(0);
+  expect(await commands(page)).toEqual([]);
 });

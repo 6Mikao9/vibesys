@@ -53,6 +53,12 @@ export interface GatewayObservation {
 }
 export interface GatewayReader {
   /** One reader per run: history and records come from the same stream. */
+  binary(
+    runId: string,
+    streamId: string,
+    signal: AbortSignalLike,
+    receive: (bytes: Uint8Array) => void,
+  ): Promise<void>;
   watch(
     runId: string,
     receive: (observation: GatewayObservation) => void,
@@ -101,20 +107,17 @@ async function content(
   return {hash, text: new TextDecoder('utf-8', {fatal: true}).decode(bytes)};
 }
 
-async function log(
+async function binary(
   transport: RunTransport,
   runId: string,
   streamId: string,
   signal: AbortSignalLike,
-  receive: (chunk: GatewayLogChunk) => void,
+  receive: (bytes: Uint8Array) => void,
   fromOffset = 0n,
 ): Promise<void> {
   if (fromOffset < 0n || fromOffset > BigInt(Number.MAX_SAFE_INTEGER))
     throw new Error('Stream offset exceeds screen precision');
-  const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
-  const encoder = new TextEncoder();
   let offset = fromOffset;
-  let decodedOffset = Number(fromOffset);
   for await (const bytes of transport.stream(
     `${SERVICE}${HostService.method.tailStream.name}`,
     toBinary(
@@ -130,12 +133,37 @@ async function log(
       response.nextOffset > BigInt(Number.MAX_SAFE_INTEGER)
     )
       throw new Error('Stream offset mismatch');
-    const text = decoder.decode(response.data, {stream: true});
-    const next = decodedOffset + encoder.encode(text).length;
-    if (text !== '') receive({text, offset: decodedOffset, next});
-    decodedOffset = next;
     offset = response.nextOffset;
+    receive(response.data);
   }
+}
+
+async function log(
+  transport: RunTransport,
+  runId: string,
+  streamId: string,
+  signal: AbortSignalLike,
+  receive: (chunk: GatewayLogChunk) => void,
+  fromOffset = 0n,
+): Promise<void> {
+  if (fromOffset < 0n || fromOffset > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new Error('Stream offset exceeds screen precision');
+  const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
+  const encoder = new TextEncoder();
+  let decodedOffset = Number(fromOffset);
+  await binary(
+    transport,
+    runId,
+    streamId,
+    signal,
+    data => {
+      const text = decoder.decode(data, {stream: true});
+      const next = decodedOffset + encoder.encode(text).length;
+      if (text !== '') receive({text, offset: decodedOffset, next});
+      decodedOffset = next;
+    },
+    fromOffset,
+  );
   if (!signal.aborted) decoder.decode();
 }
 
@@ -203,6 +231,8 @@ export function gatewayReader(
         actor.stop();
       };
     },
+    binary: (runId, streamId, signal, receive) =>
+      binary(transport, runId, streamId, signal, receive),
     content: (runId, hash, signal) => content(transport, cache, runId, hash, signal),
     log: (runId, streamId, signal, receive, fromOffset) =>
       log(transport, runId, streamId, signal, receive, fromOffset),

@@ -54,6 +54,7 @@ function boundedRecords(records: readonly StoreRecord[], kind: 'skeleton' | 'tai
 export class FakeRunTransport implements RunTransport {
   readonly calls: {method: string; request: Uint8Array; signal: AbortSignalLike}[] = [];
   readonly #subscribers = new Set<Subscriber>();
+  readonly #idle = new Set<() => void>();
   readonly #observations: WatchRunsResponse[] = [];
   readonly #closed = new Set<string>();
   readonly #records: StoreRecord[];
@@ -92,6 +93,11 @@ export class FakeRunTransport implements RunTransport {
     this.#streamChunkBytes = input.streamChunkBytes ?? 65536;
     if (!Number.isSafeInteger(this.#streamChunkBytes) || this.#streamChunkBytes < 1)
       throw new Error('streamChunkBytes must be a positive safe integer');
+  }
+  /** Resolves when every owned iterator has acknowledged cancellation or its end. */
+  whenIdle(): Promise<void> {
+    if (this.#subscribers.size === 0) return Promise.resolve();
+    return new Promise(resolve => this.#idle.add(resolve));
   }
   get activeStreams(): number {
     return this.#subscribers.size;
@@ -191,6 +197,10 @@ export class FakeRunTransport implements RunTransport {
     } finally {
       registration.detach();
       this.#subscribers.delete(subscriber);
+      if (this.#subscribers.size === 0) {
+        for (const resolve of this.#idle) resolve();
+        this.#idle.clear();
+      }
     }
   }
   private cursor(method: string, request: Uint8Array) {

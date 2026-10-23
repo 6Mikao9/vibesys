@@ -1,4 +1,5 @@
 import type {ScheduleTimeout} from '@vibesys/machine';
+import {transcriptStreamFor} from '@vibesys/run-skeleton';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {getInitialSnapshot} from 'xstate';
 import {
@@ -40,7 +41,7 @@ export function useGatewayRun(options: {
     };
   }, [ports, schedule, host, runId]);
   const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
-  const {load, ui, text, hint, replies} = snapshot.context;
+  const {load, ui, text, hint, replies, transcripts} = snapshot.context;
   const skeleton = paintedSkeleton(load);
   const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
   const epoch = skeleton?.epochs.filter(item => item.seq <= at).at(-1)?.epoch;
@@ -53,20 +54,22 @@ export function useGatewayRun(options: {
         skeleton
           ? projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, wholeText, {
               head: hint?.head,
-              content: {text, replies},
+              content: {text, replies, transcripts},
             })
           : null,
       ),
-    [skeleton, wholeText, hint?.head, text, replies],
+    [skeleton, wholeText, hint?.head, text, replies, transcripts],
   );
   const modelRead = useMemo(
     () =>
       at === skeleton?.throughSeq
         ? wholeRead
         : project(() =>
-            skeleton ? projectSkeleton(skeleton, at, objective, {content: {text, replies}}) : null,
+            skeleton
+              ? projectSkeleton(skeleton, at, objective, {content: {text, replies, transcripts}})
+              : null,
           ),
-    [skeleton, at, objective, wholeRead, text, replies],
+    [skeleton, at, objective, wholeRead, text, replies, transcripts],
   );
   const {value: whole} = wholeRead;
   const {value: model} = modelRead;
@@ -74,18 +77,15 @@ export function useGatewayRun(options: {
     () =>
       project(() =>
         skeleton && whole
-          ? skeletonScreenState(seed, skeleton, whole, ui, hint, {text, replies})
+          ? skeletonScreenState(seed, skeleton, whole, ui, hint, {text, replies, transcripts})
           : null,
       ),
-    [skeleton, whole, seed, ui, hint, text, replies],
+    [skeleton, whole, seed, ui, hint, text, replies, transcripts],
   );
   const {value: state} = stateRead;
   const projectionError = wholeRead.error ?? modelRead.error ?? stateRead.error;
   const follow = state && model ? logStreamToFollow(state, model, route) : null;
-  useEffect(() => {
-    if (follow !== null)
-      actor?.send({type: 'ui', action: {type: 'select-stream', streamId: follow}});
-  }, [actor, follow]);
+  useFollowedContent(actor, follow, skeleton, route.step);
   return {
     snapshot,
     load: loadView(snapshot.context),
@@ -100,6 +100,27 @@ export function useGatewayRun(options: {
     dispatch: (action: import('../../state/index.js').RunPageAction) =>
       actor?.send({type: 'ui', action}),
   };
+}
+
+function useFollowedContent(
+  actor: ReturnType<typeof startGatewayRun> | null,
+  follow: string | null,
+  skeleton: import('@vibesys/run-skeleton').Skeleton | undefined,
+  step: string | null,
+): void {
+  useEffect(() => {
+    if (follow !== null)
+      actor?.send({type: 'ui', action: {type: 'select-stream', streamId: follow}});
+  }, [actor, follow]);
+  const transcriptId = transcriptStreamFor(skeleton, step);
+  const transcriptSpan = transcriptId ? step : null;
+  useEffect(() => {
+    actor?.send({
+      type: 'follow-transcript',
+      selection:
+        transcriptId && transcriptSpan ? {streamId: transcriptId, spanId: transcriptSpan} : null,
+    });
+  }, [actor, transcriptId, transcriptSpan]);
 }
 
 function project<T>(read: () => T): {value: T | null; error: string | null} {

@@ -1,6 +1,8 @@
 import type {EpochVersion, Keyframe, Lifecycle, MetricHistory, Span} from '@vibesys/proto';
+import type {NativeTranscript} from '../transcript/native.js';
 /** Content attachments copied from the record path, with their recorded sequence. */
 export interface SkeletonContent {
+  readonly transcripts?: Readonly<Record<string, NativeTranscript>>;
   readonly text?: Readonly<Record<string, string>>;
   readonly replies?: Readonly<
     Record<string, readonly {readonly seq: bigint; readonly hash: string}[]>

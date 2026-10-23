@@ -18,6 +18,11 @@ import {
 import type {RunFixture, StoreRunFixture} from '@vibesys/run-fixtures';
 import {gatewayScript, wire} from './fake-gateway.js';
 
+export interface NativeFixtureOptions {
+  readonly refuseActions?: readonly string[];
+  readonly historyPrefix?: number;
+}
+
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const projector = join(root, 'tests/e2e/retained_client_fixture.py');
 const cache = join(
@@ -66,17 +71,21 @@ export function nativeRecords(fixture: RunFixture): StoreRecord[] {
     .flatMap(batch => batch.records.map(bytes => fromBinary(RecordSchema, bytes)))
     .sort((a, b) => Number(a.seq - b.seq));
 }
-export function nativeFixtureScript(fixture: RunFixture): string {
+export function nativeFixtureScript(
+  fixture: RunFixture,
+  options: NativeFixtureOptions = {},
+): string {
   ensure([fixture]);
   const directory = join(cache, hash(JSON.stringify(fixture)));
   const replay = fromBinary(ClientReplaySchema, readFileSync(join(directory, 'replay.pb')));
-  return nativeReplayScript(fixture, replay);
+  return nativeReplayScript(fixture, replay, options);
 }
 
 /** Serve Python-produced records through the same gateway for recorded and declarative fixtures. */
 export function nativeReplayScript(
   fixture: RunFixture,
   replay: import('@bufbuild/protobuf').MessageShape<typeof ClientReplaySchema>,
+  options: NativeFixtureOptions = {},
 ): string {
   const groups = new Map(
     replay.batches.map(batch => [
@@ -84,6 +93,7 @@ export function nativeReplayScript(
       batch.records.map(bytes => fromBinary(RecordSchema, bytes)),
     ]),
   );
+  const held = options.historyPrefix !== undefined;
   const through = fixture.state === 'live' ? (fixture.liveAfter ?? Infinity) : Infinity;
   const records = [...groups]
     .filter(([source]) => source <= through)
@@ -91,14 +101,18 @@ export function nativeReplayScript(
     .sort((a, b) => Number(a.seq - b.seq));
   const stored: StoreRunFixture = {
     records,
-    initialCount: records.length,
+    initialCount: options.historyPrefix ?? records.length,
     blobs: replay.blobs,
     streams: replay.streams,
   };
   const input = wire(stored, fixture.state === 'live' ? RunLiveness.ALIVE : RunLiveness.ENDED);
+  input.behavior = {
+    ...(held ? {holdTail: true} : {}),
+    ...(options.refuseActions ? {refuseActions: options.refuseActions} : {}),
+  };
   const updates = Object.fromEntries(
     [...groups]
-      .filter(([source]) => source > through)
+      .filter(([source, rows]) => source > through && rows.length > 0)
       .map(([source, rows]) => [
         source,
         [
@@ -121,17 +135,13 @@ function connectUpdates(updates: Record<string, number[]>): void {
     fakeGateway: {append(bytes: number[]): void; disconnect(): void};
     fakeHost: {emit(events: readonly {sequence?: number}[]): void; drop(): void};
   };
-  const emit = peer.fakeHost.emit;
   peer.fakeHost.emit = events => {
-    emit(events);
     for (const event of events) {
       const bytes = updates[String(event.sequence)];
       if (bytes) peer.fakeGateway.append(bytes);
     }
   };
-  const drop = peer.fakeHost.drop;
   peer.fakeHost.drop = () => {
-    drop();
     peer.fakeGateway.disconnect();
   };
 }
