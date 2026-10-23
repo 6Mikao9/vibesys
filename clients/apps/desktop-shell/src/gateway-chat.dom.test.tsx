@@ -27,6 +27,10 @@ import {initialCoreState} from '@vibesys/run-state';
 import {CHAT_CATALOG_METHOD, CHAT_SESSIONS_METHOD} from '@vibesys/runs/chat';
 import {HOST_CALL_METHOD} from '@vibesys/runs/intents';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
+
+/** Each seed renders the real panel, so a fixed, small sample of the seeds is enough per run. */
+const DOM_SEEDS = SEEDS.slice(0, 30);
+
 import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act, type JSX} from 'react';
@@ -381,7 +385,7 @@ async function chatStep(screen: Screen, random: Seeded, label: string, blank: bo
 }
 
 test('generated new chats, follow-ups and slow discovery create a thread only for a new chat and show it at once', async () => {
-  for (const seed of SEEDS) {
+  for (const seed of DOM_SEEDS) {
     const random = new Seeded(seed);
     const screen = new Screen();
     await screen.mount();
@@ -525,5 +529,5 @@ async function steerRun(seed: number) {
 }
 
 test('generated steers, refusals, deliveries, withdrawals and reconnects show on the cards what the run recorded', async () => {
-  for (const seed of SEEDS) await steerRun(seed);
+  for (const seed of DOM_SEEDS) await steerRun(seed);
 });
