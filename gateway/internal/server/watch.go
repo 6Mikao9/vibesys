@@ -150,6 +150,9 @@ rescan:
 						}
 					}
 				}
+				if err := stream.Send(&apiv1.WatchRunsResponse{Heartbeat: true}); err != nil {
+					return err
+				}
 			}
 		}
 	}

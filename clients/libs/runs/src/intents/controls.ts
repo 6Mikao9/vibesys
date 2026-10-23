@@ -8,6 +8,7 @@ export type RunIntentAction = 'pause' | 'pauseNow' | 'steer';
 /** Everything the host has said about the writer: each fact carries the epoch it describes. */
 export interface WriterFacts {
   readonly reference: RunReference | undefined;
+  readonly fresh: boolean;
   readonly observation: RelaunchObservation | undefined;
   readonly liveness: RelaunchLiveness;
   /** The newest epoch in committed history, which can lead the lifecycle stream. */
@@ -51,10 +52,11 @@ export type WriterControls = WriterAvailability &
 export function writerControls(facts: WriterFacts): WriterControls {
   const offered = writerAvailability(facts);
   if (!facts.reference) return {...offered, status: 'locating', actions: [], relaunch: null};
+  if (!facts.fresh) return {...offered, status: 'unknown', actions: [], relaunch: null};
   return offered.status === 'ready' ? {...offered, reference: facts.reference} : offered;
 }
 
-function writerAvailability(facts: Omit<WriterFacts, 'reference'>): WriterAvailability {
+function writerAvailability(facts: Omit<WriterFacts, 'reference' | 'fresh'>): WriterAvailability {
   const {observation, liveness, historyEpoch, acknowledgedEpoch = 0n} = facts;
   const observed = observation?.epoch ?? 0n;
   const epoch = [observed, liveness.epoch, historyEpoch, acknowledgedEpoch].reduce((a, b) =>

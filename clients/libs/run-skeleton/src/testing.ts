@@ -209,6 +209,7 @@ export class FakeRunTransport implements RunTransport {
     } else if (method !== `${SERVICE}WatchRuns`) throw new Error(`Unknown stream method ${method}`);
     const current = new Map<string, WatchRunsResponse>();
     for (const response of this.#observations) {
+      if (response.heartbeat || response.initialComplete) continue;
       if (response.removed) current.delete(response.runId);
       else current.set(response.runId, response);
     }

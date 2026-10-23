@@ -17,6 +17,7 @@ import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
 import {FakeClock} from '@vibesys/transport/testing';
+import fc from 'fast-check';
 
 const METHOD = '/vibesys.api.v1.HostService/TailStream';
 
@@ -180,4 +181,61 @@ test('the retained conversion corpus obeys gateway byte bounds and continues thr
   }
   expect(count).toBe(records.length);
   expect(transport.activeStreams).toBe(0);
+});
+
+test('property: the public reader expires silent channels after the last frame even while history is cached', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({min: 1, max: 50}),
+      fc.array(fc.integer({min: 1, max: 20000}), {minLength: 1, maxLength: 5}),
+      async (start, intervals) => {
+        const transport = new FakeRunTransport({records: []});
+        const clock = new FakeClock();
+        const reader = gatewayReader(transport, new FakeSkeletonCache(), clock.schedule);
+        let hint: RunLivenessHint | undefined;
+        let failed = false;
+        let notify = () => {};
+        const stop = reader.watch('run-a', (_load, error, observed) => {
+          hint = observed;
+          failed = error;
+          notify();
+        });
+        const watch = '/vibesys.api.v1.HostService/WatchRuns';
+        try {
+          let epoch = start;
+          for (const interval of intervals) {
+            const current = ++epoch;
+            const received = Promise.withResolvers<void>();
+            notify = () => {
+              if (hint?.epoch === current) received.resolve();
+            };
+            transport.observe(
+              create(WatchRunsResponseSchema, {
+                runId: 'run-a',
+                liveness: RunLiveness.ALIVE,
+                head: {epoch: current},
+              }),
+            );
+            await received.promise;
+            clock.advanceBy(interval);
+            expect(hint?.epoch).toBe(current);
+          }
+          // Freeze new subscriptions too; reconnect cannot turn a cached observation into a frame.
+          transport.held.add(watch);
+          clock.advanceBy(30000);
+          expect(hint).toBeUndefined();
+          expect(failed).toBe(true);
+        } finally {
+          stop();
+        }
+        expect(
+          transport.calls
+            .filter(call => call.method.endsWith('/WatchRuns'))
+            .every(call => call.signal.aborted),
+        ).toBe(true);
+        expect(clock.pending).toBe(0);
+      },
+    ),
+    {numRuns: 12, seed: 34371, examples: [[1, [5000, 5000, 5000]]]},
+  );
 });

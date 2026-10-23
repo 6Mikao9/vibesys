@@ -20,7 +20,7 @@ import {
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
 import {Window} from 'happy-dom';
-import {act, useState} from 'react';
+import {act, Profiler, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {RunIntents} from './index.js';
 
@@ -233,6 +233,11 @@ async function verifyHistory(input: Input, availabilityOnly = false) {
         BigInt(input.epoch - 1),
         create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
       );
+      await act(async () =>
+        bridge.streams
+          .find(stream => stream.method.endsWith('/WatchRuns'))
+          ?.receive(livenessPacket(input.epoch - 1, RunLiveness.ENDED)),
+      );
       await send(records.filter(record => record.epoch < input.epoch));
       const resume = [...container.querySelectorAll('button')].find(
         button => button.textContent === 'Resume',
@@ -361,7 +366,9 @@ function expectedButtons(facts: {
   kind: Kind;
   liveness: {epoch: number; value: RunLiveness};
   tailEpoch: number;
+  fresh?: boolean;
 }): string[] {
+  if (facts.fresh === false) return [];
   const newest = Math.max(facts.lifecycleEpoch, facts.liveness.epoch, facts.tailEpoch);
   if (facts.lifecycleEpoch < newest) return [];
   const value = facts.liveness.epoch === newest ? facts.liveness.value : RunLiveness.UNSPECIFIED;
@@ -379,6 +386,7 @@ function expectedButtons(facts: {
 }
 
 interface Facts {
+  fresh: boolean;
   lifecycleEpoch: number;
   kind: Kind;
   resumable: boolean;
@@ -446,6 +454,7 @@ async function verifyInterleaving(steps: readonly Step[]) {
   const container = document.createElement('div');
   const root = createRoot(container);
   const facts: Facts = {
+    fresh: false,
     lifecycleEpoch: 1,
     kind: 'running',
     resumable: true,
@@ -497,6 +506,7 @@ async function verifyInterleaving(steps: readonly Step[]) {
       facts.tailEpoch = Math.max(facts.tailEpoch, step.epoch);
       await act(async () => stream('/Tail').receive(packet(records)));
     } else if (step.kind === 'liveness') {
+      facts.fresh = true;
       facts.liveness = {epoch: Math.max(facts.liveness.epoch, step.epoch), value: step.value};
       await act(async () =>
         stream('/WatchRuns').receive(livenessPacket(facts.liveness.epoch, step.value)),
@@ -582,7 +592,11 @@ test('property: unresolved facts keep their recovery deadline across liveness ex
           visible();
           // Separate event-loop tasks flush React between tied deadlines. One advanceBy over all
           // timers would batch the expiry and refresh, hiding cancellation of the refresh deadline.
-          for (let step = 0; step < 12 && refreshes === 0; step += 1) {
+          for (
+            let step = 0;
+            step < 12 && (refreshes === 0 || !labels().includes('Resume'));
+            step += 1
+          ) {
             const next = clock.pendingDelays()[0];
             if (next === undefined || clock.now() + next > 60_000) break;
             await act(async () => {
@@ -608,5 +622,281 @@ test('property: unresolved facts keep their recovery deadline across liveness ex
       },
     ),
     {numRuns: 16, seed: 34363, examples: [['starting', 'parked', 1, false]]},
+  );
+});
+
+const CHANNEL_STEP = fc.record({
+  kind: fc.constantFrom('frame', 'heartbeat', 'silence', 'kill', 'freeze', 'hide', 'restore'),
+  elapsed: fc.integer({min: 0, max: 40000}),
+});
+
+function assertFreshControls(
+  container: HTMLElement,
+  now: number,
+  shown: boolean,
+  lastFrame: number,
+) {
+  const labels = [...container.querySelectorAll('button')].map(each => each.textContent ?? '');
+  const live = labels.filter(label => ['Pause', 'Pause now', 'Guidance'].includes(label));
+  if (!shown || now - lastFrame >= 30000) expect(live).toEqual([]);
+  if (live.length === 0)
+    expect(container.textContent).toMatch(/catching up|unknown|waiting for the host/i);
+  expect(labels).not.toContain('Stop');
+}
+
+test('property: channel freshness survives independent lifecycle gaps and every rendered frame has controls or a waiting reason', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({min: 1, max: 8}),
+      fc.array(CHANNEL_STEP, {minLength: 1, maxLength: 8}),
+      async (epoch, steps) => {
+        const bridge = new FakeGatewayBridge();
+        const clock = new FakeClock();
+        const container = document.createElement('div');
+        const root = createRoot(container);
+        let shown = true;
+        let frozen = false;
+        let lastFrame = -Infinity;
+        let armed = false;
+        const check = () => {
+          if (armed) assertFreshControls(container, clock.now(), shown, lastFrame);
+        };
+        const render = () =>
+          act(async () =>
+            root.render(
+              <Profiler id="controls" onRender={check}>
+                <RunIntents
+                  bridge={bridge}
+                  host={'local' as HostKey}
+                  projectRoot={recordedProjectRoot('/catalog/project')}
+                  runId="run-1"
+                  enabled
+                  schedule={clock.schedule}
+                  {...(shown
+                    ? {relaunch: {epoch: BigInt(epoch), lifecycle: lifecycleOf('running', false)}}
+                    : {})}
+                />
+              </Profiler>,
+            ),
+          );
+        const watches = () =>
+          bridge.streams.filter(
+            stream => stream.method.endsWith('/WatchRuns') && !stream.cancelled,
+          );
+        const frame = async (heartbeat: boolean) => {
+          if (frozen) return;
+          lastFrame = clock.now();
+          await act(async () => {
+            for (const stream of watches())
+              stream.receive(
+                heartbeat
+                  ? toBinary(
+                      WatchRunsResponseSchema,
+                      create(WatchRunsResponseSchema, {heartbeat: true}),
+                    )
+                  : livenessPacket(epoch, RunLiveness.ALIVE),
+              );
+          });
+        };
+        const advance = async (elapsed: number) => {
+          const until = clock.now() + elapsed;
+          for (let count = 0; count < 100; count += 1) {
+            const next = clock.pendingDelays()[0];
+            if (next === undefined || clock.now() + next > until) break;
+            await act(async () => clock.runNext());
+            check();
+          }
+          await act(async () => clock.advanceBy(until - clock.now()));
+        };
+        const apply = async (step: {kind: string}) => {
+          switch (step.kind) {
+            case 'freeze':
+              frozen = true;
+              break;
+            case 'kill':
+              frozen = true;
+              await act(async () => {
+                for (const stream of watches()) stream.ended('Channel killed');
+              });
+              break;
+            case 'hide':
+            case 'restore':
+              shown = step.kind === 'restore';
+              await render();
+              break;
+            case 'frame':
+              frozen = false;
+              await frame(false);
+              break;
+            case 'heartbeat':
+              await frame(true);
+              break;
+          }
+        };
+        try {
+          await render();
+          await frame(false);
+          armed = true;
+          for (const step of steps) {
+            await apply(step);
+            await advance(step.elapsed);
+            check();
+          }
+        } finally {
+          await act(async () => root.unmount());
+          container.remove();
+        }
+        expect(clock.pending).toBe(0);
+        expect(bridge.streams.every(stream => stream.cancelled)).toBe(true);
+      },
+    ),
+    {
+      numRuns: 12,
+      seed: 34368,
+      examples: [
+        [
+          1,
+          [
+            {kind: 'hide', elapsed: 45000},
+            {kind: 'freeze', elapsed: 25000},
+            {kind: 'restore', elapsed: 0},
+          ],
+        ],
+        [
+          1,
+          [
+            {kind: 'heartbeat', elapsed: 20000},
+            {kind: 'heartbeat', elapsed: 20000},
+            {kind: 'freeze', elapsed: 45000},
+          ],
+        ],
+        [
+          1,
+          [
+            {kind: 'freeze', elapsed: 70000},
+            {kind: 'frame', elapsed: 0},
+          ],
+        ],
+      ],
+    },
+  );
+});
+
+test('property: confirming facts supersede Resume timeout in either order on every authoritative stream', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({min: 1, max: 8}),
+      fc.constantFrom('lifecycle', 'liveness', 'history'),
+      fc.boolean(),
+      fc.constantFrom('starting', 'running', 'draining', 'parked', 'finished', 'failed'),
+      async (epoch, source, timeoutFirst, kind) => {
+        const bridge = new FakeGatewayBridge();
+        const clock = new FakeClock();
+        const container = document.createElement('div');
+        const root = createRoot(container);
+        let successor = false;
+        const render = () =>
+          act(async () =>
+            root.render(
+              <RunIntents
+                bridge={bridge}
+                host={'local' as HostKey}
+                projectRoot={recordedProjectRoot('/project')}
+                runId="run-1"
+                enabled
+                schedule={clock.schedule}
+                relaunch={{
+                  epoch: BigInt(successor ? epoch + 1 : epoch),
+                  lifecycle: lifecycleOf(successor ? kind : 'parked', false),
+                }}
+              />,
+            ),
+          );
+        const receive = async (suffix: string, bytes: Uint8Array) =>
+          act(async () => {
+            for (const stream of bridge.streams.filter(
+              each => each.method.endsWith(suffix) && !each.cancelled,
+            ))
+              stream.receive(bytes);
+          });
+        const confirm = async () => {
+          if (source === 'lifecycle') {
+            successor = true;
+            await render();
+          } else if (source === 'liveness')
+            await receive('/WatchRuns', livenessPacket(epoch + 1, RunLiveness.ALIVE));
+          else
+            await receive(
+              '/Tail',
+              packet([
+                create(RecordSchema, {
+                  seq: 1n,
+                  epoch: epoch + 1,
+                  body: {case: 'epochStarted', value: {epoch: epoch + 1}},
+                }),
+              ]),
+            );
+        };
+        try {
+          await render();
+          await receive('/WatchRuns', livenessPacket(epoch, RunLiveness.ENDED));
+          await act(async () =>
+            [...container.querySelectorAll('button')]
+              .find(button => button.textContent === 'Resume')
+              ?.click(),
+          );
+          expect(bridge.calls).toHaveLength(1);
+          if (timeoutFirst) await act(async () => clock.advanceBy(35000));
+          await confirm();
+          await act(async () => clock.advanceBy(35000));
+          expect(container.textContent).not.toContain('Resume not confirmed');
+          expect(container.textContent).not.toContain('Waiting for the host');
+          expect(bridge.calls[0]?.cancelled).toBe(true);
+          successor = true;
+          await render();
+          await receive(
+            '/WatchRuns',
+            livenessPacket(
+              epoch + 1,
+              ['starting', 'running', 'draining'].includes(kind)
+                ? RunLiveness.ALIVE
+                : RunLiveness.ENDED,
+            ),
+          );
+          expect(container.textContent).not.toContain('not confirmed');
+          expect(
+            [...container.querySelectorAll('button')]
+              .map(each => each.textContent ?? '')
+              .filter(label => ['Pause', 'Pause now', 'Guidance', 'Resume'].includes(label))
+              .sort(),
+          ).toEqual(
+            expectedButtons({
+              lifecycleEpoch: epoch + 1,
+              kind,
+              liveness: {
+                epoch: epoch + 1,
+                value: ['starting', 'running', 'draining'].includes(kind)
+                  ? RunLiveness.ALIVE
+                  : RunLiveness.ENDED,
+              },
+              tailEpoch: source === 'history' ? epoch + 1 : 0,
+            }).sort(),
+          );
+        } finally {
+          await act(async () => root.unmount());
+          container.remove();
+        }
+        expect(clock.pending).toBe(0);
+      },
+    ),
+    {
+      numRuns: 16,
+      seed: 34369,
+      examples: [
+        [1, 'lifecycle', true, 'running'],
+        [1, 'history', true, 'starting'],
+        [1, 'liveness', false, 'running'],
+      ],
+    },
   );
 });

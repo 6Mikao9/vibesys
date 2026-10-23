@@ -269,11 +269,15 @@ func TestTailStreamRejectsEscapes(t *testing.T) {
 
 func watchEntry(t *testing.T, stream apiv1.HostService_WatchRunsClient) *apiv1.WatchRunsResponse {
 	t.Helper()
-	got, err := stream.Recv()
-	if err != nil {
-		t.Fatal(err)
+	for {
+		got, err := stream.Recv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.Heartbeat {
+			return got
+		}
 	}
-	return got
 }
 
 func TestWatchRunsAtomicHeadAndRealLock(t *testing.T) {

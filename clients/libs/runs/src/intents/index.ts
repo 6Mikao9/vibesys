@@ -194,6 +194,7 @@ export {
   writerControls,
 } from './controls.js';
 export {
+  confirmedRelaunchEpoch,
   copyRelaunch,
   copyRelaunchObservation,
   hostRelaunchRequest,

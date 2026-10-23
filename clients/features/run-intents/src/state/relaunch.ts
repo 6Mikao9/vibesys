@@ -1,5 +1,6 @@
 import {unprovided} from '@vibesys/machine';
 import {
+  confirmedRelaunchEpoch,
   copyRelaunch,
   copyRelaunchObservation,
   type RelaunchLiveness,
@@ -13,7 +14,8 @@ import {
 import {assign, fromCallback, setup} from 'xstate';
 
 export type RelaunchEvent =
-  | {readonly type: 'relaunch'}
+  | {readonly type: 'relaunch' | 'heartbeat' | 'stale'}
+  | {readonly type: 'epoch'; readonly epoch: bigint}
   | {readonly type: 'observe'; readonly observation: RelaunchObservation}
   | {readonly type: 'liveness'; readonly value: RelaunchLiveness};
 
@@ -25,6 +27,9 @@ export const relaunchMachine = setup({
       readonly observation: RelaunchObservation;
       readonly liveness: RelaunchLiveness;
       readonly result: RelaunchResponse | null;
+      readonly historyEpoch: bigint;
+      readonly fresh: boolean;
+      readonly attempted: boolean;
     },
     input: {} as {readonly request: RelaunchRequest; readonly observation: RelaunchObservation},
     events: {} as RelaunchEvent,
@@ -42,6 +47,14 @@ export const relaunchMachine = setup({
   },
   guards: {
     eligible: ({context}) => relaunchTarget(context.observation, context.liveness) !== null,
+    confirmed: ({context}) =>
+      context.attempted &&
+      confirmedRelaunchEpoch(
+        context.request,
+        context.observation,
+        context.liveness,
+        context.historyEpoch,
+      ) !== null,
     nextEpoch: ({context}) =>
       context.observation.epoch > context.request.expectedEpoch &&
       relaunchTarget(context.observation, context.liveness) !== null,
@@ -54,6 +67,9 @@ export const relaunchMachine = setup({
     observation: copyRelaunchObservation(input.observation),
     liveness: {epoch: 0n, value: RunLiveness.UNSPECIFIED},
     result: null,
+    historyEpoch: 0n,
+    fresh: false,
+    attempted: false,
   }),
   invoke: {
     id: 'liveness',
@@ -61,6 +77,14 @@ export const relaunchMachine = setup({
     onError: {actions: 'livenessUnknown'},
   },
   on: {
+    heartbeat: {actions: assign({fresh: true})},
+    stale: {actions: ['livenessUnknown', assign({fresh: false})]},
+    epoch: {
+      actions: assign({
+        historyEpoch: ({context, event}) =>
+          event.epoch > context.historyEpoch ? event.epoch : context.historyEpoch,
+      }),
+    },
     observe: {
       guard: ({context, event}) =>
         event.observation.epoch >= context.observation.epoch &&
@@ -89,11 +113,13 @@ export const relaunchMachine = setup({
           actions: assign(({context}) => ({
             request: copyRelaunch({...context.request, expectedEpoch: context.observation.epoch}),
             result: null,
+            attempted: true,
           })),
         },
       },
     },
     launching: {
+      always: {guard: 'confirmed', target: 'settled'},
       invoke: {
         id: 'launch',
         src: 'launch',
@@ -104,13 +130,15 @@ export const relaunchMachine = setup({
       after: {deadline: 'uncertain'},
     },
     settled: {always: {guard: 'nextEpoch', target: 'ready'}},
-    uncertain: {always: {guard: 'nextEpoch', target: 'ready'}},
+    uncertain: {always: {guard: 'confirmed', target: 'settled'}},
   },
 });
 
 /** A quiet or broken WatchRuns is re-read; silence cannot renew permission to act. */
 export const livenessWatchMachine = setup({
-  types: {events: {} as {type: 'ended'} | {type: 'liveness'; value: RelaunchLiveness}},
+  types: {
+    events: {} as {type: 'ended' | 'heartbeat'} | {type: 'liveness'; value: RelaunchLiveness},
+  },
   actions: {observed: () => {}, unknown: () => {}},
   actors: {
     read: fromCallback(() => {
@@ -125,10 +153,17 @@ export const livenessWatchMachine = setup({
     watching: {
       invoke: {id: 'read', src: 'read', onError: 'recovering'},
       initial: 'fresh',
-      states: {fresh: {after: {lease: '#livenessWatch.recovering'}}},
+      states: {
+        fresh: {
+          after: {lease: '#livenessWatch.recovering'},
+          on: {
+            liveness: {target: 'fresh', reenter: true, actions: 'observed'},
+            heartbeat: {target: 'fresh', reenter: true, actions: 'observed'},
+          },
+        },
+      },
       on: {
         ended: 'recovering',
-        liveness: {target: '.fresh', actions: 'observed'},
       },
     },
     recovering: {entry: 'unknown', after: {retry: 'watching'}},

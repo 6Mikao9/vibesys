@@ -546,12 +546,12 @@ test.each([
         snapshot.matches({active: {content: 'idle'}}) &&
         Object.keys(snapshot.context.text).length > 0,
     );
-    expect(clock.pending).toBe(0);
+    expect(clock.pending).toBe(1);
     const through = actor.getSnapshot().context.load?.skeleton.throughSeq;
     if (failure === 'closed') transport.close(`${SERVICE}Tail`);
     else transport.fail(`${SERVICE}Tail`, new Error('connection lost'));
     // The retry timer is armed only after the stream's outcome has been consumed.
-    await reached(actor, () => clock.pending > 0);
+    await reached(actor, () => clock.pending > 1);
     expect(actor.getSnapshot().context.error).toBe(kind === 'short' ? null : 'Disconnected');
     expect(actor.getSnapshot().context.load?.skeleton.throughSeq).toBe(through);
     if (kind === 'live') {
@@ -676,6 +676,23 @@ test('reply attachments load through the same verified content owner as objectiv
   ).toBe(true);
 });
 
+async function expireAndRestoreWatch(
+  actor: ReturnType<typeof startGatewayRun>,
+  transport: FakeRunTransport,
+  clock: FakeClock,
+  idle: number,
+) {
+  transport.held.add(`${SERVICE}WatchRuns`);
+  clock.advanceBy(idle);
+  expect(actor.getSnapshot().context.error).toBe('Disconnected');
+  transport.release(`${SERVICE}WatchRuns`);
+  clock.advanceBy(1000);
+  await reached(
+    actor,
+    snapshot => snapshot.context.error === null && snapshot.context.hint?.epoch === 1,
+  );
+}
+
 test('property: quiet logs and peer failures stay scoped to their stream for any idle interval', async () => {
   const fixture = storeRunFixture('live');
   await fc.assert(
@@ -711,9 +728,10 @@ test('property: quiet logs and peer failures stay scoped to their stream for any
               head: {epoch: 1},
             }),
           );
+          await reached(actor, snapshot => snapshot.context.hint?.epoch === 1);
           actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'quiet'}});
           await transport.called(`${SERVICE}TailStream`);
-          clock.advanceBy(idle);
+          await expireAndRestoreWatch(actor, transport, clock, idle);
           expect(actor.getSnapshot().context.error).toBeNull();
           expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
           expect(actor.getSnapshot().matches({active: {logs: 'following'}})).toBe(true);
@@ -723,7 +741,7 @@ test('property: quiet logs and peer failures stay scoped to their stream for any
           transport.recover(`${SERVICE}TailStream`);
           actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'quiet'}});
           expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
-          clock.advanceBy(idle);
+          await expireAndRestoreWatch(actor, transport, clock, idle);
           expect(actor.getSnapshot().context.error).toBeNull();
           actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
           await reached(actor, snapshot => snapshot.context.ui.views['build-log'] !== undefined);

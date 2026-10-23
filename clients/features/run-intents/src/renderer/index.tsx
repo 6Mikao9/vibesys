@@ -51,22 +51,24 @@ function useIntentActor(props: RunIntentsProps) {
   return {snapshot, current};
 }
 
-function enabledObservation(props: RunIntentsProps) {
-  return props.enabled && props.projectRoot !== undefined ? props.relaunch : undefined;
-}
-
 export function useRunIntents(props: RunIntentsProps) {
   const {snapshot, current} = useIntentActor(props);
   const [text, setText] = useState('');
   const [guidanceOpen, showGuidance] = useState(false);
   const projectRoot = props.projectRoot;
   const committed = snapshot ? historyEpoch(snapshot.context) : 0n;
-  const {view: machineRelaunch, liveness} = useRelaunch({
+  const {
+    view: machineRelaunch,
+    liveness,
+    fresh,
+  } = useRelaunch({
     bridge: props.bridge,
     host: props.host,
     projectRoot: projectRoot ?? '',
     runId: props.runId,
-    observation: enabledObservation(props),
+    enabled: props.enabled && projectRoot !== undefined,
+    observation: props.relaunch,
+    historyEpoch: committed,
     schedule: props.schedule,
   });
   const busy = snapshot?.matches({active: 'sending'}) ?? false;
@@ -75,6 +77,7 @@ export function useRunIntents(props: RunIntentsProps) {
   ) => current.current?.send(request);
   const acknowledged = machineRelaunch?.appliedEpoch ?? 0n;
   const writer = writerControls({
+    fresh,
     reference: projectRoot === undefined ? undefined : runReference(projectRoot, props.runId),
     observation: props.relaunch,
     liveness,

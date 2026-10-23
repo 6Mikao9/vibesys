@@ -64,11 +64,14 @@ export const runObservationMachine = setup({
           after: {deadline: '#runObservation.retrying'},
           on: {ready: {target: 'live', actions: assign({watchFailed: false})}},
         },
-        live: {},
+        live: {
+          after: {deadline: '#runObservation.retrying'},
+          on: {ready: {target: 'live', reenter: true, actions: assign({watchFailed: false})}},
+        },
       },
     },
     retrying: {
-      entry: assign({watchFailed: true}),
+      entry: assign({watchFailed: true, hint: undefined}),
       after: {retry: 'watching'},
     },
   },
