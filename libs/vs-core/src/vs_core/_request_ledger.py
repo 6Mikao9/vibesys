@@ -35,7 +35,7 @@ from ._proofs import (
 from ._registry import ClosedRecordContradictionError, ContractError
 from ._request_forward import declaration, owner_signals, records_own
 from ._request_recovery import resent
-from ._session_scope import lost_turn_cancellation
+from ._session_scope import lost_cancellation_ask
 from ._turn_permit import cap_dispatch_until, facts_for
 from ._values import digest
 from .types.attempts import RevisionOperationRequested
@@ -334,8 +334,14 @@ def _end_released_dispatch(
     """
     request = root.request
     observation = event.observation
-    lost = isinstance(request, CancelTurn) and request.request_id == lost_turn_cancellation(
-        request.invocation
+    lost = (
+        isinstance(request, CancelTurn)
+        and lost_cancellation_ask(
+            request.invocation,
+            cancellation=request.request_id,
+            limit=context.run.limits.request_retries.limit,
+        )
+        is not None
     )
     refused = lost and observation.status == ObservationStatus.REJECTED
     if (

@@ -37,6 +37,7 @@ from ._session_rows import session_row as _session
 from ._session_scope import (
     attempt_for,
     inspect_turn,
+    lost_turn_ask,
     lost_turn_authority,
     retains_write_turn,
     scope_active,
@@ -1159,7 +1160,14 @@ def _cancel(
     lost = invocation.phase in (
         SessionPhase.UNKNOWN,
         SessionPhase.EXECUTING,
-    ) and event.authority == lost_turn_authority(event.invocation)
+    ) and (
+        lost_turn_ask(
+            event.invocation,
+            authority=event.authority,
+            limit=context.run.limits.request_retries.limit,
+        )
+        is not None
+    )
     if claim is None and not cleanup and not run_cleanup and not lost:
         raise ContractValidationError(
             "authority", "cancellation requires recorded interruption or cleanup record"

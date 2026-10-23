@@ -27,7 +27,7 @@ from ._recovery_owners import known_owner, operation_decision, typed_job_owner
 from ._recovery_unanswered import Inspection, Settlement, settlement
 from ._registry import ContractError
 from ._request_forward import turn_of
-from ._session_scope import lost_turn_authority
+from ._session_scope import lost_cancellation_ask, lost_turn_authority
 from ._waits import owned_job_subject, recovery_waits
 from .types.attempts import (
     AttemptPhase,
@@ -1565,7 +1565,10 @@ def _deadline(
         reason=reason,
     )
     requests: list[Outbound] = []
-    signals = _lost_turn(context, record, first=previous_block is None)
+    signals = (
+        *_lost_turn(context, record, first=previous_block is None),
+        *_lost_turn_asked_again(context, record, first=previous_block is None),
+    )
     if previous_block is None:
         requests.append(_probe(block, context))
     state, events = _end_open_record(
@@ -1716,6 +1719,33 @@ def _lost_turn(
     return (
         InvocationCancellationRequested(
             invocation=invocation, authority=lost_turn_authority(invocation)
+        ),
+    )
+
+
+def _lost_turn_asked_again(
+    context: RecordsContext, record: RequestRecord, *, first: bool
+) -> tuple[Signal, ...]:
+    """The next ask to cancel a lost turn whose cancellation ended unanswered at its bound.
+
+    A cancellation that never answered proves nothing: the turn may still run, and the session
+    waits on it for ever, so the ask it serves (a planner call, an implementer's turn) has no
+    next step. Cancelling is idempotent, so core asks again under the next authority, up to
+    ``Limits.request_retries.limit`` more asks (as for a job's cancel, ``cancel_settled``),
+    each one given the bound to answer. Past it the cancellation stays unanswered and the
+    session keeps its wait, which halts the run loudly (``OrphanWaitError``).
+    """
+    request = record.request
+    if not first or not isinstance(request, CancelTurn) or not is_open(record):
+        return ()
+    limit = context.run.limits.request_retries.limit
+    ask = lost_cancellation_ask(request.invocation, cancellation=request.request_id, limit=limit)
+    if ask is None or ask >= limit:
+        return ()
+    return (
+        InvocationCancellationRequested(
+            invocation=request.invocation,
+            authority=lost_turn_authority(request.invocation, ask + 1),
         ),
     )
 
