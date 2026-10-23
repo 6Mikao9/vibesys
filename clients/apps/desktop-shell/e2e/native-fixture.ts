@@ -62,16 +62,30 @@ function ensure(fixtures: readonly RunFixture[]): void {
 }
 /** Canonical scenarios use checked native goldens; custom variants use the same real projector. */
 function replayFor(fixture: RunFixture) {
-  const base = join(root, 'clients/libs/run-fixtures/src');
-  const declaration = join(base, 'data', `${fixture.name}.json`);
-  const golden = join(base, 'native', `${fixture.name}.pb`);
-  if (
-    existsSync(declaration) &&
-    existsSync(golden) &&
-    JSON.stringify(fixture) ===
-      JSON.stringify(parseFixture(JSON.parse(readFileSync(declaration, 'utf8'))))
-  ) {
-    return fromBinary(ClientReplaySchema, readFileSync(golden));
+  const sources = [
+    {
+      data: join(root, 'clients/libs/run-fixtures/src/data'),
+      native: join(root, 'clients/libs/run-fixtures/src/native'),
+    },
+    {
+      data: join(root, 'clients/apps/desktop-shell/e2e/scenarios'),
+      native: join(root, 'clients/apps/desktop-shell/e2e/scenarios'),
+    },
+  ];
+  for (const source of sources) {
+    const declaration = join(source.data, `${fixture.name}.json`);
+    const golden = join(source.native, `${fixture.name}.pb`);
+    if (!existsSync(declaration) || !existsSync(golden)) continue;
+    const {
+      lineage: _lineage,
+      nativeLifecycles: _lifecycles,
+      nativeStreams: _streams,
+      nativeTransitions: _transitions,
+      ...value
+    } = JSON.parse(readFileSync(declaration, 'utf8'));
+    if (JSON.stringify(fixture) === JSON.stringify(parseFixture(value))) {
+      return fromBinary(ClientReplaySchema, readFileSync(golden));
+    }
   }
   ensure([fixture]);
   return fromBinary(

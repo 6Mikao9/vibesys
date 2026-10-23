@@ -8,7 +8,7 @@ import {
   installFakeProjectRuns,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
-import {journeyScript} from './journey-world.js';
+import {journeyScript, type NativeJourney, transitionJourney} from './journey-world.js';
 import {installGatewayOnly} from './retired-run-bridge.js';
 import {STARTED_AT} from './started-at.js';
 
@@ -76,6 +76,8 @@ async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
     ),
   ]);
   await page.goto('./shell.html');
+  if ((seed.listings?.[0] as {live?: {phase: string}[]})?.live?.[0]?.phase === 'starting')
+    phases.set(page, 'startup');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink');
   await page
     .getByRole('main')
@@ -83,6 +85,7 @@ async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
     .click();
 }
 
+const phases = new WeakMap<Page, NativeJourney>();
 const shots = process.env['RUN_PAGE_SHOTS'];
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -94,6 +97,21 @@ async function push(page: Page, listing: unknown): Promise<void> {
     ([value]) => (window as unknown as FakeHostWindow).fakeHost.listing(value),
     [listing],
   );
+  const from = phases.get(page);
+  if (from) {
+    const value = listing as {live: {phase: string}[]; ended: unknown[]};
+    const phase = value.live[0]?.phase;
+    const to = value.ended.length
+      ? 'startup-ended'
+      : phase === 'running'
+        ? 'startup-running'
+        : phase === 'stopping'
+          ? 'startup-draining'
+          : undefined;
+    if (!to) throw new Error(`Unsupported startup fixture phase: ${phase}`);
+    await transitionJourney(page, from, to);
+    phases.set(page, to);
+  }
 }
 
 async function calls(page: Page): Promise<unknown[][]> {

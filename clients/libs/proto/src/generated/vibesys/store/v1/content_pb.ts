@@ -5,13 +5,15 @@
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
+import type { StartupStage } from "./lifecycle_pb.js";
+import { file_vibesys_store_v1_lifecycle } from "./lifecycle_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/store/v1/content.proto.
  */
 export const file_vibesys_store_v1_content: GenFile = /*@__PURE__*/
-  fileDesc("Ch52aWJlc3lzL3N0b3JlL3YxL2NvbnRlbnQucHJvdG8SEHZpYmVzeXMuc3RvcmUudjEijAEKC01ldHJpY1BvaW50EhsKBnNlcmllcxgBIAEoCUILukgIcgYQASiAgAQSHgoEc3BhbhgCIAEoCUILukgIcgYQASiAgARIAIgBARIWCgV2YWx1ZRgDIAEoAUIHukgEEgJAARIfCgVjbG9jaxgEIAEoAUIQukgNEgtAASkAAAAAAAAAAEIHCgVfc3BhbiLxAwoJU3RyZWFtUmVmEhcKAmlkGAEgASgJQgu6SAhyBhABKICABBI2CgRraW5kGAIgASgOMhwudmliZXN5cy5zdG9yZS52MS5TdHJlYW1LaW5kQgq6SAeCAQQQASAAEh4KBHNwYW4YAyABKAlCC7pICHIGEAEogIAESACIAQESGAoFdGl0bGUYBCABKAlCCbpIBnIEKICABBI4CgVzdGF0ZRgFIAEoDjIdLnZpYmVzeXMuc3RvcmUudjEuU3RyZWFtU3RhdGVCCrpIB4IBBBABIAASEwoGbGVuZ3RoGAYgASgESAGIAQE69QG6SPEBGpoBCg1zdHJlYW0ubGVuZ3RoElBsZW5ndGggaXMgYWJzZW50IGZvciB0cmFuc2NyaXB0cyBhbmQgb3BlbmVkIGxvZ3MsIGFuZCByZXF1aXJlZCB3aGVuIGEgbG9nIGNsb3Nlcxo3aGFzKHRoaXMubGVuZ3RoKSA9PSAodGhpcy5raW5kID09IDEgJiYgdGhpcy5zdGF0ZSAhPSAxKRpSCgtzdHJlYW0uc3BhbhIhc3BhbiBpcyByZXF1aXJlZCBmb3IgYSB0cmFuc2NyaXB0GiB0aGlzLmtpbmQgIT0gMiB8fCBoYXModGhpcy5zcGFuKUIHCgVfc3BhbkIJCgdfbGVuZ3RoIl8KB0Jsb2JSZWYSJQoGc2hhMjU2GAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSDAoEc2l6ZRgCIAEoBBIfCgptZWRpYV90eXBlGAMgASgJQgu6SAhyBhABKICABCJ1CgxCbG9iQXR0YWNoZWQSGQoEc3BhbhgBIAEoCUILukgIcgYQASiAgAQSGQoEcm9sZRgCIAEoCUILukgIcgYQASiAgAQSLwoEYmxvYhgDIAEoCzIZLnZpYmVzeXMuc3RvcmUudjEuQmxvYlJlZkIGukgDyAEBKloKClN0cmVhbUtpbmQSGwoXU1RSRUFNX0tJTkRfVU5TUEVDSUZJRUQQABITCg9TVFJFQU1fS0lORF9MT0cQARIaChZTVFJFQU1fS0lORF9UUkFOU0NSSVBUEAIqkAEKC1N0cmVhbVN0YXRlEhwKGFNUUkVBTV9TVEFURV9VTlNQRUNJRklFRBAAEhcKE1NUUkVBTV9TVEFURV9PUEVORUQQARIWChJTVFJFQU1fU1RBVEVfRU5ERUQQAhIXChNTVFJFQU1fU1RBVEVfRkFJTEVEEAMSGQoVU1RSRUFNX1NUQVRFX0RFR1JBREVEEARCQVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_buf_validate_validate]);
+  fileDesc("Ch52aWJlc3lzL3N0b3JlL3YxL2NvbnRlbnQucHJvdG8SEHZpYmVzeXMuc3RvcmUudjEijAEKC01ldHJpY1BvaW50EhsKBnNlcmllcxgBIAEoCUILukgIcgYQASiAgAQSHgoEc3BhbhgCIAEoCUILukgIcgYQASiAgARIAIgBARIWCgV2YWx1ZRgDIAEoAUIHukgEEgJAARIfCgVjbG9jaxgEIAEoAUIQukgNEgtAASkAAAAAAAAAAEIHCgVfc3BhbiKIBQoJU3RyZWFtUmVmEhcKAmlkGAEgASgJQgu6SAhyBhABKICABBI2CgRraW5kGAIgASgOMhwudmliZXN5cy5zdG9yZS52MS5TdHJlYW1LaW5kQgq6SAeCAQQQASAAEh4KBHNwYW4YAyABKAlCC7pICHIGEAEogIAESACIAQESGAoFdGl0bGUYBCABKAlCCbpIBnIEKICABBI4CgVzdGF0ZRgFIAEoDjIdLnZpYmVzeXMuc3RvcmUudjEuU3RyZWFtU3RhdGVCCrpIB4IBBBABIAASEwoGbGVuZ3RoGAYgASgESAGIAQESMQoFb3duZXIYByABKAsyHS52aWJlc3lzLnN0b3JlLnYxLlN0cmVhbU93bmVySAKIAQE6zwK6SMsCGlgKDHN0cmVhbS5vd25lchIkc2VtYW50aWMgb3duZXIgYmVsb25ncyBvbmx5IHRvIGEgbG9nGiIhaGFzKHRoaXMub3duZXIpIHx8IHRoaXMua2luZCA9PSAxGpoBCg1zdHJlYW0ubGVuZ3RoElBsZW5ndGggaXMgYWJzZW50IGZvciB0cmFuc2NyaXB0cyBhbmQgb3BlbmVkIGxvZ3MsIGFuZCByZXF1aXJlZCB3aGVuIGEgbG9nIGNsb3Nlcxo3aGFzKHRoaXMubGVuZ3RoKSA9PSAodGhpcy5raW5kID09IDEgJiYgdGhpcy5zdGF0ZSAhPSAxKRpSCgtzdHJlYW0uc3BhbhIhc3BhbiBpcyByZXF1aXJlZCBmb3IgYSB0cmFuc2NyaXB0GiB0aGlzLmtpbmQgIT0gMiB8fCBoYXModGhpcy5zcGFuKUIHCgVfc3BhbkIJCgdfbGVuZ3RoQggKBl9vd25lciJfCgdCbG9iUmVmEiUKBnNoYTI1NhgBIAEoCUIVukgSchAyDl5bMC05YS1mXXs2NH0kEgwKBHNpemUYAiABKAQSHwoKbWVkaWFfdHlwZRgDIAEoCUILukgIcgYQASiAgAQidQoMQmxvYkF0dGFjaGVkEhkKBHNwYW4YASABKAlCC7pICHIGEAEogIAEEhkKBHJvbGUYAiABKAlCC7pICHIGEAEogIAEEi8KBGJsb2IYAyABKAsyGS52aWJlc3lzLnN0b3JlLnYxLkJsb2JSZWZCBrpIA8gBASLPAQoLU3RyZWFtT3duZXISPQoHc3RhcnR1cBgBIAEoDjIeLnZpYmVzeXMuc3RvcmUudjEuU3RhcnR1cFN0YWdlQgq6SAeCAQQQASAASAASMQoEZ2F0ZRgCIAEoCzIhLnZpYmVzeXMuc3RvcmUudjEuR2F0ZVN0cmVhbU93bmVySAASIQoKdG9vbF9idWlsZBgDIAEoCUILukgIcgYQASiAgARIABIcCgluYXJyYXRpb24YBCABKAhCB7pIBGoCCAFIAEINCgRraW5kEgW6SAIIASJ3Cg9HYXRlU3RyZWFtT3duZXISHgoJZXhlY3V0aW9uGAEgASgJQgu6SAhyBhABKICABBIzCgRnYXRlGAIgASgOMhkudmliZXN5cy5zdG9yZS52MS5Mb2dHYXRlQgq6SAeCAQQQASAAEg8KB2F0dGVtcHQYAyABKA0qWgoKU3RyZWFtS2luZBIbChdTVFJFQU1fS0lORF9VTlNQRUNJRklFRBAAEhMKD1NUUkVBTV9LSU5EX0xPRxABEhoKFlNUUkVBTV9LSU5EX1RSQU5TQ1JJUFQQAiqQAQoLU3RyZWFtU3RhdGUSHAoYU1RSRUFNX1NUQVRFX1VOU1BFQ0lGSUVEEAASFwoTU1RSRUFNX1NUQVRFX09QRU5FRBABEhYKElNUUkVBTV9TVEFURV9FTkRFRBACEhcKE1NUUkVBTV9TVEFURV9GQUlMRUQQAxIZChVTVFJFQU1fU1RBVEVfREVHUkFERUQQBCp/CgdMb2dHYXRlEhgKFExPR19HQVRFX1VOU1BFQ0lGSUVEEAASEgoOTE9HX0dBVEVfQlVJTEQQARIVChFMT0dfR0FURV9BQ0NVUkFDWRACEhYKEkxPR19HQVRFX0JFTkNITUFSSxADEhcKE0xPR19HQVRFX1ZBTElEQVRJT04QBEJBWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_buf_validate_validate, file_vibesys_store_v1_lifecycle]);
 
 /**
  * Value is a finite, possibly signed measurement. clock is run-clock seconds.
@@ -83,6 +85,13 @@ export type StreamRef = Message<"vibesys.store.v1.StreamRef"> & {
    * @generated from field: optional uint64 length = 6;
    */
   length?: bigint | undefined;
+
+  /**
+   * Additive: absent on historical log references. A transcript cannot carry it.
+   *
+   * @generated from field: optional vibesys.store.v1.StreamOwner owner = 7;
+   */
+  owner?: StreamOwner | undefined;
 };
 
 /**
@@ -152,6 +161,77 @@ export const BlobAttachedSchema: GenMessage<BlobAttached> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_content, 3);
 
 /**
+ * Semantic log ownership is independent of a stream's display title. Older logs
+ * have no owner and remain unattributed; transcript ownership uses StreamRef.span.
+ *
+ * @generated from message vibesys.store.v1.StreamOwner
+ */
+export type StreamOwner = Message<"vibesys.store.v1.StreamOwner"> & {
+  /**
+   * @generated from oneof vibesys.store.v1.StreamOwner.kind
+   */
+  kind: {
+    /**
+     * @generated from field: vibesys.store.v1.StartupStage startup = 1;
+     */
+    value: StartupStage;
+    case: "startup";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.GateStreamOwner gate = 2;
+     */
+    value: GateStreamOwner;
+    case: "gate";
+  } | {
+    /**
+     * @generated from field: string tool_build = 3;
+     */
+    value: string;
+    case: "toolBuild";
+  } | {
+    /**
+     * @generated from field: bool narration = 4;
+     */
+    value: boolean;
+    case: "narration";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message vibesys.store.v1.StreamOwner.
+ * Use `create(StreamOwnerSchema)` to create a new message.
+ */
+export const StreamOwnerSchema: GenMessage<StreamOwner> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_content, 4);
+
+/**
+ * @generated from message vibesys.store.v1.GateStreamOwner
+ */
+export type GateStreamOwner = Message<"vibesys.store.v1.GateStreamOwner"> & {
+  /**
+   * @generated from field: string execution = 1;
+   */
+  execution: string;
+
+  /**
+   * @generated from field: vibesys.store.v1.LogGate gate = 2;
+   */
+  gate: LogGate;
+
+  /**
+   * @generated from field: uint32 attempt = 3;
+   */
+  attempt: number;
+};
+
+/**
+ * Describes the message vibesys.store.v1.GateStreamOwner.
+ * Use `create(GateStreamOwnerSchema)` to create a new message.
+ */
+export const GateStreamOwnerSchema: GenMessage<GateStreamOwner> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_content, 5);
+
+/**
  * @generated from enum vibesys.store.v1.StreamKind
  */
 export enum StreamKind {
@@ -212,3 +292,39 @@ export enum StreamState {
  */
 export const StreamStateSchema: GenEnum<StreamState> = /*@__PURE__*/
   enumDesc(file_vibesys_store_v1_content, 1);
+
+/**
+ * @generated from enum vibesys.store.v1.LogGate
+ */
+export enum LogGate {
+  /**
+   * @generated from enum value: LOG_GATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: LOG_GATE_BUILD = 1;
+   */
+  BUILD = 1,
+
+  /**
+   * @generated from enum value: LOG_GATE_ACCURACY = 2;
+   */
+  ACCURACY = 2,
+
+  /**
+   * @generated from enum value: LOG_GATE_BENCHMARK = 3;
+   */
+  BENCHMARK = 3,
+
+  /**
+   * @generated from enum value: LOG_GATE_VALIDATION = 4;
+   */
+  VALIDATION = 4,
+}
+
+/**
+ * Describes the enum vibesys.store.v1.LogGate.
+ */
+export const LogGateSchema: GenEnum<LogGate> = /*@__PURE__*/
+  enumDesc(file_vibesys_store_v1_content, 2);

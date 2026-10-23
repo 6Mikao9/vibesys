@@ -152,7 +152,13 @@ export function skeletonScreenState(
       id: step.stage,
       label: STARTUP_LABELS[step.stage],
       state: step.state,
-      streamId: null,
+      streamId:
+        reading.streams
+          .filter(
+            stream =>
+              stream.owner['kind'] === 'startup_step' && stream.owner['stage'] === step.stage,
+          )
+          .at(-1)?.id ?? null,
     })),
     readOnly: true,
     record:
