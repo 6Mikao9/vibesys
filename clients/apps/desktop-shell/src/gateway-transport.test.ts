@@ -9,8 +9,9 @@ import {
   TailResponseSchema,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
+import {refusalOf} from '@vibesys/run-skeleton';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
-import {GrpcCode, GrpcError, grpcCode, isNotFound} from '@vibesys/transport';
+import {GrpcCode, GrpcError, grpcCode} from '@vibesys/transport';
 import {gatewayTransport} from './gateway-transport.js';
 
 /** The callback bridge over a faithful in-memory gateway; each call owns its cancellation. */
@@ -113,7 +114,7 @@ test('a stream ended with a gRPC status rethrows that status to the reader', asy
       return undefined;
     };
     const error = await read();
-    expect(grpcCode(error)).toBe(code);
-    expect(isNotFound(error)).toBe(code === GrpcCode.NOT_FOUND);
+    expect((error as {status?: number}).status).toBe(code);
+    expect(refusalOf(error) === 'not-found').toBe(code === GrpcCode.NOT_FOUND);
   }
 });

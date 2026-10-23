@@ -9,6 +9,7 @@ import {
   RecordSchema,
   RunLiveness,
   RuntimeType,
+  Severity,
   SkeletonResponseSchema,
   SpanStatus,
   type Record as StoreRecord,
@@ -319,3 +320,49 @@ for (const kind of ['running', 'draining', 'parked', 'ended'] as const)
       }
     }
   });
+
+test('the fold keeps the latest error notice of each epoch, wherever the notices sit', () => {
+  let state = 7;
+  const next = (bound: number) => {
+    state = (state * 1103515245 + 12345) % 2 ** 31;
+    return state % bound;
+  };
+  for (let round = 0; round < 12; round += 1) {
+    const records = Array.from({length: next(150)}, (_, index) =>
+      create(RecordSchema, {
+        seq: BigInt(index + 1),
+        epoch: 1 + Math.floor((index * 3) / 150),
+        body: {
+          case: 'notice',
+          value: {severity: [Severity.WARNING, Severity.ERROR, Severity.FATAL][next(3)] ?? 1},
+        },
+      }),
+    );
+    const folded = foldSkeleton(seedSkeleton(), records);
+    const latest = new Map<number, bigint>();
+    for (const record of records)
+      if (record.body.case === 'notice' && record.body.value.severity >= Severity.ERROR)
+        latest.set(record.epoch, record.seq);
+    expect(new Map(folded.failures.map(record => [record.epoch, record.seq]))).toEqual(latest);
+  }
+});
+
+const failure = (seq: bigint, epoch: number, severity: Severity) =>
+  create(RecordSchema, {seq, epoch, body: {case: 'notice', value: {severity}}});
+const keyframeOf = (failures: ReturnType<typeof failure>[], failuresTracked = true) =>
+  create(KeyframeSchema, {throughSeq: 305n, logOffset: 8n, failures, failuresTracked});
+
+test('a keyframe whose failures are not error notices of its prefix is refused', () => {
+  for (const bad of [
+    keyframeOf([failure(9999n, 1, Severity.ERROR)]),
+    keyframeOf([failure(4n, 1, Severity.WARNING)]),
+    keyframeOf([failure(4n, 1, Severity.ERROR), failure(5n, 1, Severity.FATAL)]),
+    keyframeOf([failure(4n, 1, Severity.ERROR)], false),
+  ])
+    expect(() => seedSkeleton(bad)).toThrow('keyframe.failures');
+  expect(
+    seedSkeleton(keyframeOf([failure(4n, 1, Severity.ERROR), failure(300n, 2, Severity.FATAL)]))
+      .failures,
+  ).toHaveLength(2);
+  expect(seedSkeleton(keyframeOf([], false)).failuresTracked).toBe(false);
+});

@@ -2,14 +2,25 @@ import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {
   HostService,
+  RecordSchema,
+  Severity,
   SkeletonRequestSchema,
   SkeletonResponseSchema,
+  type Record as StoreRecord,
   TailRequestSchema,
+  type TailResponse,
   TailResponseSchema,
 } from '@vibesys/proto';
 import type {AbortSignalLike} from '@vibesys/transport';
 import {type Actor, createActor, fromPromise} from 'xstate';
-import {type SkeletonLoaderInput, skeletonLoaderMachine, type TailInput} from './loader-machine.js';
+import {DescriptorCache} from './descriptors.js';
+import {
+  type FailuresInput,
+  type SkeletonLoaderInput,
+  skeletonLoaderMachine,
+  type TailInput,
+} from './loader-machine.js';
+import {RECORD_WINDOW} from './loading.js';
 
 /** Generic unary/server-stream byte bridge. Both operations must release resources on abort. */
 export interface RunTransport {
@@ -18,17 +29,35 @@ export interface RunTransport {
 }
 const SERVICE = `/${HostService.typeName}/`;
 
-export function skeletonLoaderMachineFor(transport: RunTransport): typeof skeletonLoaderMachine {
+/** Every record the loader reads reaches this once, so no other consumer reads the log again. */
+export type RecordsListener = (records: readonly Uint8Array[]) => void;
+
+export function skeletonLoaderMachineFor(
+  transport: RunTransport,
+  records: RecordsListener = () => {},
+  descriptors: DescriptorCache = new DescriptorCache(),
+): typeof skeletonLoaderMachine {
   return skeletonLoaderMachine.provide({
     actors: {
-      skeleton: fromPromise(({input, signal}) =>
-        transport
+      skeleton: fromPromise(({input, signal}) => {
+        const lease = descriptors.lease();
+        return transport
           .unary(
             `${SERVICE}${HostService.method.skeleton.name}`,
-            toBinary(SkeletonRequestSchema, create(SkeletonRequestSchema, {runId: input})),
+            toBinary(
+              SkeletonRequestSchema,
+              create(SkeletonRequestSchema, {runId: input, knownDescriptorsSha256: lease.known}),
+            ),
             signal,
           )
-          .then(bytes => fromBinary(SkeletonResponseSchema, bytes)),
+          .then(bytes => {
+            const response = lease.restore(fromBinary(SkeletonResponseSchema, bytes));
+            records(response.records);
+            return response;
+          });
+      }),
+      failures: fromPromise<void, FailuresInput>(({input, signal}) =>
+        pageFailures(transport, input, signal),
       ),
       tail: fromPromise<void, TailInput>(async ({input, signal}) => {
         const request = toBinary(
@@ -41,10 +70,91 @@ export function skeletonLoaderMachineFor(transport: RunTransport): typeof skelet
           signal,
         )) {
           if (signal.aborted) return;
-          input.receive({type: 'tail', response: fromBinary(TailResponseSchema, bytes)});
+          const response = fromBinary(TailResponseSchema, bytes);
+          records(response.records);
+          const fresh = unseen(response, input.cursor);
+          if (fresh !== response) input.receive({type: 'window', through: response.throughSeq});
+          if (fresh) input.receive({type: 'tail', response: fresh});
         }
       }),
     },
+  });
+}
+
+/** Pages of a record window each: how far back a failure is looked for; about 2000 records. */
+export const FAILURE_PAGES = 8;
+
+/**
+ * Error notices of the current epoch before `before`, newest page first, from bounded reads of
+ * the log: each page a Tail from its start, cancelled once it reaches the page after. It stops at
+ * the first page holding one, at the epoch's start, or after FAILURE_PAGES pages.
+ */
+async function pageFailures(
+  transport: RunTransport,
+  input: FailuresInput,
+  signal: AbortSignalLike,
+): Promise<void> {
+  let end = input.before;
+  for (
+    let page = 0;
+    end !== undefined && page < FAILURE_PAGES && end > input.epochStart;
+    page += 1
+  ) {
+    const start = end - RECORD_WINDOW > input.epochStart ? end - RECORD_WINDOW : input.epochStart;
+    const found = await readPage(transport, input, start, end, signal);
+    if (found.length > 0) {
+      input.receive({type: 'failures', records: found});
+      return;
+    }
+    end = start;
+  }
+}
+
+/** The current epoch's records in [start, end), by a Tail cancelled on reaching `end`. */
+async function readPage(
+  transport: RunTransport,
+  input: FailuresInput,
+  start: bigint,
+  end: bigint,
+  signal: AbortSignalLike,
+): Promise<StoreRecord[]> {
+  const found: StoreRecord[] = [];
+  const request = toBinary(
+    TailRequestSchema,
+    create(TailRequestSchema, {runId: input.runId, fromSeq: start}),
+  );
+  for await (const bytes of transport.stream(
+    `${SERVICE}${HostService.method.tail.name}`,
+    request,
+    signal,
+  )) {
+    if (signal.aborted) return found;
+    const records = fromBinary(TailResponseSchema, bytes).records.map(item =>
+      fromBinary(RecordSchema, item),
+    );
+    found.push(
+      ...records.filter(
+        record =>
+          record.seq < end &&
+          record.epoch === input.epoch &&
+          record.body.case === 'notice' &&
+          record.body.value.severity >= Severity.ERROR,
+      ),
+    );
+    if (records.some(record => record.seq >= end)) break;
+  }
+  return found;
+}
+
+/** The part of a Tail message at or after the cursor, if any; the rest only feeds the record log. */
+function unseen(response: TailResponse, cursor: bigint): TailResponse | undefined {
+  const records = response.records;
+  const start = records.findIndex(bytes => fromBinary(RecordSchema, bytes).seq >= cursor);
+  if (start < 0) return undefined;
+  if (start === 0) return response;
+  return create(TailResponseSchema, {
+    records: records.slice(start),
+    throughSeq: response.throughSeq,
   });
 }
 
@@ -53,10 +163,12 @@ export function startSkeletonLoader(
   transport: RunTransport,
   schedule: ScheduleTimeout,
   input: SkeletonLoaderInput,
+  records?: RecordsListener,
+  descriptors?: DescriptorCache,
 ): Actor<typeof skeletonLoaderMachine> {
   if (!input.runId || !Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0)
     throw new Error('loader: runId and positive timeoutMs required');
-  return createActor(skeletonLoaderMachineFor(transport), {
+  return createActor(skeletonLoaderMachineFor(transport, records, descriptors), {
     input,
     clock: clockFrom(schedule),
   }).start();

@@ -1,6 +1,5 @@
 /** Generic protobuf bridge. The caller owns every call and cancels it on leaving its screen. */
 import {type HostKey, hostFromKey} from '@vibesys/hosts';
-import {GrpcCode, GrpcError} from '@vibesys/transport';
 
 export const GATEWAY_CHANNEL = 'vibesys:gateway';
 export interface GatewayCall<T> {
@@ -14,21 +13,47 @@ export interface GatewayBridge {
     method: string,
     bytes: Uint8Array,
     receive: (bytes: Uint8Array) => void,
-    /** `code` is the gateway's gRPC status when the host answered with one. */
-    ended: (error?: string, code?: number) => void,
+    ended: (error?: string, status?: number) => void,
   ): {cancel(): void};
 }
 /**
- * A unary reply as it crosses the context bridge. The bridge keeps only an Error's message, so a
- * failure travels as data and `gatewayBridge` turns it back into a typed error in the renderer.
+ * What the preload's unary resolves with. An `Error`'s own properties do not cross the context
+ * bridge (only its message and stack do), so a refusal travels as a value carrying its gRPC
+ * status, and `gatewayBridge` turns it back into a `GatewayError` in the page.
  */
 export type GatewayUnaryReply =
   | {readonly bytes: Uint8Array}
-  | {readonly error: string; readonly code?: number};
-/** What the preload exposes; the renderer reads it only through `gatewayBridge`. */
-export interface GatewayPreloadBridge {
+  | {readonly error: string; readonly status?: number};
+/** The bridge the preload exposes: values only across the context bridge. */
+export interface GatewayPreload {
   unary(host: HostKey, method: string, bytes: Uint8Array): GatewayCall<GatewayUnaryReply>;
   stream: GatewayBridge['stream'];
+}
+/** A call the gateway or the link failed; `status` is the gRPC code when the gateway refused it. */
+export class GatewayError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+/** The page's bridge over the preload's: a refused unary rejects with a `GatewayError`. */
+export function gatewayBridge(preload: GatewayPreload): GatewayBridge {
+  return {
+    unary(host, method, bytes) {
+      const call = preload.unary(host, method, bytes);
+      return {
+        result: call.result.then(reply => {
+          if ('bytes' in reply) return reply.bytes;
+          throw new GatewayError(reply.error, reply.status);
+        }),
+        cancel: () => call.cancel(),
+      };
+    },
+    stream: (host, method, bytes, receive, ended) =>
+      preload.stream(host, method, bytes, receive, ended),
+  };
 }
 export interface GatewayRequest {
   readonly kind: 'unary' | 'stream';
@@ -38,7 +63,7 @@ export interface GatewayRequest {
 }
 export type GatewayReply =
   | {readonly bytes: Uint8Array}
-  | {readonly end: true; readonly error?: string; readonly code?: number};
+  | {readonly end: true; readonly error?: string; readonly status?: number};
 
 export function parseGatewayRequest(value: unknown): GatewayRequest {
   if (value === null || typeof value !== 'object')
@@ -57,32 +82,4 @@ export function parseGatewayRequest(value: unknown): GatewayRequest {
   if (!(bytes instanceof Uint8Array) || bytes.byteLength > 16 * 1024 * 1024)
     throw new Error('gateway bytes must be at most 16 MiB');
   return {kind, host: host as HostKey, method, bytes};
-}
-
-/** The renderer's typed failure for an ended call: the gRPC status survives the bridge. */
-export function gatewayFailure(error: string, code?: number): Error {
-  return code === undefined ? new Error(error) : new GrpcError(code, error);
-}
-
-/** The host answered that it holds no such run or stream. */
-export function isNotFoundCode(code: number | undefined): boolean {
-  return code === GrpcCode.NOT_FOUND;
-}
-
-/** The renderer's bridge over the preload's: a failed unary call rejects with `gatewayFailure`. */
-export function gatewayBridge(preload: GatewayPreloadBridge): GatewayBridge {
-  return {
-    unary(host, method, bytes) {
-      const call = preload.unary(host, method, bytes);
-      return {
-        result: call.result.then(reply => {
-          if ('bytes' in reply) return reply.bytes;
-          throw gatewayFailure(reply.error, reply.code);
-        }),
-        cancel: () => call.cancel(),
-      };
-    },
-    stream: (host, method, bytes, receive, ended) =>
-      preload.stream(host, method, bytes, receive, ended),
-  };
 }

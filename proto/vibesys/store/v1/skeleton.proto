@@ -66,6 +66,11 @@ message RunProcess {
 // seek without parsing old records. The gateway reads only these two headers;
 // it passes the entire encoded keyframe through without interpreting its body.
 message Keyframe {
+  option (buf.validate.message).cel = {
+    id: "keyframe.failures_within_prefix"
+    message: "failures must be error notices of the prefix: sequence at most through_seq, at most one per epoch, and only a keyframe that tracks them may carry any"
+    expression: "this.failures.all(f, f.seq <= this.through_seq && has(f.notice) && f.notice.severity >= 2) && this.failures.map(f, f.epoch).unique() && (this.failures.size() == 0 || this.failures_tracked)"
+  };
   uint64 through_seq = 1 [(buf.validate.field).uint64.gt = 0];
   uint64 log_offset = 2 [(buf.validate.field).uint64 = {
     gte: 8
@@ -76,6 +81,13 @@ message Keyframe {
   repeated StreamRef streams = 5;
   repeated EpochVersion epochs = 6;
   repeated LifecycleVersion lifecycles = 7;
+  // The latest error notice of each epoch, whole, so a reader can show a run's diagnostic
+  // without reading the records the keyframe summarises.
+  repeated Record failures = 8;
+  // True when the writer folded every record through through_seq into `failures`, so that an
+  // empty list means no error notice. Keyframes written before the field are false: their
+  // reader recovers the failure facts from the log.
+  bool failures_tracked = 9;
 }
 
 message SpanHistory {
@@ -100,9 +112,20 @@ message MetricVersion {
   MetricPoint point = 2 [(buf.validate.field).required = true];
 }
 
+// A stored keyframe carries epoch.descriptors inline. The gateway replaces them
+// with descriptors_sha256 on the wire (SkeletonResponse.descriptor_sets), since
+// every epoch of a run usually repeats one set. Exactly one of the two names the
+// descriptors of an epoch that has any. The wire form is not valid under the
+// EpochStarted descriptor rules until a reader has restored them.
 message EpochVersion {
+  option (buf.validate.message).cel = {
+    id: "epoch_version.descriptors_once"
+    message: "descriptors are inline or addressed by hash, not both"
+    expression: "this.descriptors_sha256 == '' || !has(this.epoch.descriptors)"
+  };
   uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
   EpochStarted epoch = 2 [(buf.validate.field).required = true];
+  string descriptors_sha256 = 3 [(buf.validate.field).string.pattern = "^([0-9a-f]{64})?$"];
 }
 
 message LifecycleVersion {

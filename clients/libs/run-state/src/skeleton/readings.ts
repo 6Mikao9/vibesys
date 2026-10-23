@@ -34,7 +34,8 @@ function readingsBySpan(view: StoreView): ReadonlyMap<string, readonly Reading[]
   return new Map([...points].map(([span, rows]) => [span, [...rows.values()]]));
 }
 
-export function measuredSpans(spans: readonly Span[], view: StoreView): Span[] {
+/** The real input gate's readings and its value of the objective metric, whether or not any idea was measured. */
+function inputOf(spans: readonly Span[], view: StoreView) {
   const bySpan = readingsBySpan(view);
   const metric = view.epochs.at(-1)?.epoch?.run?.objectives[0]?.series;
   const inputs = spans.filter(
@@ -44,12 +45,22 @@ export function measuredSpans(spans: readonly Span[], view: StoreView): Span[] {
         'GATE_SUBJECT_INPUT',
   );
   // An input has several gates (build, validation, benchmark), in any order: its value is the one
-  // that measured the objective, never whichever gate came last.
+  // that measured the objective, never whichever gate came last. Every reader of the input (the
+  // chart, the hero tile, the vs-input column) takes it from here.
   const input =
     inputs.filter(span => bySpan.get(span.id)?.some(item => item.name === metric)).at(-1) ??
     inputs.at(-1);
-  const inputReadings = input ? (bySpan.get(input.id) ?? []) : [];
-  const inputValue = inputReadings.find(item => item.name === metric)?.value;
+  const readings = input ? (bySpan.get(input.id) ?? []) : [];
+  return {bySpan, readings, metric, value: readings.find(item => item.name === metric)?.value};
+}
+
+/** The input's measured value of the objective metric, or null before it is measured. */
+export function inputMeasurement(spans: readonly Span[], view: StoreView): number | null {
+  return inputOf(spans, view).value ?? null;
+}
+
+export function measuredSpans(spans: readonly Span[], view: StoreView): Span[] {
+  const {bySpan, readings: inputReadings, metric, value: inputValue} = inputOf(spans, view);
   return spans.map(span => {
     if (span.label?.kind !== 'gate') return span;
     const rows = bySpan.get(span.id) ?? [];

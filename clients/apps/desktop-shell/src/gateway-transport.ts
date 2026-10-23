@@ -1,6 +1,6 @@
 /** App-owned adapter between the Electron callback bridge and the neutral skeleton transport. */
 import type {HostKey} from '@vibesys/hosts';
-import {type GatewayBridge, gatewayFailure} from '@vibesys/ipc';
+import type {GatewayBridge} from '@vibesys/ipc';
 import type {RunTransport} from '@vibesys/run-skeleton';
 import {registerAbort} from '@vibesys/transport';
 
@@ -8,11 +8,13 @@ class ByteQueue {
   readonly #queue: Uint8Array[] = [];
   #buffered = 0;
   #ended = false;
-  #error: Error | undefined;
+  #error: string | undefined;
+  #status: number | undefined;
   #wake: (() => void) | undefined;
-  readonly finish = (error?: string, code?: number): void => {
+  readonly finish = (error?: string, status?: number): void => {
     this.#ended = true;
-    this.#error = error === undefined ? undefined : gatewayFailure(error, code);
+    this.#error = error;
+    this.#status = status;
     this.#wake?.();
   };
   readonly receive = (bytes: Uint8Array): void => {
@@ -32,7 +34,8 @@ class ByteQueue {
       return {done: false, value: bytes};
     }
     if (this.#ended) {
-      if (this.#error !== undefined) throw this.#error;
+      if (this.#error !== undefined)
+        throw Object.assign(new Error(this.#error), {status: this.#status});
       return {done: true, value: undefined};
     }
     await new Promise<void>(resolve => {

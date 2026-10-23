@@ -161,7 +161,8 @@ class FileRunLogWriter:
         self.sequence = 0
         self._epoch = CurrentEpoch()
         self._path = path
-        self._skeleton = Keyframe()
+        # The writer folds every record of the log, recovered ones included.
+        self._skeleton = Keyframe(failures_tracked=True)
         self._checkpoint_seq = 0
         self._process: RunProcess | None = None
         self._resources = ReleaseStack()

@@ -21,8 +21,7 @@ export interface RunIntentsContext {
 export type RunIntentsEvent =
   | {readonly type: 'send'; readonly request: PostIntentRequest}
   | {readonly type: 'retry'; readonly requestId: string}
-  | {readonly type: 'outcomes'; readonly outcomes: readonly IntentState[]}
-  | {readonly type: 'watchFailed'; readonly error: string};
+  | {readonly type: 'outcomes'; readonly outcomes: readonly IntentState[]};
 
 function outcomeEntries(
   entries: readonly IntentEntry[],
@@ -99,7 +98,6 @@ export const runIntentsMachine = setup({
       },
       on: {
         outcomes: {actions: 'apply'},
-        watchFailed: {actions: assign(({event}) => ({error: event.error}))},
       },
       initial: 'idle',
       states: {
@@ -191,27 +189,5 @@ export const runIntentsMachine = setup({
         },
       },
     },
-  },
-});
-
-/** Outcome delivery owns its retry independently of admission calls. */
-export const intentWatchMachine = setup({
-  types: {events: {} as {type: 'ended'} | {type: 'missing'}},
-  actors: {
-    read: fromCallback(() => {
-      throw new Error('read was not provided');
-    }),
-  },
-  delays: {retry: 1000},
-}).createMachine({
-  initial: 'watching',
-  states: {
-    watching: {
-      invoke: {src: 'read', onError: 'recovering'},
-      on: {ended: 'recovering', missing: 'missing'},
-    },
-    recovering: {after: {retry: 'watching'}},
-    /** The host holds no such run: retrying cannot find it. */
-    missing: {type: 'final'},
   },
 });

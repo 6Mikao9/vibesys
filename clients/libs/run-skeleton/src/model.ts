@@ -7,6 +7,7 @@ import {
   MetricHistorySchema,
   MetricVersionSchema,
   RecordSchema,
+  Severity,
   SpanHistorySchema,
   SpanVersionSchema,
   type Record as StoreRecord,
@@ -14,7 +15,10 @@ import {
 import {validateKeyframe} from './keyframe.js';
 
 /** Writer-only byte offsets do not belong to the client's data model. */
-export type Skeleton = Pick<Keyframe, 'spans' | 'metrics' | 'streams' | 'epochs' | 'lifecycles'> & {
+export type Skeleton = Pick<
+  Keyframe,
+  'spans' | 'metrics' | 'streams' | 'epochs' | 'lifecycles' | 'failures' | 'failuresTracked'
+> & {
   readonly throughSeq: bigint | undefined;
 };
 
@@ -23,12 +27,13 @@ export function seedSkeleton(keyframe?: Keyframe): Skeleton {
   if (keyframe) validateKeyframe(keyframe);
   return keyframe
     ? copySkeleton(keyframe)
-    : {...copySkeleton(create(KeyframeSchema)), throughSeq: undefined};
+    : {...copySkeleton(create(KeyframeSchema, {failuresTracked: true})), throughSeq: undefined};
 }
 
 function copySkeleton(keyframe: Keyframe): Skeleton {
-  const {throughSeq, spans, metrics, streams, epochs, lifecycles} = clone(KeyframeSchema, keyframe);
-  return {throughSeq, spans, metrics, streams, epochs, lifecycles};
+  const {throughSeq, spans, metrics, streams, epochs, lifecycles, failures, failuresTracked} =
+    clone(KeyframeSchema, keyframe);
+  return {throughSeq, spans, metrics, streams, epochs, lifecycles, failures, failuresTracked};
 }
 
 /**
@@ -76,6 +81,11 @@ function foldBody(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): voi
       break;
     case 'lifecycle':
       state.lifecycles.push(create(LifecycleVersionSchema, {seq, lifecycle: body.value}));
+      break;
+    case 'notice':
+      // The latest error notice of each epoch stands for all of them, as the writer's keyframe has it.
+      if (body.value.severity >= Severity.ERROR)
+        state.failures = [...state.failures.filter(kept => kept.epoch !== record.epoch), record];
       break;
     case 'stream': {
       const index = state.streams.findIndex(stream => stream.id === body.value.id);
@@ -141,4 +151,20 @@ function validateSequence(previous: bigint | undefined, record: StoreRecord): vo
       `record.seq: expected ${legacy ? 'an increasing phase 1 sequence' : expected}, got ${record.seq}`,
     );
   }
+}
+
+/**
+ * Error notices read from the log, which a keyframe without failure facts could not give: the
+ * latest of each epoch stands for all of them, and none past the prefix counts.
+ */
+export function absorbFailures(state: Skeleton, found: readonly StoreRecord[]): Skeleton {
+  let failures = state.failures;
+  for (const record of found) {
+    if (record.body.case !== 'notice' || record.body.value.severity < Severity.ERROR) continue;
+    if (record.seq > (state.throughSeq ?? 0n)) continue;
+    const kept = failures.find(item => item.epoch === record.epoch);
+    if (kept !== undefined && kept.seq >= record.seq) continue;
+    failures = [...failures.filter(item => item.epoch !== record.epoch), record];
+  }
+  return {...state, failures};
 }

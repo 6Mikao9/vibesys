@@ -39,6 +39,7 @@ from vs_proto._generated.vibesys.api.v1.host_mutate_generated_pb import (
 )
 from vs_proto._generated.vibesys.api.v1.host_pb import (
     BlobResult,
+    DescriptorSet,
     GetBlobsRequest,
     GetBlobsResponse,
     HelloRequest,
@@ -274,6 +275,7 @@ __all__ = [
     "ComparisonAttrs",
     "ComparisonVerdict",
     "ConfigurationFailed",
+    "DescriptorSet",
     "Direction",
     "DrainGoal",
     "Draining",

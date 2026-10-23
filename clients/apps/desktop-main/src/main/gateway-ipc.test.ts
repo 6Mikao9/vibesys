@@ -33,12 +33,12 @@ test('HostCall refuses missing host configuration and malformed protobuf', () =>
   expect(() => configuredHostCall(new Uint8Array([255]), '/src/vibesys')).toThrow();
 });
 
-test('terminal replies keep every gRPC code and a single error prefix', () => {
+test('terminal replies keep every gRPC status and a single error prefix', () => {
   for (let code = 0; code <= 16; code++) {
     expect(gatewayEnd(new GrpcError(code, 'missing run'))).toEqual({
       end: true,
       error: 'missing run',
-      code,
+      status: code,
     });
   }
   expect(gatewayEnd(new Error('caller cancelled'))).toEqual({

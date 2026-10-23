@@ -14,7 +14,6 @@ import {foldSkeleton, seedSkeleton} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
-import {GrpcCode, GrpcError} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {SnapshotFrom} from 'xstate';
 import {
@@ -67,7 +66,9 @@ test('model: every setting, content and log operation belongs to its active stat
             nextSeq: (skeleton.throughSeq ?? 0n) + 1n,
             complete: true,
           },
-          failed: false,
+          progress: {phase: 'complete'},
+          failure: undefined,
+          terminal: false,
         },
         {type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}},
         ...live.operations.flatMap(id => [
@@ -122,7 +123,7 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   expect(transport.calls).toHaveLength(calls);
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await reached(actor, snapshot => snapshot.context.ui.views['build-log']?.lines.length === 1);
-  expect(transport.activeStreams).toBe(4);
+  expect(transport.activeStreams).toBe(3);
   actor.send({type: 'toggle', enabled: false});
   await reached(actor, snapshot => snapshot.matches('off'));
   await Promise.resolve();
@@ -175,7 +176,7 @@ test('off is inert, live records append while scrubbed and switching streams can
   actor.stop();
 });
 
-test('native record history owns its cursor and retries without losing startup or diagnostics', async () => {
+test('native record history comes from the loader without a second reader of the log', async () => {
   const fixture = storeRunFixture('live');
   const transport = new FakeRunTransport(fixture);
   const clock = new FakeClock();
@@ -215,23 +216,13 @@ test('native record history owns its cursor and retries without losing startup o
     expect(skeletonScreenState(SEED, load.skeleton, model, ui).recordDiagnostic?.message).toBe(
       'Measurement unavailable',
     );
-    transport.fail(`${SERVICE}Tail`, new Error('Disconnected'));
-    await reached(
-      actor,
-      snapshot =>
-        snapshot.context.ui.recordLogError !== null &&
-        snapshot.context.ui.recordLogError !== undefined,
-    );
-    transport.recover(`${SERVICE}Tail`);
-    clock.advanceBy(1000);
-    await transport.called(`${SERVICE}Tail`);
-    await Promise.resolve();
-    expect(
-      transport.calls
-        .filter(call => call.method === `${SERVICE}Tail`)
-        .some(call => fromBinary(TailRequestSchema, call.request).fromSeq === seq + 1n),
-    ).toBe(true);
     expect(actor.getSnapshot().context.ui.recordLog).toHaveLength(fixture.records.length + 1);
+    // One reader: the records came from the loader's Skeleton and Tail, never a second Tail.
+    const tails = transport.calls.filter(call => call.method === `${SERVICE}Tail`);
+    expect(tails).toHaveLength(1);
+    expect(
+      fromBinary(TailRequestSchema, tails[0]?.request ?? new Uint8Array()).fromSeq,
+    ).toBeGreaterThan(0n);
   } finally {
     actor.stop();
   }
@@ -252,10 +243,15 @@ test('failed unary and corrupt content surface errors without using the legacy p
       new FakeClock().schedule,
       {seed: SEED},
     );
-    await reached(actor, snapshot => snapshot.context.error !== null);
-    expect(actor.getSnapshot().context.error).toBe(
-      operation === 'Skeleton' ? 'Disconnected' : 'Content unavailable',
+    await reached(
+      actor,
+      snapshot => snapshot.context.error !== null || snapshot.context.failure !== undefined,
     );
+    expect(actor.getSnapshot().context.error).toBe(
+      operation === 'Skeleton' ? null : 'Content unavailable',
+    );
+    if (operation === 'Skeleton')
+      expect(actor.getSnapshot().context.failure?.kind).toBe('transport');
     actor.stop();
   }
 });
@@ -551,12 +547,12 @@ test.each([
     else transport.fail(`${SERVICE}Tail`, new Error('connection lost'));
     // The retry timer is armed only after the stream's outcome has been consumed.
     await reached(actor, () => clock.pending > 0);
-    expect(actor.getSnapshot().context.error).toBe(kind === 'short' ? null : 'Disconnected');
+    expect(actor.getSnapshot().context.failure === undefined).toBe(kind === 'short');
     expect(actor.getSnapshot().context.load?.skeleton.throughSeq).toBe(through);
     if (kind === 'live') {
       transport.recover(`${SERVICE}Tail`);
       clock.advanceBy(1000);
-      await reached(actor, snapshot => snapshot.context.error === null);
+      await reached(actor, snapshot => snapshot.context.failure === undefined);
     }
     actor.stop();
     expect(clock.pending).toBe(0);
@@ -571,7 +567,9 @@ test.each([
   const transport = new FakeRunTransport(fixture);
   const clock = new FakeClock();
   const settings = new HostSetting();
-  const missing = new GrpcError(GrpcCode.NOT_FOUND, 'lstat runs/run-a: no such file or directory');
+  const missing = Object.assign(new Error('lstat runs/run-a: no such file or directory'), {
+    status: 5,
+  });
   if (method === 'Skeleton') transport.fail(`${SERVICE}Skeleton`, missing);
   const actor = startGatewayRun(
     {
@@ -586,7 +584,9 @@ test.each([
     await reached(actor, snapshot => snapshot.context.load !== undefined);
     transport.fail(`${SERVICE}Tail`, missing);
   }
-  await reached(actor, snapshot => snapshot.context.error === 'Not on this host');
+  const final = (snapshot: ReturnType<typeof actor.getSnapshot>): boolean =>
+    snapshot.context.terminal && snapshot.context.failure?.kind === 'refused';
+  await reached(actor, final);
   const reads = () => transport.calls.filter(call => /\/(Skeleton|Tail)$/.test(call.method)).length;
   const before = reads();
   // WatchRuns keeps reporting the link as healthy; the reader's answer stays final.
@@ -594,7 +594,7 @@ test.each([
     clock.advanceBy(1000);
     await Promise.resolve();
   }
-  expect(actor.getSnapshot().context.error).toBe('Not on this host');
+  expect(final(actor.getSnapshot())).toBe(true);
   expect(reads()).toBe(before);
   actor.stop();
   expect(clock.pending).toBe(0);
@@ -628,11 +628,11 @@ test.each([
   if (failure === 'deadline') clock.advanceBy(30000);
   else if (failure === 'closed') transport.close(`${SERVICE}WatchRuns`);
   else transport.fail(`${SERVICE}WatchRuns`, new Error('offline'));
-  await reached(actor, snapshot => snapshot.context.error === 'Disconnected');
+  await reached(actor, snapshot => snapshot.context.failure !== undefined);
   transport.release(`${SERVICE}WatchRuns`);
   transport.recover(`${SERVICE}WatchRuns`);
   clock.advanceBy(1000);
-  await reached(actor, snapshot => snapshot.context.error === null);
+  await reached(actor, snapshot => snapshot.context.failure === undefined);
   transport.observe(
     create(WatchRunsResponseSchema, {
       runId: 'run-a',

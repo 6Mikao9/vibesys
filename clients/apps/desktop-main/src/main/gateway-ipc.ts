@@ -103,13 +103,13 @@ export function installGatewayIpc(
 
 /** Serialize one terminal reply without duplicating the renderer's Error name. */
 export function gatewayEnd(error?: unknown): Extract<GatewayReply, {end: true}> {
-  const code = grpcCode(error);
+  const status = grpcCode(error);
   return {
     end: true,
     ...(error === undefined
       ? {}
-      : {error: code !== undefined && error instanceof Error ? error.message : String(error)}),
-    ...(code === undefined ? {} : {code}),
+      : {error: status !== undefined && error instanceof Error ? error.message : String(error)}),
+    ...(status === undefined ? {} : {status}),
   };
 }
 

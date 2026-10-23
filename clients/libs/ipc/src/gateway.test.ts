@@ -1,6 +1,5 @@
 import {expect, test} from 'bun:test';
-import {GrpcError, grpcCode} from '@vibesys/transport';
-import {type GatewayUnaryReply, gatewayBridge, parseGatewayRequest} from './index.js';
+import {GatewayError, type GatewayUnaryReply, gatewayBridge, parseGatewayRequest} from './index.js';
 
 function preloadAnswering(reply: GatewayUnaryReply) {
   return gatewayBridge({
@@ -29,18 +28,18 @@ test('generic gateway calls validate all routing keys and preserve protobuf byte
 });
 
 test('a unary failure keeps its gRPC status across the preload, for every status', async () => {
-  for (let code = 0; code <= 16; code++) {
-    const error = await preloadAnswering({error: 'no such run', code})
+  for (let status = 0; status <= 16; status++) {
+    const error = await preloadAnswering({error: 'no such run', status})
       .unary('ssh:host-a', '/vibesys.api.v1.HostService/Skeleton', new Uint8Array())
       .result.catch((error: unknown) => error);
-    expect(error).toBeInstanceOf(GrpcError);
-    expect(grpcCode(error)).toBe(code);
+    expect(error).toBeInstanceOf(GatewayError);
+    expect((error as GatewayError).status).toBe(status);
     expect((error as Error).message).toBe('no such run');
   }
   const plain = await preloadAnswering({error: 'Run transport v2 is off'})
     .unary('ssh:host-a', '/vibesys.api.v1.HostService/Skeleton', new Uint8Array())
     .result.catch((error: unknown) => error);
-  expect(grpcCode(plain)).toBeUndefined();
+  expect((plain as GatewayError).status).toBeUndefined();
   expect((plain as Error).message).toBe('Run transport v2 is off');
   expect(
     await preloadAnswering({bytes: new Uint8Array([7])}).unary(

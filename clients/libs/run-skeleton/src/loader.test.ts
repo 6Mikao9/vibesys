@@ -8,7 +8,7 @@ import {
   TailRequestSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
-import {type AbortSignalLike, GrpcCode, GrpcError, registerAbort} from '@vibesys/transport';
+import {type AbortSignalLike, registerAbort} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {Actor, SnapshotFrom} from 'xstate';
 import {type RunTransport, skeletonLoaderMachine, startSkeletonLoader} from './index.js';
@@ -24,6 +24,21 @@ const batch = (seq: bigint) =>
         create(RecordSchema, {
           seq,
           body: {case: 'lifecycle', value: {state: {case: 'running', value: {}}}},
+        }),
+      ),
+    ],
+  });
+
+/** The first record of a run: its epoch, the first thing a screen can show. */
+const opening = (seq: bigint) =>
+  create(TailResponseSchema, {
+    throughSeq: seq,
+    records: [
+      toBinary(
+        RecordSchema,
+        create(RecordSchema, {
+          seq,
+          body: {case: 'epochStarted', value: {runId: 'run-a', epoch: 1}},
         }),
       ),
     ],
@@ -144,7 +159,7 @@ test('live byte bridge starts at next_seq, catches up, folds live batches and cl
   transport.finishSkeleton(toBinary(SkeletonResponseSchema, initial()));
   await reached(actor, snapshot => snapshot.matches({following: 'catchingUp'}));
   expect(transport.fromSeq).toBe(1n);
-  transport.push(toBinary(TailResponseSchema, batch(1n)));
+  transport.push(toBinary(TailResponseSchema, opening(1n)));
   await reached(actor, snapshot => snapshot.context.load?.nextSeq === 2n);
   expect(actor.getSnapshot().matches({following: 'catchingUp'})).toBe(true);
   transport.push(toBinary(TailResponseSchema, batch(2n)));
@@ -210,29 +225,30 @@ test.each([
     expect(transport.streamSignal.aborted || transport.streamClosed).toBe(true);
 });
 
-test('closed streams recover from a fresh Skeleton and release retries when stopped', async () => {
+test('a cut stream resumes from its cursor without another Skeleton and stops with its owner', async () => {
   const transport = new FakeRunTransport();
   const clock = new FakeClock();
   const actor = startSkeletonLoader(transport, clock.schedule, INPUT);
+  transport.finishSkeleton(toBinary(SkeletonResponseSchema, initial()));
+  await reached(actor, snapshot => snapshot.matches('following'));
   for (let cycle = 0; cycle < 5; cycle += 1) {
-    transport.finishSkeleton(toBinary(SkeletonResponseSchema, initial()));
-    await reached(actor, snapshot => snapshot.matches('following'));
-    transport.push(toBinary(TailResponseSchema, batch(1n)));
-    await reached(actor, snapshot => snapshot.context.load?.nextSeq === 2n);
-    transport.push(toBinary(TailResponseSchema, batch(2n)));
+    const first = BigInt(1 + 2 * cycle);
+    transport.push(toBinary(TailResponseSchema, batch(first)));
+    await reached(actor, snapshot => snapshot.context.load?.nextSeq === first + 1n);
+    transport.push(toBinary(TailResponseSchema, batch(first + 1n)));
     await reached(actor, snapshot => snapshot.matches({following: 'live'}));
     expect(actor.getSnapshot().context.error).toBeUndefined();
     transport.endStream();
     await reached(actor, snapshot => snapshot.matches('recovering'));
-    expect(actor.getSnapshot().context.load?.nextSeq).toBe(3n);
+    expect(actor.getSnapshot().context.load?.nextSeq).toBe(first + 2n);
     expect(actor.getSnapshot().context.error?.kind).toBe('stream-ended');
     expect(clock.pending).toBe(1);
     clock.advanceBy(1000);
-    expect(actor.getSnapshot().matches('loading')).toBe(true);
+    expect(actor.getSnapshot().matches('following')).toBe(true);
+    expect(transport.fromSeq).toBe(first + 2n);
   }
   actor.stop();
   expect(clock.pending).toBe(0);
-  expect(transport.unarySignal?.aborted).toBe(true);
 });
 
 // gRPC defines codes 0 through 16; only the host's NotFound answer is final.
@@ -240,20 +256,22 @@ test.each(
   Array.from({length: 17}, (_, code) => code).flatMap(code =>
     (['skeleton', 'tail'] as const).map(call => [code, call] as const),
   ),
-)('gRPC code %i on %s retries unless the host holds no such run', async (code, call) => {
+)('gRPC status %i on %s retries unless the host will never serve the run', async (code, call) => {
   const transport = new FakeRunTransport();
   const clock = new FakeClock();
   const actor = startSkeletonLoader(transport, clock.schedule, INPUT);
-  const failure = new GrpcError(code, 'lstat run: no such file or directory');
+  const failure = Object.assign(new Error('lstat run: no such file or directory'), {status: code});
   if (call === 'skeleton') transport.failSkeleton(failure);
   else {
     transport.finishSkeleton(toBinary(SkeletonResponseSchema, initial()));
     await reached(actor, snapshot => snapshot.matches('following'));
     transport.failStream(failure);
   }
-  const missing = code === GrpcCode.NOT_FOUND;
+  // The statuses a retry cannot change: invalid, not found, denied, too large, unsupported, lost.
+  const missing = [3, 5, 7, 8, 9, 11, 12, 15, 16].includes(code);
   await reached(actor, snapshot => snapshot.matches(missing ? 'failed' : 'recovering'));
-  expect(actor.getSnapshot().context.error?.kind).toBe(missing ? 'not-found' : 'transport');
+  expect(actor.getSnapshot().context.error?.kind).toBe(missing ? 'refused' : 'transport');
+  if (code === 5) expect(actor.getSnapshot().context.error).toMatchObject({reason: 'not-found'});
   // A final answer arms no retry; a transient one arms exactly one.
   expect(clock.pending).toBe(missing ? 0 : 1);
   actor.stop();
