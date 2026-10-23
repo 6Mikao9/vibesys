@@ -243,8 +243,10 @@ def test_a_combine_of_two_candidates_that_lost_alone_is_built_from_main_and_repo
     assert composite.verdict.value == "better"
     assert composite.best_part == "h2"  # the stronger part alone
     shown = render(PromptTemplate.PORTFOLIO, after)
-    # The task declares no noise: the verdict is a strict comparison and must not claim noise.
-    assert "better in a strict comparison" in _flat(shown), shown
+    # The task declares no noise: the verdict is held against the framework's default, not a declared noise.
+    assert "better beyond the framework's default noise: the task declares none" in _flat(shown), (
+        shown
+    )
     assert "beyond" not in _flat(shown).split("combined from `h1`")[1].split(".")[0]
     assert "combined from `h1`" in shown, shown
     assert "`h2`" in shown
