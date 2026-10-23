@@ -13,7 +13,6 @@ import {type AdoptedCandidate, adoptedCandidate, endReason, unclipped} from './e
 import {overviewAt, traceAt} from './live.js';
 import {type ModelNames, NO_MODEL_NAMES} from './model-names.js';
 import {
-  canResumeEnded,
   commandable,
   type HistoryProgress,
   type MachineBlock,
@@ -588,7 +587,7 @@ export function endedView(state: RunPageState): EndedView | null {
             direction,
             end.uncompared === true,
           );
-  const resume = canResumeEnded(phase) ? 'Resume' : null;
+  const resume = 'Resume';
   return {title: label, tone: tone === 'live' ? 'neutral' : tone, reason, resume};
 }
 

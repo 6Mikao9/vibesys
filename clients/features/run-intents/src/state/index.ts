@@ -2,6 +2,7 @@
 export {
   type IntentEntry,
   type IntentRow,
+  historyEpoch,
   intentRows,
   intentWatchMachine,
   type RunIntentsContext,

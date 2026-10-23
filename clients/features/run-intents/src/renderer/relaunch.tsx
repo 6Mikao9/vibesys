@@ -2,7 +2,9 @@ import type {HostKey} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import {
+  type RelaunchLiveness,
   type RelaunchObservation,
+  RunLiveness,
   relaunchLabel,
   relaunchRequest,
   relaunchTarget,
@@ -13,6 +15,8 @@ import type {relaunchMachine} from '../state/index.js';
 import {relaunchActor} from './effects/relaunch.js';
 import type {RelaunchView} from './ui/relaunch.js';
 
+const UNKNOWN: RelaunchLiveness = {epoch: 0n, value: RunLiveness.UNSPECIFIED};
+
 /** Keep the in-flight request and result while the reader observes its new epoch. */
 export function useRelaunch(props: {
   readonly bridge: GatewayBridge;
@@ -21,7 +25,7 @@ export function useRelaunch(props: {
   readonly runId: string;
   readonly observation: RelaunchObservation | undefined;
   readonly schedule: ScheduleTimeout;
-}): RelaunchView | undefined {
+}): {readonly view: RelaunchView | undefined; readonly liveness: RelaunchLiveness} {
   const [snapshot, setSnapshot] = useState<SnapshotFrom<typeof relaunchMachine> | null>(null);
   const current = useRef<ReturnType<typeof relaunchActor> | null>(null);
   const observation = useRef(props.observation);
@@ -50,14 +54,15 @@ export function useRelaunch(props: {
   useEffect(() => {
     if (props.observation) current.current?.send({type: 'observe', observation: props.observation});
   }, [props.observation]);
-  if (!enabled || !snapshot) return undefined;
+  if (!enabled || !snapshot) return {view: undefined, liveness: UNKNOWN};
+  const liveness = snapshot.context.liveness;
   if (
     snapshot.matches('ready') &&
     relaunchTarget(snapshot.context.observation, snapshot.context.liveness) === null &&
     snapshot.context.result === null
   )
-    return undefined;
-  return {
+    return {view: undefined, liveness};
+  const view: RelaunchView = {
     state:
       snapshot.matches('ready') &&
       relaunchTarget(snapshot.context.observation, snapshot.context.liveness) === null
@@ -71,4 +76,5 @@ export function useRelaunch(props: {
     available: relaunchTarget(snapshot.context.observation, snapshot.context.liveness) !== null,
     launch: () => current.current?.send({type: 'relaunch'}),
   };
+  return {view, liveness};
 }

@@ -535,8 +535,7 @@ describe('the run page store', () => {
 
   test('the ended banner names the round to resume from only when resumable', () => {
     const stopped = fold(initial(), [{type: 'record', record: RECORDS[7] as RunRecord}]).state;
-    expect(endedView(stopped)).toMatchObject({title: 'Stopped', resume: null});
-    expect(fold(stopped, [{type: 'resume-ended'}]).requests).toEqual([]);
+    expect(endedView(stopped)).toMatchObject({title: 'Stopped', resume: 'Resume'});
     const failed = fold(initial(), [{type: 'record', record: RECORDS[8] as RunRecord}]).state;
     expect(endedView(failed)).toMatchObject({title: 'Failed', resume: 'Resume'});
     expect(fold(failed, [{type: 'resume-ended'}]).requests).toEqual([
@@ -1028,14 +1027,12 @@ test('terminal session events supersede a stale live listing for every control',
     const ended = fold(attached, [{type: 'run-core', core}]).state;
     expect(headerView(ended).pause.shown).toBe(false);
     expect(headerView(ended).pauseNow.shown).toBe(false);
-    expect(endedView(ended)?.resume).toBeNull();
+    expect(endedView(ended)?.resume).toBe('Resume');
     expect(
-      fold(ended, [
-        {type: 'pause'},
-        {type: 'ask-pause-now'},
-        {type: 'confirm-pause-now'},
-        {type: 'resume-ended'},
-      ]).requests,
+      fold(ended, [{type: 'pause'}, {type: 'ask-pause-now'}, {type: 'confirm-pause-now'}]).requests,
     ).toEqual([]);
+    expect(fold(ended, [{type: 'resume-ended'}]).requests).toEqual([
+      {kind: 'resume-ended', fromRound: null},
+    ]);
   }
 });

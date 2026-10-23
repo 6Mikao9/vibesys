@@ -11,8 +11,11 @@ import {
   LifecycleSchema,
   Outcome,
   RecordSchema,
+  RelaunchRefusal,
+  RunLiveness,
   type Record as StoreRecord,
   TailResponseSchema,
+  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
@@ -156,8 +159,9 @@ function verifyPermissions(container: HTMLElement, input: Input) {
   expect(buttons.includes('Pause now')).toBe(live);
   expect(buttons.includes('Pause')).toBe(live && input.state !== 'draining');
   expect(buttons.includes('Guidance')).toBe(input.state === 'running');
+  // The host admits Resume after every ending; its ended flag is kept for older readers.
   expect(buttons.includes('Resume')).toBe(
-    input.state === 'parked' || (input.state === 'failed' && input.resumable),
+    input.state === 'parked' || input.state === 'failed' || input.state === 'finished',
   );
 }
 
@@ -281,5 +285,216 @@ test('property: controls equal writer permissions for live, parked, failed and f
   await fc.assert(
     fc.asyncProperty(INPUT, input => verifyHistory(input, true)),
     {numRuns: 32, seed: 3430},
+  );
+});
+
+const KINDS = [
+  'starting',
+  'running',
+  'operatorHold',
+  'draining',
+  'parked',
+  'finished',
+  'failed',
+] as const;
+type Kind = (typeof KINDS)[number];
+const STEP = fc.oneof(
+  fc.record({
+    kind: fc.constant('lifecycle' as const),
+    epoch: fc.integer({min: 1, max: 4}),
+    state: fc.constantFrom(...KINDS),
+    resumable: fc.boolean(),
+  }),
+  fc.record({
+    kind: fc.constant('tail' as const),
+    epoch: fc.integer({min: 1, max: 4}),
+    action: fc.constantFrom(IntentAction.PAUSE, IntentAction.PAUSE_NOW, IntentAction.RESUME),
+    applied: fc.boolean(),
+  }),
+  fc.record({
+    kind: fc.constant('liveness' as const),
+    epoch: fc.integer({min: 1, max: 4}),
+    value: fc.constantFrom(
+      RunLiveness.ALIVE,
+      RunLiveness.INTERRUPTED,
+      RunLiveness.ENDED,
+      RunLiveness.UNSPECIFIED,
+    ),
+  }),
+  fc.record({kind: fc.constant('ack' as const)}),
+);
+type Step = typeof STEP extends fc.Arbitrary<infer Value> ? Value : never;
+
+function lifecycleOf(kind: Kind, resumable: boolean) {
+  return create(LifecycleSchema, {
+    state:
+      kind === 'finished' || kind === 'failed'
+        ? {
+            case: 'ended',
+            value: {outcome: kind === 'finished' ? Outcome.FINISHED : Outcome.FAILED, resumable},
+          }
+        : kind === 'parked'
+          ? {case: 'parked', value: {}}
+          : kind === 'draining'
+            ? {case: 'draining', value: {goal: DrainGoal.PARK}}
+            : kind === 'operatorHold'
+              ? {case: 'running', value: {hold: {reason: {case: 'operator', value: {}}}}}
+              : {case: kind, value: {}},
+  });
+}
+
+/** What the host would admit given the newest facts, however the three streams interleaved. */
+function expectedButtons(facts: {
+  lifecycleEpoch: number;
+  kind: Kind;
+  liveness: {epoch: number; value: RunLiveness};
+  tailEpoch: number;
+}): string[] {
+  const newest = Math.max(facts.lifecycleEpoch, facts.liveness.epoch, facts.tailEpoch);
+  if (facts.lifecycleEpoch < newest) return [];
+  const value = facts.liveness.epoch === newest ? facts.liveness.value : RunLiveness.UNSPECIFIED;
+  const live = ['starting', 'running', 'operatorHold', 'draining'].includes(facts.kind);
+  const buttons: string[] = [];
+  if (live && value !== RunLiveness.INTERRUPTED) {
+    if (facts.kind === 'starting' || facts.kind === 'running') buttons.push('Pause');
+    buttons.push('Pause now');
+    if (facts.kind === 'running' || facts.kind === 'operatorHold') buttons.push('Guidance');
+  }
+  const stopped = !live;
+  if (value !== RunLiveness.ALIVE && (stopped || value === RunLiveness.INTERRUPTED))
+    buttons.push('Resume');
+  return buttons;
+}
+
+async function verifyInterleaving(steps: readonly Step[]) {
+  const bridge = new FakeGatewayBridge();
+  const clock = new FakeClock();
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  const facts = {
+    lifecycleEpoch: 1,
+    kind: 'running' as Kind,
+    resumable: true,
+    liveness: {epoch: 0, value: RunLiveness.UNSPECIFIED},
+    tailEpoch: 0,
+  };
+  let seq = 0n;
+  const render = () =>
+    act(async () =>
+      root.render(
+        <RunIntents
+          bridge={bridge}
+          host={'local' as HostKey}
+          projectRoot={recordedProjectRoot('/project')}
+          runId="run-1"
+          enabled
+          schedule={clock.schedule}
+          relaunch={{
+            epoch: BigInt(facts.lifecycleEpoch),
+            lifecycle: lifecycleOf(facts.kind, facts.resumable),
+          }}
+        />,
+      ),
+    );
+  const buttons = () =>
+    [...container.querySelectorAll('button')]
+      .map(button => button.textContent ?? '')
+      .filter(text => ['Pause', 'Pause now', 'Guidance', 'Resume'].includes(text));
+  const check = () => {
+    expect(buttons().sort()).toEqual(expectedButtons(facts).sort());
+    expect(
+      historyRows(container).filter(text => text.endsWith('· Applied')).length,
+    ).toBeLessThanOrEqual(1);
+  };
+  try {
+    await render();
+    check();
+    for (const [index, step] of steps.entries()) {
+      // Each stream is ordered by itself; only the streams interleave with one another.
+      if (step.kind === 'lifecycle') {
+        facts.lifecycleEpoch = Math.max(facts.lifecycleEpoch, step.epoch);
+        facts.kind = step.state;
+        facts.resumable = step.resumable;
+        await render();
+      } else if (step.kind === 'tail') {
+        const epoch = Math.max(facts.tailEpoch, step.epoch);
+        const records: StoreRecord[] = [];
+        if (epoch > facts.tailEpoch)
+          records.push(
+            create(RecordSchema, {seq: ++seq, epoch, body: {case: 'epochStarted', value: {epoch}}}),
+          );
+        records.push(
+          create(RecordSchema, {
+            seq: ++seq,
+            epoch,
+            body: {
+              case: 'intent',
+              value: {
+                controlId: `step-${index}`,
+                action: step.action,
+                step: step.applied ? IntentStep.APPLIED : IntentStep.REFUSED,
+              },
+            },
+          }),
+        );
+        facts.tailEpoch = epoch;
+        await act(async () => activeStream(bridge).receive(packet(records)));
+      } else if (step.kind === 'liveness') {
+        facts.liveness = {
+          epoch: Math.max(facts.liveness.epoch, step.epoch),
+          value: step.value,
+        };
+        const stream = bridge.streams
+          .filter(s => s.method.endsWith('/WatchRuns') && !s.cancelled)
+          .at(-1);
+        if (!stream) throw new Error('WatchRuns required');
+        await act(async () =>
+          stream.receive(
+            toBinary(
+              WatchRunsResponseSchema,
+              create(WatchRunsResponseSchema, {
+                runId: 'run-1',
+                liveness: step.value,
+                head: {epoch: facts.liveness.epoch},
+              }),
+            ),
+          ),
+        );
+      } else {
+        const resume = [...container.querySelectorAll('button')].find(
+          button => button.textContent === 'Resume' && !button.disabled,
+        );
+        const before = bridge.calls.length;
+        if (resume) await act(async () => resume.click());
+        const call = bridge.calls.at(-1);
+        if (resume && bridge.calls.length > before && call)
+          await act(async () =>
+            call.resolve(
+              toBinary(
+                HostCallResponseSchema,
+                create(HostCallResponseSchema, {
+                  result: {
+                    case: 'relaunch',
+                    value: {outcome: {case: 'refusal', value: RelaunchRefusal.LOCKED}},
+                  },
+                }),
+              ),
+            ),
+          );
+      }
+      check();
+    }
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+}
+
+test('property: controls equal what the host admits across any interleaving of lifecycle, history, liveness and acknowledgement', async () => {
+  await fc.assert(
+    fc.asyncProperty(fc.array(STEP, {minLength: 1, maxLength: 8}), steps =>
+      verifyInterleaving(steps),
+    ),
+    {numRuns: 60, seed: 3431},
   );
 });

@@ -194,7 +194,8 @@ test('live, draining, parked, resumed and finished observations keep the right c
     await render(2n, create(LifecycleSchema, {state: {case: 'ended', value: {resumable: false}}}));
     expect(labels()).not.toContain('Pause');
     expect(labels()).not.toContain('Pause now');
-    expect(labels().filter(label => label === 'Resume')).toEqual([]);
+    // The host admits Resume after any ending; the flag it keeps for older readers does not narrow it.
+    expect(labels().filter(label => label === 'Resume')).toEqual(['Resume']);
   } finally {
     await act(async () => root.unmount());
     container.remove();

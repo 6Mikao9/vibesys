@@ -6,12 +6,12 @@ import {
   type RelaunchObservation,
   type RunIntentAction,
   runIntent,
-  runIntentActions,
   runReference,
+  writerControls,
 } from '@vibesys/runs/intents';
 import {type JSX, useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
-import {intentRows, type runIntentsMachine} from '../state/index.js';
+import {historyEpoch, intentRows, type runIntentsMachine} from '../state/index.js';
 import {intentsActor} from './effects/controls.js';
 import {useRelaunch} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
@@ -48,7 +48,7 @@ export function useRunIntents(props: {
     };
   }, [props.bridge, props.host, props.runId, props.enabled, props.schedule]);
   const projectRoot = props.projectRoot;
-  const relaunch = useRelaunch({
+  const {view: machineRelaunch, liveness} = useRelaunch({
     bridge: props.bridge,
     host: props.host,
     projectRoot: projectRoot ?? '',
@@ -62,10 +62,20 @@ export function useRunIntents(props: {
   ) => current.current?.send(request);
   if (!props.enabled || !snapshot || projectRoot === undefined)
     return {controls: null, busy, sendRequest};
-  const observedEpoch = props.relaunch?.epoch ?? 0n;
+  // Committed history can name a newer epoch than the lifecycle stream has reached; until that
+  // stream catches up the lifecycle describes a writer that no longer exists, so it offers nothing.
+  const writer = writerControls({
+    observation: props.relaunch,
+    liveness,
+    historyEpoch: snapshot ? historyEpoch(snapshot.context) : 0n,
+  });
+  const relaunch = machineRelaunch && {
+    ...machineRelaunch,
+    available: machineRelaunch.available && writer.relaunch !== null,
+  };
   const confirmedEpoch = relaunch?.appliedEpoch ?? 0n;
-  const epoch = observedEpoch > confirmedEpoch ? observedEpoch : confirmedEpoch;
-  const actions = runIntentActions(props.relaunch);
+  const epoch = writer.epoch > confirmedEpoch ? writer.epoch : confirmedEpoch;
+  const actions = writer.actions;
   const send = (action: RunIntentAction) => {
     if (!actions.includes(action)) return;
     const request = runIntent(

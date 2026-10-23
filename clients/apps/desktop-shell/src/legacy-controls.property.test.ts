@@ -36,7 +36,7 @@ function listedRun(input: Input): HostRun {
   };
 }
 
-test('property: legacy controls follow terminal journal facts despite stale listings and late events', () => {
+test('property: legacy controls follow terminal journal facts despite stale listings and late events, and Resume follows host admission', () => {
   fc.assert(
     fc.property(INPUT, input => {
       const seed = {
@@ -65,10 +65,9 @@ test('property: legacy controls follow terminal journal facts despite stale list
       state = runPageStep(state, {type: 'run-core', core}).state;
       expect(headerView(state).pause.shown).toBe(false);
       expect(headerView(state).pauseNow.shown).toBe(false);
-      if (input.terminal === 'completed' || !input.resumable) {
-        expect(endedView(state)?.resume).toBeNull();
-        expect(runPageStep(state, {type: 'resume-ended'}).requests).toEqual([]);
-      }
+      // The host admits Resume after every ending, whatever flag its record keeps for old readers.
+      expect(endedView(state)?.resume).toBe('Resume');
+      expect(runPageStep(state, {type: 'resume-ended'}).requests).toHaveLength(1);
       for (const type of ['pause', 'ask-pause-now', 'confirm-pause-now'] as const)
         expect(runPageStep(state, {type}).requests).toEqual([]);
     }),

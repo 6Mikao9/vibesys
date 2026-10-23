@@ -3,7 +3,7 @@ import {create, toBinary} from '@bufbuild/protobuf';
 import {LifecycleSchema, Outcome, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
 import * as intents from './index.js';
 
-test('only resumable ended observations offer Resume while a live writer never does', () => {
+test('every ended observation offers Resume while a live writer never does', () => {
   for (let epoch = 1; epoch <= 5; epoch += 1) {
     const observed = BigInt(epoch);
     for (const [state, lifecycle] of [
@@ -34,13 +34,23 @@ test('only resumable ended observations offer Resume while a live writer never d
         ),
       ).toBeNull();
     }
-    for (const outcome of [Outcome.FINISHED, Outcome.FAILED]) {
-      const lifecycle = create(LifecycleSchema, {state: {case: 'ended', value: {outcome}}});
-      for (const value of [RunLiveness.ALIVE, RunLiveness.ENDED, RunLiveness.INTERRUPTED])
+    // The host admits Resume after every ending; the flag it keeps for older readers is ignored.
+    for (const outcome of [Outcome.FINISHED, Outcome.FAILED])
+      for (const resumable of [true, false]) {
+        const lifecycle = create(LifecycleSchema, {
+          state: {case: 'ended', value: {outcome, resumable}},
+        });
+        for (const value of [RunLiveness.ENDED, RunLiveness.INTERRUPTED, RunLiveness.UNSPECIFIED])
+          expect(
+            intents.relaunchTarget({epoch: observed, lifecycle}, {epoch: observed, value}),
+          ).toEqual({epoch: observed, state: 'ended'});
         expect(
-          intents.relaunchTarget({epoch: observed, lifecycle}, {epoch: observed, value}),
-        ).toEqual(null);
-    }
+          intents.relaunchTarget(
+            {epoch: observed, lifecycle},
+            {epoch: observed, value: RunLiveness.ALIVE},
+          ),
+        ).toBeNull();
+      }
     const lifecycle = create(LifecycleSchema, {state: {case: 'running', value: {}}});
     expect(
       intents.relaunchTarget(

@@ -142,10 +142,17 @@ const BACKGROUND = fc.record({
 type Generated<A> = A extends fc.Arbitrary<infer Value> ? Value : never;
 type Scenario = Generated<typeof BACKGROUND> & {
   lifecycle: Generated<typeof STATE>;
+  liveness: RunLiveness;
   loading: boolean;
 };
+const LIVENESS = fc.constantFrom(
+  RunLiveness.ALIVE,
+  RunLiveness.INTERRUPTED,
+  RunLiveness.ENDED,
+  RunLiveness.UNSPECIFIED,
+);
 
-function peerFor({lifecycle, epoch, loading, history, modernHead}: Scenario): RunPeer {
+function peerFor({lifecycle, liveness, epoch, loading, history, modernHead}: Scenario): RunPeer {
   const source = storeRunFixture('live');
   const records = source.records.map(record =>
     create(RecordSchema, {
@@ -182,12 +189,7 @@ function peerFor({lifecycle, epoch, loading, history, modernHead}: Scenario): Ru
     records,
     initialCount: loading ? source.initialCount : records.length,
   };
-  const input = wire(
-    fixture,
-    lifecycle.state.case === 'ended' || lifecycle.state.case === 'parked'
-      ? RunLiveness.ENDED
-      : RunLiveness.ALIVE,
-  );
+  const input = wire(fixture, liveness);
   if (modernHead) {
     const observed = fromBinary(WatchRunsResponseSchema, new Uint8Array(input.watchRuns));
     if (!observed.head) throw new Error('head required');
@@ -215,7 +217,7 @@ async function verifyOffers(input: Scenario) {
         <Profiler
           id="run"
           onRender={() => {
-            expect(++renders).toBeLessThan(40);
+            renders += 1;
           }}
         >
           <GatewayRun
@@ -240,26 +242,24 @@ async function verifyOffers(input: Scenario) {
     const buttons = [...container.querySelectorAll('button')].map(button => button.textContent);
     const state = input.lifecycle.state;
     const live = state.case === 'starting' || state.case === 'running' || state.case === 'draining';
-    expect(buttons.includes('Pause now')).toBe(live);
+    // What the host would admit: live actions need a writer that is not dead, and Resume needs
+    // one that is not alive; every ending is admitted, whatever flag the ended record keeps.
+    const dead = input.liveness === RunLiveness.INTERRUPTED;
+    expect(buttons.includes('Pause now')).toBe(live && !dead);
     expect(buttons.includes('Pause')).toBe(
       live &&
-        state.case !== 'draining' &&
-        !(state.case === 'running' && state.value.hold?.reason.case === 'operator'),
+        !dead &&
+        (state.case === 'starting' ||
+          (state.case === 'running' && state.value.hold?.reason.case !== 'operator')),
     );
-    expect(buttons.includes('Guidance')).toBe(state.case === 'running');
+    expect(buttons.includes('Guidance')).toBe(state.case === 'running' && !dead);
+    expect(buttons.includes('Resume')).toBe(
+      input.liveness !== RunLiveness.ALIVE && (!live || dead),
+    );
     if (!input.loading) {
       expect(container.querySelector('[inert] button') === null).toBe(true);
     }
-    expect(buttons.includes('Resume')).toBe(
-      state.case === 'parked' ||
-        (state.case === 'ended' &&
-          state.value.resumable &&
-          state.value.outcome !== Outcome.FINISHED),
-    );
-    if (state.case === 'ended' && state.value.outcome === Outcome.FINISHED) {
-      expect(buttons).not.toContain('Pause');
-      expect(buttons).not.toContain('Resume');
-    }
+    expect(renders).toBeLessThan(40);
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -267,19 +267,19 @@ async function verifyOffers(input: Scenario) {
   expect(peer.streams.every(stream => stream.cancelled)).toBe(true);
 }
 
-test('property: every loading live run exposes Pause now through the real app bridge', async () => {
+test('property: every loading live run exposes the controls its writer admits through the real app bridge', async () => {
   await fc.assert(
-    fc.asyncProperty(LIVE, BACKGROUND, async (lifecycle, background) => {
-      await verifyOffers({...background, lifecycle, loading: true});
+    fc.asyncProperty(LIVE, LIVENESS, BACKGROUND, async (lifecycle, liveness, background) => {
+      await verifyOffers({...background, lifecycle, liveness, loading: true});
     }),
     {numRuns: 24, seed: 226},
   );
 });
 
-test('property: ready run controls follow the writer lifecycle, including finished runs', async () => {
+test('property: ready run controls follow the writer lifecycle and liveness, including interrupted writers and every ended run', async () => {
   await fc.assert(
-    fc.asyncProperty(STATE, BACKGROUND, async (lifecycle, background) => {
-      await verifyOffers({...background, lifecycle, loading: false});
+    fc.asyncProperty(STATE, LIVENESS, BACKGROUND, async (lifecycle, liveness, background) => {
+      await verifyOffers({...background, lifecycle, liveness, loading: false});
     }),
     {numRuns: 32, seed: 229},
   );

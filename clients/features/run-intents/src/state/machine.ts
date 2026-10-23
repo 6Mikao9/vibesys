@@ -241,6 +241,14 @@ const INTENT_ACTIONS: Record<NonNullable<PostIntentRequest['intent']['case']>, I
   setParallelism: IntentAction.SET_MAX_PARALLEL,
 };
 
+/** The newest epoch committed history names, which can lead the lifecycle stream. */
+export function historyEpoch(context: RunIntentsContext): bigint {
+  return context.outcomes.reduce(
+    (newest, row) => (row.epoch !== null && row.epoch > newest ? row.epoch : newest),
+    0n,
+  );
+}
+
 /** History includes writer outcomes posted elsewhere, plus local requests still awaiting them. */
 export function intentRows(context: RunIntentsContext, epoch: bigint): readonly IntentRow[] {
   const local = context.entries.map(entry => ({

@@ -216,25 +216,11 @@ export {
   RunLiveness,
   relaunchLabel,
   relaunchRequest,
-  relaunchTarget,
   sameRelaunchObservation,
 } from './relaunch.js';
-
-/** Writer lifecycle determines available live actions, independent of the reader or scrubber. */
-export function runIntentActions(
-  observation: import('./relaunch.js').RelaunchObservation | undefined,
-): readonly RunIntentAction[] {
-  if (!observation || observation.epoch < 1n) return [];
-  switch (observation.lifecycle?.state.case) {
-    case 'starting':
-      return ['pause', 'pauseNow'];
-    case 'running':
-      return observation.lifecycle.state.value.hold?.reason.case === 'operator'
-        ? ['pauseNow', 'steer']
-        : ['pause', 'pauseNow', 'steer'];
-    case 'draining':
-      return ['pauseNow'];
-    default:
-      return [];
-  }
-}
+export {
+  relaunchTarget,
+  type WriterControls,
+  type WriterFacts,
+  writerControls,
+} from './controls.js';

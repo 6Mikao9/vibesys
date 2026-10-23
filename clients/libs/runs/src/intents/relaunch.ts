@@ -6,7 +6,6 @@ import {
   HostService,
   type Lifecycle,
   LifecycleSchema,
-  Outcome,
   RelaunchRefusal,
   type RelaunchRequest,
   RelaunchRequestSchema,
@@ -96,24 +95,6 @@ export function sameRelaunchObservation(a: RelaunchObservation, b: RelaunchObser
       ? a.lifecycle === b.lifecycle
       : equals(LifecycleSchema, a.lifecycle, b.lifecycle))
   );
-}
-
-/** Use the latest writer facts, never the scrubbed timeline position. */
-export function relaunchTarget(
-  observation: RelaunchObservation,
-  liveness: RelaunchLiveness,
-): RelaunchTarget | null {
-  const live = liveness.epoch === observation.epoch ? liveness.value : RunLiveness.UNSPECIFIED;
-  if (observation.epoch < 1n || liveness.epoch > observation.epoch || live === RunLiveness.ALIVE)
-    return null;
-  const state = observation.lifecycle?.state;
-  if (state?.case === 'parked') return {epoch: observation.epoch, state: 'parked'};
-  if (state?.case === 'ended') {
-    return state.value.resumable && state.value.outcome !== Outcome.FINISHED
-      ? {epoch: observation.epoch, state: 'ended'}
-      : null;
-  }
-  return live === RunLiveness.INTERRUPTED ? {epoch: observation.epoch, state: 'interrupted'} : null;
 }
 
 export const RUN_LIVENESS_METHOD = `/${HostService.typeName}/${HostService.method.watchRuns.name}`;
