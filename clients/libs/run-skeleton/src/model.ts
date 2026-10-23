@@ -152,3 +152,19 @@ function validateSequence(previous: bigint | undefined, record: StoreRecord): vo
     );
   }
 }
+
+/**
+ * Error notices read from the log, which a keyframe without failure facts could not give: the
+ * latest of each epoch stands for all of them, and none past the prefix counts.
+ */
+export function absorbFailures(state: Skeleton, found: readonly StoreRecord[]): Skeleton {
+  let failures = state.failures;
+  for (const record of found) {
+    if (record.body.case !== 'notice' || record.body.value.severity < Severity.ERROR) continue;
+    if (record.seq > (state.throughSeq ?? 0n)) continue;
+    const kept = failures.find(item => item.epoch === record.epoch);
+    if (kept !== undefined && kept.seq >= record.seq) continue;
+    failures = [...failures.filter(item => item.epoch !== record.epoch), record];
+  }
+  return {...state, failures};
+}

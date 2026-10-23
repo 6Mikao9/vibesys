@@ -20,7 +20,7 @@ import {
   TailRequestSchema,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
-import {MAX_ATTEMPTS, RECORD_WINDOW, RETRY_CAP_MS} from '@vibesys/run-skeleton';
+import {FAILURE_PAGES, MAX_ATTEMPTS, RECORD_WINDOW, RETRY_CAP_MS} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {
@@ -380,25 +380,53 @@ function withEarlyFailure(trailing: number): SimRun['records'] {
   return all.map((record, index) => create(RecordSchema, {...record, seq: BigInt(index + 1)}));
 }
 
+/** What the banner says after the page has loaded, and how many Tails the load cost. */
+async function bannerOf(records: SimRun['records'], run: Partial<SimRun>) {
+  const {clock, gateway, actor} = open({records, ...run}, {rttMs: 20, bytesPerMs: 1400});
+  await until(clock, () => false, MINUTE);
+  const {load, ui} = actor.getSnapshot().context;
+  if (!load) throw new Error('loaded history required');
+  const whole = projectSkeleton(load.skeleton, load.skeleton.throughSeq ?? 0n);
+  actor.stop();
+  return {
+    message: skeletonScreenState(SEED, load.skeleton, whole, ui).recordDiagnostic?.message,
+    tails: gateway.callsTo('Tail').length,
+  };
+}
+
 test('a finished run’s failure diagnostic does not depend on how many records follow it', async () => {
-  for (const trailing of [0, 256, 257, 700]) {
-    const records = withEarlyFailure(trailing);
-    for (const keyframes of [[], [records.length], [Math.floor(records.length / 2)]]) {
-      const {clock, gateway, actor} = open({records, keyframes}, {rttMs: 20, bytesPerMs: 1400});
-      await until(clock, () => (actor.getSnapshot().context.ui.recordLog?.length ?? 0) >= 1);
-      await until(clock, () => false, MINUTE);
-      const {load, ui} = actor.getSnapshot().context;
-      if (!load) throw new Error('loaded history required');
-      const whole = projectSkeleton(load.skeleton, load.skeleton.throughSeq ?? 0n);
-      const label = `${trailing} records after the notice, checkpoint ${keyframes[0] ?? 'none'}`;
-      expect(
-        skeletonScreenState(SEED, load.skeleton, whole, ui).recordDiagnostic?.message,
-        label,
-      ).toBe('Measurement unavailable');
-      expect(gateway.callsTo('Tail').length, label).toBeLessThanOrEqual(1);
-      actor.stop();
+  for (const legacyKeyframes of [false, true]) {
+    for (const trailing of [0, 256, 257, 700, 1500]) {
+      const records = withEarlyFailure(trailing);
+      for (const keyframes of [[], [records.length], [Math.floor(records.length / 2)]]) {
+        const label = `${trailing} records after the notice, checkpoint ${keyframes[0] ?? 'none'}, ${legacyKeyframes ? 'keyframe without failure facts' : 'tracked keyframe'}`;
+        const {message, tails} = await bannerOf(records, {keyframes, legacyKeyframes});
+        expect(message, label).toBe('Measurement unavailable');
+        // Bounded cost: the live Tail, plus at most one paged read per page looked back.
+        expect(tails, label).toBeLessThanOrEqual(1 + FAILURE_PAGES);
+      }
     }
   }
+});
+
+test('an old keyframe with no failure ever recorded costs a bounded read, not a replay', async () => {
+  const records = storeRunFixture('short', 400, 1).records;
+  const {clock, gateway, actor} = open(
+    {records, keyframes: [records.length], legacyKeyframes: true},
+    {rttMs: 20, bytesPerMs: 1400},
+  );
+  await until(clock, () => false, MINUTE);
+  expect(gateway.callsTo('Tail').length).toBeLessThanOrEqual(1 + FAILURE_PAGES);
+  const read = new Set(
+    gateway
+      .callsTo('Tail')
+      .map(call => Number(fromBinary(TailRequestSchema, call.request).fromSeq)),
+  );
+  // No page starts before FAILURE_PAGES windows back from the first record read.
+  expect(Math.min(...read)).toBeGreaterThanOrEqual(
+    records.length - (FAILURE_PAGES + 1) * Number(RECORD_WINDOW),
+  );
+  actor.stop();
 });
 
 test('a checkpoint stored over the read limit is skipped though its reply would fit', async () => {
@@ -420,6 +448,6 @@ test('a checkpoint stored over the read limit is skipped though its reply would 
   actor.stop();
   const reply = gateway.skeletons[0];
   expect(fromBinary(KeyframeSchema, reply?.keyframe ?? new Uint8Array()).throughSeq).toBe(
-    records[4]?.seq,
+    records[4]?.seq ?? 0n,
   );
 });

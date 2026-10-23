@@ -28,8 +28,18 @@ export interface SkeletonLoad {
    * back a window to show the latest of them. Those records only feed the record log.
    */
   readonly windowFrom: bigint | undefined;
+  /**
+   * Set when the keyframe lacks failure facts (it predates `failures_tracked`): the records before
+   * this sequence were never read, so the error notices among them are paged in from the log.
+   */
+  readonly failuresBefore: bigint | undefined;
   readonly committedSeq: bigint;
   readonly complete: boolean;
+}
+
+/** Where the records a keyframe hides end, less the window the first Tail re-reads. */
+function windowStart(response: SkeletonResponse): bigint {
+  return response.nextSeq > RECORD_WINDOW ? response.nextSeq - RECORD_WINDOW : 0n;
 }
 
 /** Decode the server's bounded committed prefix. No keyframe means replay; next_seq remains authoritative for phase 1 gaps. */
@@ -55,12 +65,11 @@ export function ingestSkeleton(response: SkeletonResponse): SkeletonLoad {
   return {
     skeleton,
     nextSeq: response.nextSeq,
-    windowFrom:
-      response.keyframe === undefined
+    windowFrom: response.keyframe === undefined ? undefined : windowStart(response),
+    failuresBefore:
+      response.keyframe === undefined || skeleton.failuresTracked
         ? undefined
-        : response.nextSeq > RECORD_WINDOW
-          ? response.nextSeq - RECORD_WINDOW
-          : 0n,
+        : windowStart(response),
     committedSeq: response.committedSeq,
     complete: response.complete,
   };

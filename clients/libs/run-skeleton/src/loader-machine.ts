@@ -1,7 +1,8 @@
 import {unprovided} from '@vibesys/machine';
-import type {SkeletonResponse, TailResponse} from '@vibesys/proto';
+import type {SkeletonResponse, Record as StoreRecord, TailResponse} from '@vibesys/proto';
 import {assign, setup} from 'xstate';
 import {ingestSkeleton, ingestTail, isFinalLoad, type SkeletonLoad} from './loading.js';
+import {absorbFailures} from './model.js';
 import {type LoadRefusal, refusalOf} from './status.js';
 
 export interface SkeletonLoaderInput {
@@ -15,7 +16,17 @@ export interface TailInput {
   readonly cursor: bigint;
   readonly receive: (event: LoaderEvent) => void;
 }
+export interface FailuresInput {
+  readonly runId: string;
+  /** The records from here on were read; the error notices before it are still to be found. */
+  readonly before: bigint | undefined;
+  /** Where the current epoch's records begin, and its number: nothing older can be its banner. */
+  readonly epochStart: bigint;
+  readonly epoch: number;
+  readonly receive: (event: LoaderEvent) => void;
+}
 export type LoaderEvent =
+  | {type: 'failures'; records: readonly StoreRecord[]}
   | {type: 'tail'; response: TailResponse}
   /** A Tail message that only fed the record log reached `through`: a resume starts after it. */
   | {type: 'window'; through: bigint}
@@ -52,6 +63,7 @@ export const skeletonLoaderMachine = setup({
   actors: {
     skeleton: unprovided<SkeletonResponse, string>('skeleton'),
     tail: unprovided<void, TailInput>('tail'),
+    failures: unprovided<void, FailuresInput>('failures'),
   },
   delays: {
     deadline: ({context}) => context.timeoutMs,
@@ -66,6 +78,8 @@ export const skeletonLoaderMachine = setup({
       error: tailFailure(context, {kind: 'stream-ended'}),
     })),
     clearError: assign({error: undefined}),
+    // Failure facts are best effort: the screen stands without them.
+    ignore: () => undefined,
   },
   guards: {
     hasError: ({context}) => context.error !== undefined,
@@ -138,6 +152,18 @@ export const skeletonLoaderMachine = setup({
             attempts: 0,
           })),
         },
+        failures: {
+          actions: assign(({context, event}) =>
+            context.load === undefined
+              ? {}
+              : {
+                  load: {
+                    ...context.load,
+                    skeleton: absorbFailures(context.load.skeleton, event.records),
+                  },
+                },
+          ),
+        },
         window: {
           actions: assign(({context, event}) =>
             context.load === undefined
@@ -171,6 +197,30 @@ export const skeletonLoaderMachine = setup({
         },
         /** Caught up. With nothing to show yet, the wait for the first record is bounded. */
         live: {
+          // Once caught up, page in what an old keyframe never said of failures; it is done once.
+          invoke: {
+            id: 'failures',
+            src: 'failures',
+            input: ({context, self}) => {
+              const skeleton = context.load?.skeleton;
+              const epoch = skeleton?.epochs.at(-1)?.epoch?.epoch ?? 0;
+              return {
+                runId: context.runId,
+                before: context.load?.failuresBefore,
+                epoch,
+                epochStart: skeleton?.epochs.find(item => item.epoch?.epoch === epoch)?.seq ?? 0n,
+                receive: event => self.send(event),
+              };
+            },
+            onDone: {
+              actions: assign(({context}) =>
+                context.load === undefined
+                  ? {}
+                  : {load: {...context.load, failuresBefore: undefined}},
+              ),
+            },
+            onError: {actions: 'ignore'},
+          },
           initial: 'routing',
           states: {
             routing: {always: [{guard: 'unpainted', target: 'waiting'}, {target: 'populated'}]},
