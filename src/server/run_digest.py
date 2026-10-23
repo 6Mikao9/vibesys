@@ -22,12 +22,13 @@ A journal with finished rounds and no span event predates the run trace
 (``ideas`` is ``None``) instead of counting none. A round and its workstream span end together, so a
 journal with a finished round and no ended span has no spans at all.
 
-Public surface: ``digest_journal``, ``run_attention``.
+Public surface: ``digest_journal``, ``run_attention``, ``LogHeadline``, ``with_log_headline``.
 """
 
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, NamedTuple
 
@@ -536,3 +537,34 @@ def run_attention(digest: RunDigest, *, phase: RunPhase | None, now: float) -> R
     if dashboard.failed_streak >= REPEATED_FAILURE_AFTER:
         return RunAttention.REPEATED_FAILURE
     return RunAttention.NONE
+
+
+@dataclass(frozen=True)
+class LogHeadline:
+    """The objective figures a run's ``run.head`` states: its best value, and the input's."""
+
+    best: float
+    input_value: float | None
+    metric: str
+    unit: str | None
+    minimize: bool
+
+
+def with_log_headline(digest: RunDigest, headline: LogHeadline) -> RunDigest:
+    """The digest with the objective figures the run's ``run.head`` states.
+
+    A run with a typed log has one writer-owned headline, which its page reads. The row reads the
+    same one: the best value, and its ratio to the input worded as an improvement (the input over
+    the result for a minimized objective) when the input was measured.
+    """
+    best, input_value = headline.best, headline.input_value
+    ratio: float | None = None
+    if input_value is not None and input_value != 0 and best != 0:
+        ratio = input_value / best if headline.minimize else best / input_value
+    dashboard = digest.dashboard
+    if dashboard is not None:
+        reading = BestReading(value=best, metric=headline.metric, unit=headline.unit or None)
+        dashboard = dashboard.model_copy(update={"best": reading})
+    return digest.model_copy(
+        update={"adopted_ratio": ratio, "best_so_far_ratio": None, "dashboard": dashboard}
+    )

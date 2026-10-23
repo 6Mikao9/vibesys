@@ -30,6 +30,7 @@ import {
   type AllRunsState,
   askProjectRuns,
   type ListProjectRuns,
+  projectRunGaps,
   projectRunsListed,
   refreshed,
   reportedRunRefs,
@@ -138,6 +139,8 @@ export interface ShellActions {
 export interface SidebarState {
   /** Whether the overview (the first listings and Recent) has been heard. */
   readonly overviewHeard: boolean;
+  /** Whether any run has been shown: a machine that stops answering later has runs, not none. */
+  readonly runsSeen: boolean;
   /** The latest listing of each host, one per host. */
   readonly listings: readonly HostListing[];
   readonly recent: readonly RecentRun[];
@@ -182,6 +185,7 @@ export type SidebarAction =
       readonly host: HostKey;
       readonly project: string;
       readonly runs: readonly ListedRun[] | null;
+      readonly error?: string;
     };
 
 /** What the sidebar asks of the main process. */
@@ -200,6 +204,7 @@ export type SidebarStep = Step<SidebarState, SidebarRequest>;
 
 export const SIDEBAR_EMPTY: SidebarState = {
   overviewHeard: false,
+  runsSeen: false,
   listings: [],
   recent: [],
   skippedRecent: [],
@@ -252,11 +257,19 @@ export function digestKey(run: RunRef): string {
 /** The next state for `action`, and the requests it makes. */
 export function sidebarStep(state: SidebarState, action: SidebarAction): SidebarStep {
   const step = baseStep(state, action);
-  const listed = askAllRuns(step.state);
-  const asked = askDigests(listed.state);
+  // A failed read is asked again on each refresh, and at once when its host comes back.
+  const retry = action.type === 'refresh-live-digests' || reconnected(state, step.state);
+  const listed = askAllRuns(step.state, retry);
+  const asked = askDigests(listed.state, retry);
   const live = askLiveDigests(asked.state, action.type === 'refresh-live-digests');
+  // A project whose listing failed is a project with runs this app cannot list yet, not none.
+  const runsSeen =
+    live.state.runsSeen ||
+    dashboardRefs(live.state).length > 0 ||
+    liveRows(live.state).length > 0 ||
+    projectRunGaps(live.state.allRuns).some(gap => gap.refusal !== null);
   return {
-    state: live.state,
+    state: runsSeen === live.state.runsSeen ? live.state : {...live.state, runsSeen},
     requests: [...step.requests, ...listed.requests, ...asked.requests, ...live.requests],
   };
 }
@@ -342,11 +355,15 @@ function digestRequests(
  * so it is read afresh when it ends. A live run is never asked for here: its row reads its digest
  * through `askLiveDigests`, and asking for it here would be forgotten again by this very step.
  */
-function askDigests(state: SidebarState): SidebarStep {
+function askDigests(state: SidebarState, retryFailed = false): SidebarStep {
   const live = liveRows(state);
+  const reachable = new Set(
+    state.listings.filter(listing => listing.kind === 'listed').map(listing => listing.host),
+  );
   const digests: Record<string, DigestSlot> = {};
   for (const [key, slot] of Object.entries(state.digests)) {
-    if (!live.some(row => digestKey(row.run) === key)) digests[key] = slot;
+    const forgotten = retryFailed && slot.kind === 'failed' && reachable.has(hostOfKey(key));
+    if (!forgotten && !live.some(row => digestKey(row.run) === key)) digests[key] = slot;
   }
   const wanted = shownRuns(state).filter(run => {
     const key = digestKey({host: run.host, runId: run.runId});
@@ -400,9 +417,22 @@ function askLiveDigests(state: SidebarState, refresh: boolean): SidebarStep {
   return {state: {...state, live, lastDigestToken: token}, requests};
 }
 
+/** The host a `digestKey` names. */
+function hostOfKey(key: string): HostKey {
+  return key.slice(0, key.indexOf(' ')) as HostKey;
+}
+
+/** Whether a host answers in `next` that did not in `before`: reads it failed may now succeed. */
+function reconnected(before: SidebarState, next: SidebarState): boolean {
+  const was = new Set(
+    before.listings.filter(listing => listing.kind === 'listed').map(listing => listing.host),
+  );
+  return next.listings.some(listing => listing.kind === 'listed' && !was.has(listing.host));
+}
+
 /** The project listings the dashboard still needs: every known project's runs, on every screen. */
-function askAllRuns(state: SidebarState): SidebarStep {
-  const asked = askProjectRuns(state.allRuns, state.listings, state.recent);
+function askAllRuns(state: SidebarState, retryFailed: boolean): SidebarStep {
+  const asked = askProjectRuns(state.allRuns, state.listings, state.recent, retryFailed);
   return asked.requests.length === 0
     ? same(state)
     : {state: {...state, allRuns: asked.all}, requests: asked.requests};

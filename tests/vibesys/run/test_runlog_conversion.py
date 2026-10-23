@@ -296,7 +296,12 @@ def test_conversion_fold_and_every_keyframe_suffix_equal_the_typed_mapping(
         destination = Project.run_log_path_for(project.root, "run-1")
         with destination.open("rb") as stream:
             records = list(RunLogReader(stream))
-        state = MappingState("run-1", vibesys_version=version("vibesys"))
+        state = MappingState(
+            "run-1",
+            vibesys_version=version("vibesys"),
+            wall_span_clock=True,
+            clock_epochs=((journal.read()[0].timestamp.timestamp(), 0),),
+        )
         expected = []
         for event in journal.read():
             mapped = map_event(state, event)

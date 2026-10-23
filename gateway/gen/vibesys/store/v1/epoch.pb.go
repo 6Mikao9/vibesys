@@ -35,9 +35,12 @@ type RunDescription struct {
 	Evaluator        *Evaluator `protobuf:"bytes,6,opt,name=evaluator,proto3,oneof" json:"evaluator,omitempty"`
 	ExpectedRoles    []string   `protobuf:"bytes,8,rep,name=expected_roles,json=expectedRoles,proto3" json:"expected_roles,omitempty"`
 	// Strategy run configuration, described by EpochStarted.descriptors.
-	Detail        *anypb.Any `protobuf:"bytes,9,opt,name=detail,proto3,oneof" json:"detail,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Detail *anypb.Any `protobuf:"bytes,9,opt,name=detail,proto3,oneof" json:"detail,omitempty"`
+	// What the input's objective measurement is, once the writer knows. Absent only while the input
+	// has been neither measured nor given up on. Readers display it and never pick among gates.
+	InputMeasurement *InputMeasurement `protobuf:"bytes,10,opt,name=input_measurement,json=inputMeasurement,proto3,oneof" json:"input_measurement,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RunDescription) Reset() {
@@ -126,6 +129,194 @@ func (x *RunDescription) GetDetail() *anypb.Any {
 	return nil
 }
 
+func (x *RunDescription) GetInputMeasurement() *InputMeasurement {
+	if x != nil {
+		return x.InputMeasurement
+	}
+	return nil
+}
+
+// The input's measurement of the headline objective: one fact per run, written once.
+type InputMeasurement struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to State:
+	//
+	//	*InputMeasurement_Measured
+	//	*InputMeasurement_Unmeasured
+	State         isInputMeasurement_State `protobuf_oneof:"state"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InputMeasurement) Reset() {
+	*x = InputMeasurement{}
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InputMeasurement) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InputMeasurement) ProtoMessage() {}
+
+func (x *InputMeasurement) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InputMeasurement.ProtoReflect.Descriptor instead.
+func (*InputMeasurement) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *InputMeasurement) GetState() isInputMeasurement_State {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
+func (x *InputMeasurement) GetMeasured() *MeasuredInput {
+	if x != nil {
+		if x, ok := x.State.(*InputMeasurement_Measured); ok {
+			return x.Measured
+		}
+	}
+	return nil
+}
+
+func (x *InputMeasurement) GetUnmeasured() *UnmeasuredInput {
+	if x != nil {
+		if x, ok := x.State.(*InputMeasurement_Unmeasured); ok {
+			return x.Unmeasured
+		}
+	}
+	return nil
+}
+
+type isInputMeasurement_State interface {
+	isInputMeasurement_State()
+}
+
+type InputMeasurement_Measured struct {
+	Measured *MeasuredInput `protobuf:"bytes,1,opt,name=measured,proto3,oneof"`
+}
+
+type InputMeasurement_Unmeasured struct {
+	// The input was not measured (its measurement failed or the run has no input gate to read).
+	Unmeasured *UnmeasuredInput `protobuf:"bytes,2,opt,name=unmeasured,proto3,oneof"`
+}
+
+func (*InputMeasurement_Measured) isInputMeasurement_State() {}
+
+func (*InputMeasurement_Unmeasured) isInputMeasurement_State() {}
+
+type MeasuredInput struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Series string                 `protobuf:"bytes,1,opt,name=series,proto3" json:"series,omitempty"`
+	Value  float64                `protobuf:"fixed64,2,opt,name=value,proto3" json:"value,omitempty"`
+	// The input gate whose reading this is.
+	Span          string `protobuf:"bytes,3,opt,name=span,proto3" json:"span,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MeasuredInput) Reset() {
+	*x = MeasuredInput{}
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MeasuredInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MeasuredInput) ProtoMessage() {}
+
+func (x *MeasuredInput) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MeasuredInput.ProtoReflect.Descriptor instead.
+func (*MeasuredInput) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *MeasuredInput) GetSeries() string {
+	if x != nil {
+		return x.Series
+	}
+	return ""
+}
+
+func (x *MeasuredInput) GetValue() float64 {
+	if x != nil {
+		return x.Value
+	}
+	return 0
+}
+
+func (x *MeasuredInput) GetSpan() string {
+	if x != nil {
+		return x.Span
+	}
+	return ""
+}
+
+type UnmeasuredInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnmeasuredInput) Reset() {
+	*x = UnmeasuredInput{}
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnmeasuredInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnmeasuredInput) ProtoMessage() {}
+
+func (x *UnmeasuredInput) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnmeasuredInput.ProtoReflect.Descriptor instead.
+func (*UnmeasuredInput) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{3}
+}
+
 type Evaluator struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -136,7 +327,7 @@ type Evaluator struct {
 
 func (x *Evaluator) Reset() {
 	*x = Evaluator{}
-	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[1]
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -148,7 +339,7 @@ func (x *Evaluator) String() string {
 func (*Evaluator) ProtoMessage() {}
 
 func (x *Evaluator) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[1]
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -161,7 +352,7 @@ func (x *Evaluator) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Evaluator.ProtoReflect.Descriptor instead.
 func (*Evaluator) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Evaluator) GetName() string {
@@ -188,7 +379,7 @@ type Objective struct {
 
 func (x *Objective) Reset() {
 	*x = Objective{}
-	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[2]
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -200,7 +391,7 @@ func (x *Objective) String() string {
 func (*Objective) ProtoMessage() {}
 
 func (x *Objective) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[2]
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -213,7 +404,7 @@ func (x *Objective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Objective.ProtoReflect.Descriptor instead.
 func (*Objective) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Objective) GetSeries() string {
@@ -245,7 +436,7 @@ type SpanKindDecl struct {
 
 func (x *SpanKindDecl) Reset() {
 	*x = SpanKindDecl{}
-	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[3]
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -257,7 +448,7 @@ func (x *SpanKindDecl) String() string {
 func (*SpanKindDecl) ProtoMessage() {}
 
 func (x *SpanKindDecl) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[3]
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -270,7 +461,7 @@ func (x *SpanKindDecl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpanKindDecl.ProtoReflect.Descriptor instead.
 func (*SpanKindDecl) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SpanKindDecl) GetKind() string {
@@ -321,7 +512,7 @@ type MetricSeriesDecl struct {
 
 func (x *MetricSeriesDecl) Reset() {
 	*x = MetricSeriesDecl{}
-	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[4]
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -333,7 +524,7 @@ func (x *MetricSeriesDecl) String() string {
 func (*MetricSeriesDecl) ProtoMessage() {}
 
 func (x *MetricSeriesDecl) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[4]
+	mi := &file_vibesys_store_v1_epoch_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -346,7 +537,7 @@ func (x *MetricSeriesDecl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricSeriesDecl.ProtoReflect.Descriptor instead.
 func (*MetricSeriesDecl) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_store_v1_epoch_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *MetricSeriesDecl) GetName() string {
@@ -381,7 +572,7 @@ var File_vibesys_store_v1_epoch_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_epoch_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/store/v1/epoch.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a\x1dvibesys/store/v1/common.proto\x1a\x1evibesys/store/v1/content.proto\"\x8e\x05\n" +
+	"\x1cvibesys/store/v1/epoch.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a\x1dvibesys/store/v1/common.proto\x1a\x1evibesys/store/v1/content.proto\"\xfa\x05\n" +
 	"\x0eRunDescription\x12'\n" +
 	"\bstrategy\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\bstrategy\x12!\n" +
 	"\x05input\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05input\x12?\n" +
@@ -394,11 +585,25 @@ const file_vibesys_store_v1_epoch_proto_rawDesc = "" +
 	"\tevaluator\x18\x06 \x01(\v2\x1b.vibesys.store.v1.EvaluatorH\x00R\tevaluator\x88\x01\x01\x127\n" +
 	"\x0eexpected_roles\x18\b \x03(\tB\x10\xbaH\r\x92\x01\n" +
 	"\"\br\x06\x10\x01(\x80\x80\x04R\rexpectedRoles\x121\n" +
-	"\x06detail\x18\t \x01(\v2\x14.google.protobuf.AnyH\x01R\x06detail\x88\x01\x01:\x96\x01\xbaH\x92\x01\x1a\x8f\x01\n" +
+	"\x06detail\x18\t \x01(\v2\x14.google.protobuf.AnyH\x01R\x06detail\x88\x01\x01\x12T\n" +
+	"\x11input_measurement\x18\n" +
+	" \x01(\v2\".vibesys.store.v1.InputMeasurementH\x02R\x10inputMeasurement\x88\x01\x01:\x96\x01\xbaH\x92\x01\x1a\x8f\x01\n" +
 	"\x0erun.objectives\x12(objectives must have unique series names\x1aSthis.objectives.all(x, this.objectives.filter(y, y.series == x.series).size() == 1)B\f\n" +
 	"\n" +
 	"_evaluatorB\t\n" +
-	"\a_detailJ\x04\b\a\x10\bR\x0fmax_workstreams\"S\n" +
+	"\a_detailB\x14\n" +
+	"\x12_input_measurementJ\x04\b\a\x10\bR\x0fmax_workstreams\"\xa6\x01\n" +
+	"\x10InputMeasurement\x12=\n" +
+	"\bmeasured\x18\x01 \x01(\v2\x1f.vibesys.store.v1.MeasuredInputH\x00R\bmeasured\x12C\n" +
+	"\n" +
+	"unmeasured\x18\x02 \x01(\v2!.vibesys.store.v1.UnmeasuredInputH\x00R\n" +
+	"unmeasuredB\x0e\n" +
+	"\x05state\x12\x05\xbaH\x02\b\x01\"t\n" +
+	"\rMeasuredInput\x12#\n" +
+	"\x06series\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x06series\x12\x1d\n" +
+	"\x05value\x18\x02 \x01(\x01B\a\xbaH\x04\x12\x02@\x01R\x05value\x12\x1f\n" +
+	"\x04span\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04span\"\x11\n" +
+	"\x0fUnmeasuredInput\"S\n" +
 	"\tEvaluator\x12\x1f\n" +
 	"\x04name\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04name\x12%\n" +
 	"\aversion\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\aversion\"\xd7\x01\n" +
@@ -436,31 +641,37 @@ func file_vibesys_store_v1_epoch_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_epoch_proto_rawDescData
 }
 
-var file_vibesys_store_v1_epoch_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_vibesys_store_v1_epoch_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_vibesys_store_v1_epoch_proto_goTypes = []any{
 	(*RunDescription)(nil),   // 0: vibesys.store.v1.RunDescription
-	(*Evaluator)(nil),        // 1: vibesys.store.v1.Evaluator
-	(*Objective)(nil),        // 2: vibesys.store.v1.Objective
-	(*SpanKindDecl)(nil),     // 3: vibesys.store.v1.SpanKindDecl
-	(*MetricSeriesDecl)(nil), // 4: vibesys.store.v1.MetricSeriesDecl
-	(*BlobRef)(nil),          // 5: vibesys.store.v1.BlobRef
-	(*anypb.Any)(nil),        // 6: google.protobuf.Any
-	(Direction)(0),           // 7: vibesys.store.v1.Direction
-	(SeriesRole)(0),          // 8: vibesys.store.v1.SeriesRole
+	(*InputMeasurement)(nil), // 1: vibesys.store.v1.InputMeasurement
+	(*MeasuredInput)(nil),    // 2: vibesys.store.v1.MeasuredInput
+	(*UnmeasuredInput)(nil),  // 3: vibesys.store.v1.UnmeasuredInput
+	(*Evaluator)(nil),        // 4: vibesys.store.v1.Evaluator
+	(*Objective)(nil),        // 5: vibesys.store.v1.Objective
+	(*SpanKindDecl)(nil),     // 6: vibesys.store.v1.SpanKindDecl
+	(*MetricSeriesDecl)(nil), // 7: vibesys.store.v1.MetricSeriesDecl
+	(*BlobRef)(nil),          // 8: vibesys.store.v1.BlobRef
+	(*anypb.Any)(nil),        // 9: google.protobuf.Any
+	(Direction)(0),           // 10: vibesys.store.v1.Direction
+	(SeriesRole)(0),          // 11: vibesys.store.v1.SeriesRole
 }
 var file_vibesys_store_v1_epoch_proto_depIdxs = []int32{
-	5, // 0: vibesys.store.v1.RunDescription.objective:type_name -> vibesys.store.v1.BlobRef
-	2, // 1: vibesys.store.v1.RunDescription.objectives:type_name -> vibesys.store.v1.Objective
-	1, // 2: vibesys.store.v1.RunDescription.evaluator:type_name -> vibesys.store.v1.Evaluator
-	6, // 3: vibesys.store.v1.RunDescription.detail:type_name -> google.protobuf.Any
-	7, // 4: vibesys.store.v1.Objective.direction:type_name -> vibesys.store.v1.Direction
-	7, // 5: vibesys.store.v1.MetricSeriesDecl.direction:type_name -> vibesys.store.v1.Direction
-	8, // 6: vibesys.store.v1.MetricSeriesDecl.role:type_name -> vibesys.store.v1.SeriesRole
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	8,  // 0: vibesys.store.v1.RunDescription.objective:type_name -> vibesys.store.v1.BlobRef
+	5,  // 1: vibesys.store.v1.RunDescription.objectives:type_name -> vibesys.store.v1.Objective
+	4,  // 2: vibesys.store.v1.RunDescription.evaluator:type_name -> vibesys.store.v1.Evaluator
+	9,  // 3: vibesys.store.v1.RunDescription.detail:type_name -> google.protobuf.Any
+	1,  // 4: vibesys.store.v1.RunDescription.input_measurement:type_name -> vibesys.store.v1.InputMeasurement
+	2,  // 5: vibesys.store.v1.InputMeasurement.measured:type_name -> vibesys.store.v1.MeasuredInput
+	3,  // 6: vibesys.store.v1.InputMeasurement.unmeasured:type_name -> vibesys.store.v1.UnmeasuredInput
+	10, // 7: vibesys.store.v1.Objective.direction:type_name -> vibesys.store.v1.Direction
+	10, // 8: vibesys.store.v1.MetricSeriesDecl.direction:type_name -> vibesys.store.v1.Direction
+	11, // 9: vibesys.store.v1.MetricSeriesDecl.role:type_name -> vibesys.store.v1.SeriesRole
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_epoch_proto_init() }
@@ -471,13 +682,17 @@ func file_vibesys_store_v1_epoch_proto_init() {
 	file_vibesys_store_v1_common_proto_init()
 	file_vibesys_store_v1_content_proto_init()
 	file_vibesys_store_v1_epoch_proto_msgTypes[0].OneofWrappers = []any{}
+	file_vibesys_store_v1_epoch_proto_msgTypes[1].OneofWrappers = []any{
+		(*InputMeasurement_Measured)(nil),
+		(*InputMeasurement_Unmeasured)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_epoch_proto_rawDesc), len(file_vibesys_store_v1_epoch_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -38,6 +38,7 @@ import {
   HelloRequestSchema,
   HelloResponseSchema,
   RecordSchema,
+  SkeletonRequestSchema,
   TailRequestSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
@@ -107,6 +108,8 @@ for (const mode of ['socket', 'connect pipe'] as const) {
       // Observe the target document's load in Playwright before evaluating in its context.
       await page.waitForURL('app://vibesys/gateway.html', {waitUntil: 'load'});
       await helloGateway(page);
+      // A refusal reaches the renderer with its gRPC status, so a missing run is not a dead link.
+      expect(await missingRunStatus(page)).toBe(5);
       await startTail(page);
       const initial = await page.evaluate(() =>
         (window as unknown as GatewayRenderer).gatewayRead(),
@@ -171,6 +174,32 @@ async function helloGateway(page: Page): Promise<void> {
   const helloReply = decodeGatewayReply(new Uint8Array(hello));
   if (helloReply.case !== 'bytes') throw new Error('gateway ended without Hello');
   expect(fromBinary(HelloResponseSchema, helloReply.value).apiSchemaHash).toBe(API_SCHEMA_HASH);
+}
+
+async function missingRunStatus(page: Page): Promise<number | null> {
+  const request = encodeGatewayRequest({
+    kind: 'unary',
+    host: 'local',
+    method: '/vibesys.api.v1.HostService/Skeleton',
+    bytes: toBinary(SkeletonRequestSchema, create(SkeletonRequestSchema, {runId: 'run-missing'})),
+  });
+  const reply = await page.evaluate(
+    async bytes =>
+      await new Promise<number[]>((resolve, reject) => {
+        let call: {cancel(): void} | undefined;
+        call = (window as unknown as GatewayRenderer).vibesysGateway.open(
+          new Uint8Array(bytes),
+          value => {
+            call?.cancel();
+            resolve([...value]);
+          },
+          error => reject(new Error(error)),
+        );
+      }),
+    [...request],
+  );
+  const decoded = decodeGatewayReply(new Uint8Array(reply));
+  return decoded.case === 'end' ? (decoded.value.status ?? null) : null;
 }
 
 function deferred<T>() {

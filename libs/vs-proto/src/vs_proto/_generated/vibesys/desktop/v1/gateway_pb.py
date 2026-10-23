@@ -66,7 +66,7 @@ class DesktopGatewayRequest(Message[_DesktopGatewayRequestFields]):
         method: str
         bytes: bytes
 
-_DesktopGatewayEndFields: TypeAlias = Literal["error"]
+_DesktopGatewayEndFields: TypeAlias = Literal["error", "status"]
 
 class DesktopGatewayEnd(Message[_DesktopGatewayEndFields]):
     """
@@ -79,9 +79,16 @@ class DesktopGatewayEnd(Message[_DesktopGatewayEndFields]):
             ```proto
             optional string error = 1;
             ```
+        status:
+            The gRPC status code when the gateway refused the call, so a typed refusal
+            (not found, unavailable) is not flattened into a retryable disconnect.
+
+            ```proto
+            optional int32 status = 2;
+            ```
     """
 
-    __slots__ = ("error",)
+    __slots__ = ("error", "status")
 
     if TYPE_CHECKING:
 
@@ -89,10 +96,12 @@ class DesktopGatewayEnd(Message[_DesktopGatewayEndFields]):
             self,
             *,
             error: str | None = None,
+            status: int | None = None,
         ) -> None:
             pass
 
         error: str
+        status: int
 
 _DesktopGatewayReplyFields: TypeAlias = Literal["bytes", "end"]
 
@@ -149,7 +158,7 @@ class DesktopGatewayKind(Enum):
 
 
 _DESC = file_desc(
-    b'\n vibesys/desktop/v1/gateway.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto"\xa5\x02\n\x15DesktopGatewayRequest\x12F\n\x04kind\x18\x01 \x01(\x0e2&.vibesys.desktop.v1.DesktopGatewayKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12O\n\x04host\x18\x02 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12Q\n\x06method\x18\x03 \x01(\tR\x06methodB9\xbaH6r4(\x80\x082/^/[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$\x12 \n\x05bytes\x18\x04 \x01(\x0cR\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08"C\n\x11DesktopGatewayEnd\x12$\n\x05error\x18\x01 \x01(\tH\x00R\x05errorB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01B\x08\n\x06_error"\x83\x01\n\x13DesktopGatewayReply\x12"\n\x05bytes\x18\x01 \x01(\x0cH\x00R\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08\x129\n\x03end\x18\x02 \x01(\x0b2%.vibesys.desktop.v1.DesktopGatewayEndH\x00R\x03endB\r\n\x04body\x12\x05\xbaH\x02\x08\x01*{\n\x12DesktopGatewayKind\x12$\n DESKTOP_GATEWAY_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aDESKTOP_GATEWAY_KIND_UNARY\x10\x01\x12\x1f\n\x1bDESKTOP_GATEWAY_KIND_STREAM\x10\x02BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
+    b'\n vibesys/desktop/v1/gateway.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto"\xa5\x02\n\x15DesktopGatewayRequest\x12F\n\x04kind\x18\x01 \x01(\x0e2&.vibesys.desktop.v1.DesktopGatewayKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12O\n\x04host\x18\x02 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12Q\n\x06method\x18\x03 \x01(\tR\x06methodB9\xbaH6r4(\x80\x082/^/[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$\x12 \n\x05bytes\x18\x04 \x01(\x0cR\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08"v\n\x11DesktopGatewayEnd\x12$\n\x05error\x18\x01 \x01(\tH\x00R\x05errorB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12&\n\x06status\x18\x02 \x01(\x05H\x01R\x06statusB\t\xbaH\x06\x1a\x04\x18\x10(\x00\x88\x01\x01B\x08\n\x06_errorB\t\n\x07_status"\x83\x01\n\x13DesktopGatewayReply\x12"\n\x05bytes\x18\x01 \x01(\x0cH\x00R\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08\x129\n\x03end\x18\x02 \x01(\x0b2%.vibesys.desktop.v1.DesktopGatewayEndH\x00R\x03endB\r\n\x04body\x12\x05\xbaH\x02\x08\x01*{\n\x12DesktopGatewayKind\x12$\n DESKTOP_GATEWAY_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aDESKTOP_GATEWAY_KIND_UNARY\x10\x01\x12\x1f\n\x1bDESKTOP_GATEWAY_KIND_STREAM\x10\x02BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
     [
         validate_pb.desc(),
     ],

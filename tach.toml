@@ -1945,7 +1945,7 @@ depends_on = ["vibesys.run"]
 
 [[interfaces]]
 from = ["vibesys.api.transport"]
-expose = ["ConversionResult", "ConversionStatus", "RunConversion", "convert_run", "convert_runs"]
+expose = ["ConversionResult", "ConversionStatus", "RunConversion", "convert_run", "convert_runs", "iter_conversions"]
 
 [[modules]]
 path = "vibesys.records"

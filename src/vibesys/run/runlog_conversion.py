@@ -1,4 +1,13 @@
-"""Stopped-run migration and complete, idempotent host-wide outcome reporting."""
+"""One-shot migration of pre-schema runs to the typed run log.
+
+TEMPORARY: this module, ``vibesys host convert-run(s)`` and their tests are deleted after the
+transport flip (tracking issue: TBD-MIGRATION, to be filed). The product never converts on read;
+a run that has not been migrated is listed as "old format". Run it once per project, offline::
+
+    vibesys host convert-runs --project <project directory>
+
+Only the run histories that exist need to migrate; it is not a general converter.
+"""
 
 from __future__ import annotations
 

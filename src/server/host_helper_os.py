@@ -242,10 +242,7 @@ class FileProjects:
         self._summary_reader: SummaryReader | None = None
 
     def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        """Reuse catalog metadata and the transport's retained-format importer."""
-        if self._clock is None:
-            message = "saved-run import clock was not supplied"
-            raise ValueError(message)
+        """Read catalog metadata and bounded history availability observations."""
         wire = import_module("vs_proto.api")
         pb = wire.host_payloads
 
@@ -260,9 +257,7 @@ class FileProjects:
             )
             for run in runs
         ]
-        return import_module("server.host_saved_runs").page_saved_runs(
-            request, root, entries, clock=self._clock, threads=self._threads
-        )
+        return import_module("server.host_saved_runs").page_saved_runs(request, root, entries)
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -354,7 +349,33 @@ class FileProjects:
             )
         if digest.ending is not None or digest.closing is not None:
             self._digests[journal] = (version, digest)
-        return digest
+        return self._with_log_headline(project_root, run_id, digest)
+
+    @staticmethod
+    def _with_log_headline(project_root: Path, run_id: str, digest: RunDigest) -> RunDigest:
+        """A run with a typed log shows the headline its log states, as its page does."""
+        runlog = import_module("vs_runlog.api")
+        wire = import_module("vs_proto.api")
+        path = Project.run_log_path_for(project_root, run_id)
+        try:
+            head = runlog.read_run_head(path)
+        except (OSError, ValueError):
+            return digest
+        objective = head.objective
+        if objective is None or not objective.has_field("best_value") or objective.series is None:
+            return digest
+        series = objective.series
+        row = import_module("server.run_digest")
+        return row.with_log_headline(
+            digest,
+            row.LogHeadline(
+                best=objective.best_value,
+                input_value=objective.input_value if objective.has_field("input_value") else None,
+                metric=series.name,
+                unit=series.unit,
+                minimize=series.direction == wire.Direction.MIN,
+            ),
+        )
 
     def require_initialized(self, project: Path) -> Path:
         """The project's root, once it is known to define tasks."""

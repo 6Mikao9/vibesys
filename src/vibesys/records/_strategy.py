@@ -175,6 +175,30 @@ def adoption(projection: Projection) -> None:
         projection.span(span)
 
 
+def _legacy_round_benchmark_repeat(
+    projection: Projection, span_id: str, metric: str | None
+) -> bool:
+    """The named rule for the old duplicate benchmark: its repeat is dropped, not remapped.
+
+    A journal of an older checkout reports each round's benchmark twice: first with no execution
+    and no span (so it reuses the input gate's identity, ``gate:input:benchmark:default``), then
+    with its own execution (the reading that belongs to the candidate). The executionless repeat
+    carries the same value as the candidate event that follows it, so it adds no fact and is
+    dropped here, by name. The input's own measurement is the first reading at that identity;
+    the typed ``InputMeasurement`` is written from it alone.
+    """
+    return (metric, span_id) in projection.metric_values
+
+
+def _spanless_subject(projection: Projection) -> p.GateSubject:
+    """A gate event of an older journal names no span: the input's has no execution, a candidate's has."""
+    return (
+        p.GateSubject.CANDIDATE
+        if projection.event.execution_id is not None
+        else p.GateSubject.INPUT
+    )
+
+
 def gate(projection: Projection) -> None:
     data = projection.event.data
     if not isinstance(data, (e.GateStartedData, e.GateFinishedData)):
@@ -187,7 +211,7 @@ def gate(projection: Projection) -> None:
     span = labelled(projection, "gate", data.span_id or identity)
     attrs = p.GateAttrs(
         stage=enum_value(p.GateStage, data.gate),
-        subject=subject(projection, span.parent) if known else p.GateSubject.UNATTRIBUTED,
+        subject=subject(projection, span.parent) if known else _spanless_subject(projection),
         recipe=data.recipe,
         source=enum_value(p.FrameworkSource, data.source),
         source_label=data.source_label,
@@ -199,7 +223,8 @@ def gate(projection: Projection) -> None:
         projection.span(span)
         return
     attrs.reused = data.reused
-    if data.value is not None and data.metric is not None:
+    repeated = not known and _legacy_round_benchmark_repeat(projection, span.id, data.metric)
+    if data.value is not None and data.metric is not None and not repeated:
         if known and not span.has_field("ended_at") and not projection.final:
             projection.pending.append(projection.event.model_dump_json().encode())
         else:
@@ -211,6 +236,7 @@ def gate(projection: Projection) -> None:
                     clock=span.ended_at if span.has_field("ended_at") else projection.clock,
                 ),
                 unit=data.unit or "",
+                input_gate=attrs.subject == p.GateSubject.INPUT,
             )
     if data.span_id is not None:
         update_label(projection, span, "gate", attrs)
@@ -238,6 +264,7 @@ def input_failure(projection: Projection) -> None:
         ),
     )
     finish(projection, span, "gate", attrs)
+    projection.give_up_input()
     projection.attach(span.id, "summary", data.summary)
     projection.emit(
         "notice",

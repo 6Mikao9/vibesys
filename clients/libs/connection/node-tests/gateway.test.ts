@@ -20,13 +20,13 @@ import {
   validateHostPayload,
 } from '@vibesys/proto';
 import {Seeded} from '@vibesys/store/testing';
+import {GrpcError} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import {expect} from 'expect';
 import {
   GatewayCalls,
   GatewayConnection,
   GrpcDecoder,
-  GrpcError,
   grpcFrame,
   HELLO_METHOD,
   MUTATE_METHOD,
@@ -188,8 +188,11 @@ test('two live calls share a single host session', {
     first.abort();
     await one;
     expect(fake.forces).toEqual([false]);
+    // The caller's own cancellation is not a failure; losing the session is.
+    expect(failures).toHaveLength(1);
     calls.disable('local');
     expect(await two).toContain('closed');
+    expect(failures.map(failure => failure.split(' ')[0])).toEqual([HELLO_METHOD, TAIL_METHOD]);
     expect(clock.pendingDelays()).toEqual([]);
   } finally {
     first.abort();

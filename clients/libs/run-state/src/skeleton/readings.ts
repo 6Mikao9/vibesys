@@ -34,19 +34,51 @@ function readingsBySpan(view: StoreView): ReadonlyMap<string, readonly Reading[]
   return new Map([...points].map(([span, rows]) => [span, [...rows.values()]]));
 }
 
-export function measuredSpans(spans: readonly Span[], view: StoreView): Span[] {
+interface InputFact {
+  readonly name: string;
+  readonly value: number;
+  readonly unit: string;
+  readonly direction: 'max' | 'min';
+}
+
+/**
+ * The input's measurement of the objective, exactly as the run states it
+ * (`RunDescription.input_measurement`, written once where the records are made). Readers display
+ * it and never choose among gates. A run written before the field existed states it in its head;
+ * that value (read by the same core rule) is the fallback.
+ */
+function inputFact(view: StoreView, fallback: number | undefined): InputFact | null {
+  const epoch = view.epochs.at(-1)?.epoch;
+  const objective = epoch?.run?.objectives[0];
+  if (!epoch || !objective) return null;
+  const stated = epoch.run?.inputMeasurement?.state;
+  const value =
+    stated === undefined ? fallback : stated.case === 'measured' ? stated.value.value : undefined;
+  if (value === undefined) return null;
+  const declaration = epoch.series.find(item => item.name === objective.series);
+  return {
+    name: objective.series,
+    value,
+    unit: declaration?.unit ?? '',
+    direction: objective.direction === Direction.MIN ? 'min' : 'max',
+  };
+}
+
+/** The input's measured value of the objective metric, or null before it is measured. */
+export function inputMeasurement(view: StoreView, fallback?: number): number | null {
+  return inputFact(view, fallback)?.value ?? null;
+}
+
+export function measuredSpans(
+  spans: readonly Span[],
+  view: StoreView,
+  inputFallback?: number,
+): Span[] {
   const bySpan = readingsBySpan(view);
-  const input = spans
-    .filter(
-      span =>
-        span.label?.kind === 'gate' &&
-        (JSON.parse(span.label.attrs_json ?? '{}') as Record<string, unknown>)['subject'] ===
-          'GATE_SUBJECT_INPUT',
-    )
-    .at(-1);
-  const inputReadings = input ? (bySpan.get(input.id) ?? []) : [];
-  const metric = view.epochs.at(-1)?.epoch?.run?.objectives[0]?.series;
-  const inputValue = inputReadings.find(item => item.name === metric)?.value;
+  const input = inputFact(view, inputFallback);
+  const metric = input?.name ?? view.epochs.at(-1)?.epoch?.run?.objectives[0]?.series;
+  const inputReadings = input ? [input] : [];
+  const inputValue = input?.value;
   return spans.map(span => {
     if (span.label?.kind !== 'gate') return span;
     const rows = bySpan.get(span.id) ?? [];

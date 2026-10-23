@@ -21,8 +21,17 @@ export interface GatewayBridge {
     method: string,
     bytes: Uint8Array,
     receive: (bytes: Uint8Array) => void,
-    ended: (error?: string) => void,
+    ended: (error?: string, status?: number) => void,
   ): {cancel(): void};
+}
+/** A call the gateway or the link failed; `status` is the gRPC code when the gateway refused it. */
+export class GatewayError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
 }
 /** No routing or response metadata crosses Electron outside a generated message. */
 export interface GatewayPortBridge {
@@ -77,11 +86,17 @@ export function gatewayReply(bytes: Uint8Array): Uint8Array {
   validatedExactFromBinary(DesktopGatewayReplySchema, reply);
   return reply;
 }
-export function gatewayEnd(error?: string): Uint8Array {
+export function gatewayEnd(error?: string, status?: number): Uint8Array {
   const reply = toBinary(
     DesktopGatewayReplySchema,
     create(DesktopGatewayReplySchema, {
-      body: {case: 'end', value: error === undefined ? {} : {error}},
+      body: {
+        case: 'end',
+        value: {
+          ...(error === undefined ? {} : {error}),
+          ...(status === undefined ? {} : {status}),
+        },
+      },
     }),
   );
   validatedExactFromBinary(DesktopGatewayReplySchema, reply);
@@ -96,16 +111,16 @@ export function gatewayBridge(ports: GatewayPortBridge): GatewayBridge {
   function open(
     request: GatewayRequest,
     receive: (bytes: Uint8Array) => void,
-    ended: (error?: string) => void,
+    ended: (error?: string, status?: number) => void,
   ) {
     const encoded = encodeGatewayRequest(request);
     let port: {cancel(): void} | undefined;
     let done = false;
-    const finish = (error?: string): void => {
+    const finish = (error?: string, status?: number): void => {
       if (done) return;
       done = true;
       port?.cancel();
-      ended(error);
+      ended(error, status);
     };
     try {
       port = ports.open(
@@ -115,7 +130,7 @@ export function gatewayBridge(ports: GatewayPortBridge): GatewayBridge {
           try {
             const reply = decodeGatewayReply(bytes);
             if (reply.case === 'bytes') receive(reply.value);
-            else if (reply.case === 'end') finish(reply.value.error);
+            else if (reply.case === 'end') finish(reply.value.error, reply.value.status);
           } catch (error) {
             finish(String(error));
           }
@@ -140,8 +155,8 @@ export function gatewayBridge(ports: GatewayPortBridge): GatewayBridge {
               throw new Error('unary gateway returned multiple responses');
             response = value;
           },
-          error => {
-            if (error !== undefined) reject(new Error(error));
+          (error, status) => {
+            if (error !== undefined) reject(new GatewayError(error, status));
             else if (response === undefined) reject(new Error('missing unary response'));
             else resolve(response);
           },

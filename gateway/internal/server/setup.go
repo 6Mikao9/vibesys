@@ -197,7 +197,7 @@ func (h *host) inspectCandidate(ctx context.Context, request *apiv1.ReadRequest,
 		StateRoot:  h.config.Root,
 	})
 	if errors.Is(err, context.DeadlineExceeded) {
-		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, "host read deadline exceeded"), nil
+		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, deadlineMessage("read", "inspect-candidate", deadline)), nil
 	}
 	if errors.Is(err, context.Canceled) {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host read cancelled"), nil

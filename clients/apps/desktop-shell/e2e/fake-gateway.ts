@@ -27,6 +27,7 @@ export interface WireFixture {
   chatRequest: number[];
   chat: number[];
   watchRuns: number[];
+  behavior?: GatewayBehavior;
 }
 const encode = <S extends DescMessage>(schema: S, init: MessageInitShape<S>): number[] => [
   ...toBinary(schema, create(schema, init)),
@@ -82,6 +83,12 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
     ),
     log: stream(fixture.streams['build-log'] ?? new Uint8Array()),
   };
+}
+
+/** How the gateway misbehaves: a refusal carries its gRPC status; the Tail can be held back. */
+export interface GatewayBehavior {
+  readonly skeleton?: {readonly status: number; readonly message: string};
+  readonly holdTail?: boolean;
 }
 
 let preload: string | undefined;

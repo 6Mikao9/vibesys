@@ -161,7 +161,8 @@ class FileRunLogWriter:
         self.sequence = 0
         self._epoch = CurrentEpoch()
         self._path = path
-        self._skeleton = Keyframe()
+        # The writer folds every record of the log, recovered ones included.
+        self._skeleton = Keyframe(failures_tracked=True)
         self._checkpoint_seq = 0
         self._process: RunProcess | None = None
         self._resources = ReleaseStack()
@@ -428,7 +429,11 @@ class FileRunLogWriter:
 
 
 def install_run_log(
-    staged: Path, destination: Path, *, prepare: Callable[[], None] | None = None
+    staged: Path,
+    destination: Path,
+    *,
+    prepare: Callable[[], None] | None = None,
+    sync: FileSync | None = None,
 ) -> None:
     """Install a quiescent conversion with its head and keyframes.
 
@@ -440,24 +445,29 @@ def install_run_log(
     if staged.parent == destination.parent:
         message = "staged run.log needs a separate disposable directory"
         raise ValueError(message)
+    durable = OsFileSync() if sync is None else sync
     lock = RunLock(destination.parent / "run.lock")
     try:
         if prepare is not None:
             prepare()
+        sync_directory(staged.parent, sync=durable)
         keyframes = destination.parent / "keyframes"
         if keyframes.exists():
             keyframes.replace(staged.parent / "previous-keyframes")
+            sync_directory(destination.parent, sync=durable)
         staged.replace(destination)
+        sync_directory(destination.parent, sync=durable)
         staged_keyframes = staged.parent / "keyframes"
         if staged_keyframes.exists():
             staged_keyframes.replace(keyframes)
+            sync_directory(destination.parent, sync=durable)
         head = destination.parent / "run.head"
         staged_head = staged.parent / "run.head"
         if staged_head.exists():
             staged_head.replace(head)
         else:
             head.unlink(missing_ok=True)
-        sync_directory(destination.parent)
+        sync_directory(destination.parent, sync=durable)
     finally:
         lock.close()
 
@@ -482,8 +492,9 @@ class FileRunContent:
     Every file handle is scoped to one operation.
     """
 
-    def __init__(self, blobs: Path, streams: Path) -> None:
+    def __init__(self, blobs: Path, streams: Path, *, sync: FileSync | None = None) -> None:
         """Use layout paths supplied by the project, without discovering a project."""
+        self._sync = OsFileSync() if sync is None else sync
         self._blobs = blobs
         self._streams = streams
 
@@ -498,13 +509,13 @@ class FileRunContent:
             with path.open("xb") as stream:
                 stream.write(content)
                 stream.flush()
-                os.fsync(stream.fileno())
+                self._sync(stream.fileno())
         except FileExistsError:
             if path.read_bytes() != content:
                 message = f"blob {digest} conflicts with existing content"
                 raise ValueError(message) from None
-        sync_directory(self._blobs)
-        sync_directory(self._blobs.parent)
+        sync_directory(self._blobs, sync=self._sync)
+        sync_directory(self._blobs.parent, sync=self._sync)
 
     def append_stream(self, stream_id: str, offset: int, content: bytes) -> None:
         """Append once at an exact offset, or verify a previously written prefix."""
@@ -526,9 +537,9 @@ class FileRunContent:
             stream.seek(0, 2)
             stream.write(content[len(existing) :])
             stream.flush()
-            os.fsync(stream.fileno())
-        sync_directory(self._streams)
-        sync_directory(self._streams.parent)
+            self._sync(stream.fileno())
+        sync_directory(self._streams, sync=self._sync)
+        sync_directory(self._streams.parent, sync=self._sync)
 
 
 def read_run_head(path: Path) -> RunHead:

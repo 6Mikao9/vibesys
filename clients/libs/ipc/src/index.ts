@@ -24,6 +24,7 @@ export {
   GATEWAY_CHANNEL,
   type GatewayBridge,
   type GatewayCall,
+  GatewayError,
   type GatewayPortBridge,
   type GatewayRequest,
   gatewayBridge,

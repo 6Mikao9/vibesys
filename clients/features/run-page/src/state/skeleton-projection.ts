@@ -3,6 +3,7 @@ import {type HostRun, recordedProjectRoot} from '@vibesys/hosts';
 import {observeRun, type RunLivenessHint, type Skeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
+import {type RecordRow, rowsOfRecords} from '@vibesys/run-state/records';
 import {
   lifecycleState,
   readHeadline,
@@ -36,14 +37,17 @@ export function projectSkeleton(
   objectiveText = '',
   options: {head?: RunLivenessHint['head']; content?: SkeletonContent} = {},
 ): RunModel {
+  const headline = readHeadline(options.head, seq);
   const reading = readSkeleton(
     skeleton,
     seekSkeleton(skeleton, seq),
     objectiveText,
     options.content,
+    headline?.inputValue,
   );
   return {
-    headline: readHeadline(options.head, seq),
+    headline,
+    input: reading.input,
     at: Number(seq),
     trace: {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)},
     overview: reading.overview,
@@ -60,6 +64,26 @@ export function projectSkeleton(
     changed: new Set(),
   };
 }
+/**
+ * The current epoch's latest failure: the keyframe's own error notices and the lifecycle failures
+ * and notices of the record log, whichever is later. The keyframe keeps the notices a log window
+ * no longer reaches.
+ */
+function latestFailure(
+  skeleton: Skeleton,
+  recordLog: readonly RecordRow[] | undefined,
+): RecordRow | undefined {
+  const epoch = observeRun(skeleton).epoch;
+  // A failure after the prefix it claims to summarise is no fact of it: never the banner.
+  const kept = rowsOfRecords(
+    skeleton.failures.filter(record => record.seq <= (skeleton.throughSeq ?? 0n)),
+  );
+  return [...kept, ...(recordLog ?? [])]
+    .filter(row => row.failure && row.epoch === epoch)
+    .sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : 1))
+    .at(-1);
+}
+
 export function skeletonScreenState(
   seed: RunPageSeed,
   skeleton: Skeleton,
@@ -76,6 +100,7 @@ export function skeletonScreenState(
     ),
     '',
     content,
+    whole.headline?.inputValue,
   );
   const lifecycle = observedLifecycle(skeleton, hint);
   const status = lifecycle.status;
@@ -106,9 +131,7 @@ export function skeletonScreenState(
   };
   return {
     ...ui,
-    recordDiagnostic: ui.recordLog
-      ?.filter(row => row.failure && row.epoch === observeRun(skeleton).epoch)
-      .at(-1),
+    recordDiagnostic: latestFailure(skeleton, ui.recordLog),
     lifecycleWord: lifecycle.word,
     positionWord: reading.latest === null ? 'Start' : duration(reading.latest),
     startupStages: reading.startup.map(step => ({

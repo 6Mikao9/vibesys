@@ -142,8 +142,11 @@ func (x *DesktopGatewayRequest) GetBytes() []byte {
 }
 
 type DesktopGatewayEnd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Error         *string                `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Error *string                `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	// The gRPC status code when the gateway refused the call, so a typed refusal
+	// (not found, unavailable) is not flattened into a retryable disconnect.
+	Status        *int32 `protobuf:"varint,2,opt,name=status,proto3,oneof" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -183,6 +186,13 @@ func (x *DesktopGatewayEnd) GetError() string {
 		return *x.Error
 	}
 	return ""
+}
+
+func (x *DesktopGatewayEnd) GetStatus() int32 {
+	if x != nil && x.Status != nil {
+		return *x.Status
+	}
+	return 0
 }
 
 type DesktopGatewayReply struct {
@@ -278,10 +288,12 @@ const file_vibesys_desktop_v1_gateway_proto_rawDesc = "" +
 	"\x04host\x18\x02 \x01(\tB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$R\x04host\x12Q\n" +
 	"\x06method\x18\x03 \x01(\tB9\xbaH6r4(\x80\b2/^/[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$R\x06method\x12 \n" +
 	"\x05bytes\x18\x04 \x01(\fB\n" +
-	"\xbaH\az\x05\x18\x80\x80\x80\bR\x05bytes\"C\n" +
+	"\xbaH\az\x05\x18\x80\x80\x80\bR\x05bytes\"v\n" +
 	"\x11DesktopGatewayEnd\x12$\n" +
-	"\x05error\x18\x01 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x00R\x05error\x88\x01\x01B\b\n" +
-	"\x06_error\"\x83\x01\n" +
+	"\x05error\x18\x01 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x00R\x05error\x88\x01\x01\x12&\n" +
+	"\x06status\x18\x02 \x01(\x05B\t\xbaH\x06\x1a\x04\x18\x10(\x00H\x01R\x06status\x88\x01\x01B\b\n" +
+	"\x06_errorB\t\n" +
+	"\a_status\"\x83\x01\n" +
 	"\x13DesktopGatewayReply\x12\"\n" +
 	"\x05bytes\x18\x01 \x01(\fB\n" +
 	"\xbaH\az\x05\x18\x80\x80\x80\bH\x00R\x05bytes\x129\n" +

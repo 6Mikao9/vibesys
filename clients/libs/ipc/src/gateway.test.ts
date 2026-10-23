@@ -4,6 +4,7 @@ import {DesktopGatewayKind, DesktopGatewayRequestSchema} from '@vibesys/proto';
 import {
   decodeGatewayReply,
   encodeGatewayRequest,
+  GatewayError,
   type GatewayPortBridge,
   gatewayBridge,
   gatewayEnd,
@@ -165,4 +166,28 @@ test('synchronous port completion and failure still release ownership', async ()
       },
     }).unary('local', REQUEST.method, REQUEST.bytes).result,
   ).rejects.toThrow('cannot open');
+});
+
+test('a refusal keeps its gRPC status through the protobuf end, for a unary and a stream', async () => {
+  for (const status of [0, 5, 7, 14, 16]) {
+    const ports = new Ports();
+    const call = gatewayBridge(ports).unary('local', REQUEST.method, REQUEST.bytes);
+    const rejected = call.result.catch((error: unknown) => error);
+    ports.last().reply(gatewayEnd('refused', status));
+    const error = await rejected;
+    expect(error).toBeInstanceOf(GatewayError);
+    expect((error as GatewayError).status).toBe(status);
+  }
+  const ports = new Ports();
+  const ended: Array<[string | undefined, number | undefined]> = [];
+  gatewayBridge(ports).stream(
+    'local',
+    REQUEST.method,
+    REQUEST.bytes,
+    () => undefined,
+    (error, status) => ended.push([error, status]),
+  );
+  ports.last().reply(gatewayEnd('gone', 5));
+  expect(ended).toEqual([['gone', 5]]);
+  expect(() => decodeGatewayReply(gatewayEnd('x', 17))).toThrow();
 });

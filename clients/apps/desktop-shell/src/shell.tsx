@@ -10,6 +10,7 @@ import {
   type DashboardRow,
   dashboardRows,
   digestKey,
+  projectRunGaps,
   recentNotice,
   runLabels,
   runsKnown,
@@ -404,6 +405,7 @@ function RunsRoute(props: {
 }): JSX.Element {
   const {rows, stores, select} = props;
   const {by, machine} = useStore(stores.grouping);
+  const gaps = projectRunGaps(useStore(stores.sidebar.store).allRuns);
   const runOf = (id: string): RunRef | null =>
     rows.find(each => digestKey(each.row.run) === id)?.row.run ?? null;
   return (
@@ -427,7 +429,19 @@ function RunsRoute(props: {
         ];
       }}
       draft={props.draft}
-      notice={recentNotice(stores.sidebar.store.getState().skippedRecent)}
+      notice={
+        gaps.length === 0
+          ? recentNotice(stores.sidebar.store.getState().skippedRecent)
+          : {
+              title: 'Run list incomplete',
+              body: gaps
+                .map(
+                  gap =>
+                    `${hostLabel(hostFromKey(gap.host))}: ${gap.project}: ${gap.refusal?.detail ?? 'Reading runs'}`,
+                )
+                .join('; '),
+            }
+      }
     />
   );
 }
@@ -445,6 +459,9 @@ function MachinesRoute(props: {
       state={props.machines}
       dispatch={stores.machines.dispatch}
       runCounts={props.counts}
+      incompleteHosts={
+        new Set(projectRunGaps(useStore(stores.sidebar.store).allRuns).map(gap => gap.host))
+      }
       showRuns={host => {
         stores.grouping.dispatch({
           type: 'filter-machine',

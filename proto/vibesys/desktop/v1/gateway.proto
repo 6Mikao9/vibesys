@@ -27,6 +27,9 @@ message DesktopGatewayRequest {
 }
 message DesktopGatewayEnd {
   optional string error = 1 [(buf.validate.field).string.max_bytes = 65536];
+  // The gRPC status code when the gateway refused the call, so a typed refusal
+  // (not found, unavailable) is not flattened into a retryable disconnect.
+  optional int32 status = 2 [(buf.validate.field).int32 = {gte: 0, lte: 16}];
 }
 message DesktopGatewayReply {
   oneof body {

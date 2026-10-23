@@ -3,6 +3,7 @@
 import {fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   type GatewayBridge,
+  GatewayError,
   type GatewayPortBridge,
   gatewayEnd,
   gatewayReply,
@@ -31,6 +32,7 @@ class FixtureGateway {
   readonly streams = new Set<Receive>();
   readonly ended = new Set<(error?: string) => void>();
   readonly watchers = new Set<Receive>();
+  readonly held = new Set<Receive>();
   readonly history: number[][];
   readonly observations: ReturnType<typeof fixtureObservations>;
   readonly chat: ChatPeer;
@@ -46,6 +48,12 @@ class FixtureGateway {
     this.calls.push(method);
     const local = this.chat.unary(method, request);
     if (local) return settled(local);
+    const refused = this.input.behavior?.skeleton;
+    if (method === this.input.methods.skeleton && refused)
+      return {
+        result: Promise.reject(new GatewayError(refused.message, refused.status)),
+        cancel: () => undefined,
+      };
     if (method === this.input.methods.hostCall) return this.hostCall(host, request);
     const bytes =
       method === this.input.methods.skeleton
@@ -75,6 +83,7 @@ class FixtureGateway {
         closed = true;
         this.active -= 1;
         this.streams.delete(receive);
+        this.held.delete(receive);
         this.ended.delete(finish);
         cancelChat();
         this.watchers.delete(receive);
@@ -108,7 +117,8 @@ class FixtureGateway {
       const tail = fromBinary(TailRequestSchema, bytes);
       if (tail.sessionId !== '') return this.chat.watch(tail.sessionId, tail.fromSeq, receive);
       this.streams.add(receive);
-      for (const entry of this.history) receive(new Uint8Array(entry));
+      if (this.input.behavior?.holdTail) this.held.add(receive);
+      else for (const entry of this.history) receive(new Uint8Array(entry));
     } else if (method === methods.watchRuns) {
       this.watchers.add(receive);
       receive(this.observations.decode(new Uint8Array(this.input.watchRuns)));
@@ -125,6 +135,11 @@ class FixtureGateway {
 
   controls() {
     return {
+      releaseTail: () => {
+        for (const receive of this.held)
+          for (const entry of this.history) receive(new Uint8Array(entry));
+        this.held.clear();
+      },
       appendChat: (bytes: number[]) => {
         this.chat.append(bytes);
       },
@@ -166,7 +181,7 @@ function preloadOver(bridge: GatewayBridge): GatewayPortBridge {
           request.method,
           request.bytes,
           bytes => receive(gatewayReply(bytes)),
-          error => receive(gatewayEnd(error)),
+          (error, status) => receive(gatewayEnd(error, status)),
         );
       }
       const call = bridge.unary(request.host, request.method, request.bytes);
@@ -178,7 +193,9 @@ function preloadOver(bridge: GatewayBridge): GatewayPortBridge {
           if (!cancelled) receive(gatewayEnd());
         },
         error => {
-          if (!cancelled) failed(String(error));
+          if (cancelled) return;
+          if (error instanceof GatewayError) receive(gatewayEnd(error.message, error.status));
+          else failed(String(error));
         },
       );
       return {

@@ -49,7 +49,7 @@ func (h *host) Mutate(ctx context.Context, request *apiv1.MutateRequest) (*apiv1
 		Args:       []string{"host", dispatched.CLI}, Input: input, StateRoot: h.config.Root,
 	})
 	if errors.Is(err, context.DeadlineExceeded) {
-		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, "host mutate deadline exceeded"), nil
+		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, deadlineMessage("mutate", dispatched.CLI, dispatched.Deadline)), nil
 	}
 	if errors.Is(err, context.Canceled) {
 		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host mutate cancelled"), nil

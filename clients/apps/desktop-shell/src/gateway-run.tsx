@@ -2,13 +2,24 @@
 
 import {useRunIntents} from '@vibesys/feature-run-intents/renderer';
 import type {RunPageAddress, RunPageNavigation} from '@vibesys/feature-run-page/renderer';
-import {type GatewayRunPorts, RunScreen, useGatewayRun} from '@vibesys/feature-run-page/renderer';
+import {
+  type GatewayRunPorts,
+  LoadStatus,
+  RunScreen,
+  useGatewayRun,
+} from '@vibesys/feature-run-page/renderer';
 import {type RunPageSeed, recordedRunRoot} from '@vibesys/feature-run-page/state';
 import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
-import {observeRun, type Skeleton} from '@vibesys/run-skeleton';
+import {
+  observeRun,
+  type RecordsFanout,
+  type RecordsListener,
+  recordsFanout,
+  type Skeleton,
+} from '@vibesys/run-skeleton';
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
-import {gatewayReader} from '@vibesys/run-skeleton/reader';
+import {type GatewayReader, gatewayReader} from '@vibesys/run-skeleton/reader';
 import type {RelaunchObservation} from '@vibesys/runs/intents';
 import {Card, EmptyState, Page, Text} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
@@ -23,14 +34,8 @@ export function GatewayRun(props: {
   readonly navigation: RunPageNavigation;
 }): JSX.Element {
   const {bridge, seed, schedule, address} = props;
-  const ports = useMemo<GatewayRunPorts>(
-    () => ({
-      reader: gatewayReader(
-        gatewayTransport(bridge, seed.identity.host),
-        gatewayContentCache(indexedDB),
-        schedule,
-      ),
-    }),
+  const {fanout, ports} = useMemo(
+    () => gatewayPorts({bridge, host: seed.identity.host, schedule}),
     [bridge, seed.identity.host, schedule],
   );
   const page = useGatewayRun({seed, ports, schedule, address});
@@ -41,6 +46,7 @@ export function GatewayRun(props: {
     bridge,
     host: seed.identity.host,
     runId: seed.identity.runId,
+    records: fanout.subscribe,
     projectRoot,
     ...(observation ? {relaunch: observation} : {}),
     schedule,
@@ -64,7 +70,11 @@ export function GatewayRun(props: {
     return (
       <Page>
         <Card>
-          <EmptyState title={snapshot.context.error ?? page.projectionError ?? 'Loading'} />
+          {(snapshot.context.error ?? page.projectionError) ? (
+            <EmptyState title={snapshot.context.error ?? page.projectionError ?? ''} />
+          ) : (
+            <LoadStatus view={page.load} retry={page.retry} />
+          )}
         </Card>
       </Page>
     );
@@ -85,10 +95,45 @@ export function GatewayRun(props: {
       chat={{...sessions, minimumMain: 'wide'}}
       toolbar={intents.controls}
       supplemental={
-        snapshot.context.error ? <Text tone="err">{snapshot.context.error}</Text> : null
+        <>
+          <LoadStatus view={page.load} retry={page.retry} />
+          {snapshot.context.error ? <Text tone="err">{snapshot.context.error}</Text> : null}
+        </>
       }
     />
   );
+}
+
+function gatewayPorts(input: {
+  readonly bridge: GatewayBridge;
+  readonly host: RunPageSeed['identity']['host'];
+  readonly schedule: ScheduleTimeout;
+}): {readonly fanout: RecordsFanout; readonly ports: GatewayRunPorts} {
+  const {bridge, host, schedule} = input;
+  const fanout = recordsFanout();
+  const reader = gatewayReader(
+    gatewayTransport(bridge, host),
+    gatewayContentCache(indexedDB),
+    schedule,
+  );
+  return {
+    fanout,
+    ports: {
+      reader: shared(reader, fanout.publish),
+    },
+  };
+}
+
+/** The one reader of the run's log also feeds every other consumer of its records. */
+function shared(reader: GatewayReader, publish: RecordsListener): GatewayReader {
+  return {
+    ...reader,
+    watch: (runId, receive, records) =>
+      reader.watch(runId, receive, batch => {
+        records(batch);
+        publish(batch);
+      }),
+  };
 }
 
 function observationOf(skeleton: Skeleton | undefined): RelaunchObservation | undefined {

@@ -95,7 +95,7 @@ test('live connection loss remains visible', async ({page}) => {
   await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
   await expect(page.getByText('Running', {exact: true}).first()).toBeVisible();
   await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.disconnect());
-  await expect(page.getByText('Disconnected', {exact: true})).toBeVisible();
+  await expect(page.getByText('Reconnecting', {exact: true})).toBeVisible();
 });
 
 test('liveness app-window contact sheet', async ({page}) => {

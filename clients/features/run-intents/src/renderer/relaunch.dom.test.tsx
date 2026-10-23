@@ -9,6 +9,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {RunIntents} from './index.js';
 
+const noRecords = () => () => {};
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
 beforeAll(() => {
@@ -69,6 +70,7 @@ test('Relaunch starts when observation becomes available and cancels when unmoun
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
+          records={noRecords}
           schedule={clock.schedule}
           {...(observed
             ? {
@@ -89,7 +91,7 @@ test('Relaunch starts when observation becomes available and cancels when unmoun
       button => button.textContent === 'Resume',
     );
     expect(relaunch).toBeDefined();
-    expect(bridge.streams).toBe(2);
+    expect(bridge.streams).toBe(1);
     await act(async () => relaunch?.click());
     expect(bridge.launches).toBe(1);
     await act(async () => root.unmount());

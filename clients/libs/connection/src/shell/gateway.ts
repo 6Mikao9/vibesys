@@ -19,10 +19,10 @@ import {
   validatedFromBinary,
   validateHostPayload,
 } from '@vibesys/proto';
-import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
+import {GrpcError, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {createActor, fromPromise} from 'xstate';
 import {gatewayMachine} from '../state/gateway.js';
-import {GatewaySession, GrpcError} from './grpc.js';
+import {GatewaySession} from './grpc.js';
 
 export const HELLO_METHOD = `/${HostService.typeName}/${HostService.method.hello.name}`;
 export const TAIL_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;
@@ -94,6 +94,11 @@ export class GatewayConnection {
       }
     });
     this.#actor.start();
+  }
+
+  /** Whether the session ended for good (closed, or offline after its recovery budget). */
+  get ended(): boolean {
+    return this.#closed || this.#actor.getSnapshot().status === 'done';
   }
 
   unary(method: string, bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array> {

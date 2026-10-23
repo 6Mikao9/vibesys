@@ -50,6 +50,7 @@ from vs_proto._generated.vibesys.api.v1.host_mutate_generated_pb import (
 )
 from vs_proto._generated.vibesys.api.v1.host_pb import (
     BlobResult,
+    DescriptorSet,
     GetBlobsRequest,
     GetBlobsResponse,
     HelloRequest,
@@ -160,10 +161,13 @@ from vs_proto._generated.vibesys.store.v1.environment_attrs_pb import (
 )
 from vs_proto._generated.vibesys.store.v1.epoch_pb import (
     Evaluator,
+    InputMeasurement,
+    MeasuredInput,
     MetricSeriesDecl,
     Objective,
     RunDescription,
     SpanKindDecl,
+    UnmeasuredInput,
 )
 from vs_proto._generated.vibesys.store.v1.intent_pb import (
     IntentAction,
@@ -287,6 +291,7 @@ __all__ = [
     "ConfigurationFailed",
     "CreateChatSessionRequest",
     "CreateChatSessionResponse",
+    "DescriptorSet",
     "Direction",
     "DrainGoal",
     "Draining",
@@ -315,6 +320,7 @@ __all__ = [
     "HostCallResponse",
     "InputFailure",
     "InputFailureKind",
+    "InputMeasurement",
     "IntentAction",
     "IntentState",
     "IntentStep",
@@ -323,6 +329,7 @@ __all__ = [
     "LegacyEvent",
     "Lifecycle",
     "LifecycleVersion",
+    "MeasuredInput",
     "MetricHistory",
     "MetricPoint",
     "MetricSeriesDecl",
@@ -402,6 +409,7 @@ __all__ = [
     "TranscriptText",
     "TranscriptToolCall",
     "TranscriptToolResult",
+    "UnmeasuredInput",
     "ValidationError",
     "WaitCondition",
     "WaitKind",

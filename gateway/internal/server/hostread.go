@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
@@ -45,7 +47,7 @@ func (h *host) Read(ctx context.Context, request *apiv1.ReadRequest) (*apiv1.Rea
 		Args:       []string{"host", dispatched.CLI}, Input: input, StateRoot: h.config.Root,
 	})
 	if errors.Is(err, context.DeadlineExceeded) {
-		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, "host read deadline exceeded"), nil
+		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, deadlineMessage("read", dispatched.CLI, dispatched.Deadline)), nil
 	}
 	if errors.Is(err, context.Canceled) {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host read cancelled"), nil
@@ -79,4 +81,10 @@ func readFailure(category hostv1.FailureCategory, message string) *apiv1.ReadRes
 	return &apiv1.ReadResponse{Result: &apiv1.ReadResponse_Failure{Failure: &hostv1.OperationFailure{
 		Category: category, Message: text,
 	}}}
+}
+
+// deadlineMessage names the command and its budget: a bare "deadline exceeded" cannot be traced to
+// the call that ran out of time.
+func deadlineMessage(kind, command string, budget time.Duration) string {
+	return fmt.Sprintf("host %s %s deadline exceeded after %s", kind, command, budget)
 }

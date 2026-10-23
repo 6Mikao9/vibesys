@@ -1,6 +1,6 @@
 """Bounded append-only run.log files, with offset-based reads and explicit stop reasons."""
 
-from vs_runlog._atomic import FileSync, OsFileSync
+from vs_runlog._atomic import FakeFileSync, FileSync, OsFileSync
 from vs_runlog._epoch import CurrentEpoch, current_epoch, epoch_has_ended
 from vs_runlog._file import (
     FileRunContent,
@@ -25,6 +25,7 @@ from vs_runlog._lock import (
 
 __all__ = [
     "CurrentEpoch",
+    "FakeFileSync",
     "FileRunContent",
     "FileRunLogWriter",
     "FileSync",

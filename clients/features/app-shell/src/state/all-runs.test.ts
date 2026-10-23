@@ -1,15 +1,19 @@
 import {describe, expect, test} from 'bun:test';
 import type {HostListing, HostRun, ListedRun, RunDigestEntry} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
   type Clock,
   DASHBOARD_RUNS,
   dashboardRows,
+  projectRunGaps,
   runLabels,
+  runsKnown,
   SIDEBAR_EMPTY,
   type SidebarAction,
   type SidebarRequest,
   type SidebarState,
+  type SidebarStep,
   sidebarInvariants,
   sidebarStep,
 } from './index.js';
@@ -404,4 +408,210 @@ test('a native import refusal stays visible on the run row', () => {
     retry: false,
   });
   expect(row?.row.detail).toBe('Pause this run before importing its history');
+});
+
+type ProjectRunsRequest = Extract<SidebarRequest, {kind: 'list-project-runs'}>;
+
+function listRequests(step: {readonly requests: readonly SidebarRequest[]}): ProjectRunsRequest[] {
+  return step.requests.filter(
+    (request): request is ProjectRunsRequest => request.kind === 'list-project-runs',
+  );
+}
+
+function visibleRunIds(state: SidebarState): Set<string> {
+  return new Set(dashboardRows(state, CLOCK).map(row => row.row.run.runId));
+}
+
+/** Answer the pending listings in a random order, each failing or not; every gap stays named. */
+function answerShuffled(
+  random: Seeded,
+  start: SidebarStep,
+  hostRuns: ReadonlyMap<string, readonly ListedRun[]>,
+): SidebarStep {
+  let step = start;
+  const pending = listRequests(step);
+  const complete = new Set<string>();
+  while (pending.length > 0) {
+    // Latency is reply ordering, so there is no wall-clock wait or verdict.
+    const request = pending.splice(random.int(pending.length), 1)[0];
+    if (!request) throw new Error('missing request');
+    const fails = random.bool();
+    step = sidebarStep(step.state, {
+      type: 'project-runs-listed',
+      ...request,
+      runs: fails ? null : (hostRuns.get(request.project) ?? []),
+      ...(fails ? {error: `refused ${request.project}`} : {}),
+    });
+    if (!fails) complete.add(request.project);
+    expectListedOrNamed(step.state, hostRuns, complete);
+  }
+  return step;
+}
+
+/** Each project's runs are visible once listed; a project not listed yet is named as a gap. */
+function expectListedOrNamed(
+  state: SidebarState,
+  hostRuns: ReadonlyMap<string, readonly ListedRun[]>,
+  complete: ReadonlySet<string>,
+): void {
+  const gaps = projectRunGaps(state.allRuns);
+  const visible = visibleRunIds(state);
+  for (const [project, rows] of hostRuns) {
+    if (complete.has(project)) expect(rows.every(row => visible.has(row.runId))).toBe(true);
+    else expect(gaps.some(gap => gap.project === project)).toBe(true);
+  }
+}
+
+test('property: reordered project failures remain visible and retry to a complete listing', () => {
+  for (const seed of SEEDS) {
+    const random = new Seeded(seed);
+    const projects = Array.from({length: 1 + random.int(5)}, (_, index) => `/project-${index}`);
+    const hostRuns = new Map(
+      projects.map((project, index) => [
+        project,
+        Array.from({length: 1 + random.int(5)}, (_, id) => run(`${index}-${id}`, id)),
+      ]),
+    );
+    const first = sidebarStep(SIDEBAR_EMPTY, {
+      type: 'overview',
+      listings: [listed('ssh:host-a')],
+      recent: projects.map(project => opened('ssh:host-a', project, 'remembered')),
+      skippedRecent: [],
+    });
+    let step = answerShuffled(random, first, hostRuns);
+    const refused = projectRunGaps(step.state.allRuns);
+    expect(
+      refused.every(
+        gap => gap.refusal?.kind === 'unreachable' && gap.refusal.detail.includes(gap.project),
+      ),
+    ).toBe(true);
+    step = sidebarStep(step.state, {type: 'refresh-live-digests'});
+    expect(projectRunGaps(step.state.allRuns).map(gap => gap.refusal)).toEqual(
+      refused.map(gap => gap.refusal),
+    );
+    for (const request of listRequests(step)) {
+      step = sidebarStep(step.state, {
+        type: 'project-runs-listed',
+        ...request,
+        runs: hostRuns.get(request.project) ?? [],
+      });
+    }
+    expect(projectRunGaps(step.state.allRuns)).toEqual([]);
+    expect(visibleRunIds(step.state)).toEqual(
+      new Set([...hostRuns.values()].flat().map(row => row.runId)),
+    );
+  }
+});
+
+/** A host whose link drops and returns while the dashboard reads; every request settles. */
+class FlakyHost {
+  up = true;
+  pending: SidebarRequest[] = [];
+  step: SidebarStep;
+
+  constructor(
+    readonly hostRuns: ReadonlyMap<string, readonly ListedRun[]>,
+    host: 'ssh:host-a',
+  ) {
+    this.step = sidebarStep(SIDEBAR_EMPTY, {
+      type: 'overview',
+      listings: [listed(host)],
+      recent: [...hostRuns.keys()].map(project => opened(host, project, 'remembered')),
+      skippedRecent: [],
+    });
+    this.pending = [...this.step.requests];
+  }
+
+  #dispatch(action: SidebarAction): void {
+    this.step = sidebarStep(this.step.state, action);
+    this.pending.push(...this.step.requests);
+  }
+
+  answer(at: number): void {
+    const request = this.pending.splice(at, 1)[0];
+    if (!request) return;
+    if (request.kind === 'list-project-runs') {
+      const runs = this.up ? (this.hostRuns.get(request.project) ?? []) : null;
+      this.#dispatch({
+        type: 'project-runs-listed',
+        token: request.token,
+        host: request.host,
+        project: request.project,
+        runs,
+        ...(runs === null ? {error: 'host read deadline exceeded'} : {}),
+      });
+    } else {
+      const found = new Map(request.runIds.map(id => [id, read()] as const));
+      this.#dispatch({
+        type: 'digests-read',
+        token: request.token,
+        reply: this.up ? {kind: 'digests', runs: found} : null,
+      });
+    }
+  }
+
+  link(up: boolean): void {
+    this.up = up;
+    this.#dispatch({
+      type: 'listing',
+      listing: up
+        ? listed('ssh:host-a')
+        : {kind: 'unavailable', host: 'ssh:host-a', connection: {kind: 'reconnecting', attempt: 1}},
+    });
+  }
+
+  tick(): void {
+    this.#dispatch({type: 'refresh-live-digests'});
+  }
+
+  /** One of: an answer (a failure while the link is down), a drop or return, a refresh tick. */
+  randomly(random: Seeded): void {
+    const choice = random.int(6);
+    if (choice < 3 && this.pending.length > 0) this.answer(random.int(this.pending.length));
+    else if (choice === 3) this.link(!this.up);
+    else if (choice === 4) this.tick();
+  }
+
+  /** The link is back for good: each refresh and each answer is now a success. */
+  returnForGood(): void {
+    if (!this.up) this.link(true);
+    for (let round = 0; round < 4; round++) {
+      while (this.pending.length > 0) this.answer(0);
+      this.tick();
+    }
+    while (this.pending.length > 0) this.answer(0);
+  }
+}
+
+test('property: a link dropped at any point while reading converges to the host once it returns', () => {
+  for (const seed of SEEDS) {
+    const random = new Seeded(seed);
+    const projects = Array.from({length: 1 + random.int(4)}, (_, index) => `/project-${index}`);
+    const hostRuns = new Map(
+      projects.map((project, index) => [
+        project,
+        Array.from({length: 1 + random.int(4)}, (_, id) => run(`${index}-${id}`, id)),
+      ]),
+    );
+    const world = new FlakyHost(hostRuns, 'ssh:host-a');
+    let hadRuns = false;
+    for (let step = 0; step < 40; step++) {
+      world.randomly(random);
+      // Once runs have been shown, no drop or return of the link makes the home anything but Runs
+      // (the shell would leave for New run on `none`, or on `unknown` after its wait).
+      const known = runsKnown(world.step.state, ['ssh:host-a']);
+      if (hadRuns) expect(known).toBe('some');
+      hadRuns ||= known === 'some';
+    }
+    world.returnForGood();
+    const state = world.step.state;
+    expect(projectRunGaps(state.allRuns)).toEqual([]);
+    expect(visibleRunIds(state)).toEqual(
+      new Set([...hostRuns.values()].flat().map(row => row.runId)),
+    );
+    // No card says "can't read run state" or "reading" once the host answers.
+    const rows = dashboardRows(state, CLOCK);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.filter(each => each.row.problem !== null || each.row.digest === null)).toEqual([]);
+  }
 });
