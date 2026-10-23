@@ -1301,6 +1301,15 @@ button.vs-pickrow-trail:hover {
   }
 }
 
+/* Comparison tables keep their short summary readable beside the fixed numeric columns. */
+@container (max-width: 480px) {
+  .vs-picklist[data-wrap-summary] .vs-pickrow,
+  .vs-picklist[data-wrap-summary] .vs-listheader {
+    gap: var(--space-2);
+    padding-inline: var(--space-2);
+  }
+}
+
 /* --- filter chips and search ------------------------------------------------------------------- */
 
 button.vs-dotlegend-item {

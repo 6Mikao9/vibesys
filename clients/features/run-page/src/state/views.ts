@@ -21,6 +21,7 @@ import {
   type StageView,
   type Unavailable,
 } from './run-page.js';
+import {STARTUP_LABELS} from './startup-stages.js';
 import {type TokensReading, tokensReading} from './token-words.js';
 import {roleAgents} from './usage-view.js';
 import {whoWords} from './usage-who.js';
@@ -174,8 +175,8 @@ export function pauseNowBannerView(state: RunPageState): PauseNowBannerView {
 }
 
 const STAGES = [
-  {id: 'building_image', label: 'Building the agent image'},
-  {id: 'starting_container', label: 'Starting the agent container'},
+  {id: 'building_image', label: STARTUP_LABELS.building_image},
+  {id: 'starting_container', label: STARTUP_LABELS.starting_container},
 ] as const;
 
 function streamsOf(state: RunPageState): readonly LogStream[] {
