@@ -134,6 +134,13 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         return await drive_core_run(core_host, integration)
 
 
+def unwinding(exc: BaseException) -> tuple[CoreEventType, str, EventStatus]:
+    """How a run that left by an exception ends: a user interrupt is a stop, anything else a failure."""
+    if isinstance(exc, KeyboardInterrupt):
+        return CoreEventType.STOPPED, "Run stopped by interrupt", EventStatus.INTERRUPTED
+    return CoreEventType.RUN_FAILED, f"{type(exc).__name__}: {exc}", EventStatus.FAILED
+
+
 class _LocalRunSession:
     """`RunSession` that awaits one selected policy in-process.
 
@@ -360,15 +367,15 @@ class _LocalRunSession:
                 uncompared=isinstance(stop, OperatorStopped) and stop.uncompared,
             )
         except BaseException as exc:
-            self._status = RunStatus.FAILED
-            reason = f"{type(exc).__name__}: {exc}"
-            startup_recorded = self._resources is None and self._integration.events.fail_open_epoch(
-                reason
+            kind, reason, status = unwinding(exc)
+            self._status = RunStatus.STOPPED if kind is CoreEventType.STOPPED else RunStatus.FAILED
+            startup_recorded = (
+                kind is CoreEventType.RUN_FAILED
+                and self._resources is None
+                and self._integration.events.fail_open_epoch(reason)
             )
             if not startup_recorded:
-                self._integration.events.emit(
-                    CoreEventType.RUN_FAILED, reason, status=EventStatus.FAILED
-                )
+                self._integration.events.emit(kind, reason, status=status)
             raise
         else:
             self._status = RunStatus.COMPLETED if succeeded else RunStatus.FAILED
