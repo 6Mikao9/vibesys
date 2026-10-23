@@ -28,6 +28,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     reviewed,
 )
 from tests.vibesys.search_faults import assert_flow_closed
+from tests.vibesys.the_one_rule import beats, lead_of
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ProfilerResult, ReviewResult
@@ -149,7 +150,7 @@ def test_the_adopted_candidate_is_the_best_eligible_one_or_the_input_stands(
 ) -> None:
     """Whatever the candidates measure, the judge rules and the order the workstreams end in.
 
-    A candidate is eligible when the judge passed it and it beats the input. A rejected
+    A candidate is eligible when the judge passed it and it beats the input by the one rule. A rejected
     workstream spends both its turns, each on a candidate as fast as the generated throughput,
     so a search that ignored the verdict would adopt it.
     """
@@ -178,10 +179,10 @@ def test_the_adopted_candidate_is_the_best_eligible_one_or_the_input_stands(
     eligible = {
         f"c{n}": speed
         for n, speed in enumerate(throughputs, start=1)
-        if judged[n - 1] and speed > INPUT_THROUGHPUT
+        if judged[n - 1] and beats(float(speed), INPUT_THROUGHPUT)
     }
     if eligible:
-        best = max(eligible, key=eligible.__getitem__)
+        best = lead_of(list(eligible.items()))
         assert selection_of(host) == ("retained_candidate", best)
     else:
         assert selection_of(host) == ("trusted_baseline", None)

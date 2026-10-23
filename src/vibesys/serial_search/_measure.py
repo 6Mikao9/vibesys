@@ -13,10 +13,10 @@ has no gate and no result.
 
 from __future__ import annotations
 
-from vibesys.candidates.api import Baseline, input_metrics
+from vibesys.candidates.api import Baseline, beats_input, input_metrics
 from vibesys.metrics import AcceptedReading, accept_readings, reading_of
 from vibesys.search_spans.api import FAILED_CHECK, GATE, PASSED, SLOWER, GateAttrs
-from vibesys.serial_search._closing import beats_input, failed_gate
+from vibesys.serial_search._closing import failed_gate
 from vibesys.serial_search._plan_view import MeasurementNoise
 from vs_core.api.search import (
     Comparison,

@@ -289,7 +289,7 @@ export type Unit = string | null;
 export type Direction = ("max" | "min") | null;
 export type Name1 = string;
 export type Direction1 = "max" | "min";
-export type Objectives = TaskObjective[];
+export type Objectives = ObjectiveAxis[];
 export type CorrectnessCheck = string[];
 export type Name2 = string;
 export type Version = string;
@@ -744,6 +744,14 @@ export type Noise = number;
 export type MeasurementVerdict = "better" | "within_noise" | "worse" | "inconclusive";
 export type CandidateSamples = number;
 export type BaseSamples = number;
+export type Metric4 = string;
+export type Unit4 = string | null;
+export type Direction3 = "max" | "min";
+export type CandidateValue1 = number;
+export type BaseValue1 = number;
+export type Ratio1 = number;
+export type Noise1 = number;
+export type Objectives1 = ComparedObjective[];
 /**
  * Closed set of framework subsystems that emit framework events.
  */
@@ -755,9 +763,9 @@ export type Label2 = string;
  * What a run knows of one comparison baseline. Closed; mirrored by ``server.events``.
  */
 export type ComparisonStatus = "measured" | "failed" | "not_configured" | "not_measured";
-export type Metric4 = string | null;
-export type Unit4 = string | null;
-export type Direction3 = ("max" | "min") | null;
+export type Metric5 = string | null;
+export type Unit5 = string | null;
+export type Direction4 = ("max" | "min") | null;
 export type Value4 = number | null;
 export type Spread = number | null;
 export type Samples = number | null;
@@ -925,8 +933,8 @@ export type IterationStatus = "pending" | "active" | "completed" | "failed" | "c
 export type ChildCount = number;
 export type Id2 = string;
 export type Value5 = number | null;
-export type Unit5 = string | null;
-export type Direction4 = ("max" | "min") | null;
+export type Unit6 = string | null;
+export type Direction5 = ("max" | "min") | null;
 export type HeadlineMetrics = IterationMetric[];
 export type Items = IterationSummary[];
 export type NextCursor = string | null;
@@ -1025,14 +1033,16 @@ export type MetricValue1 = number | null;
 export type VsBaseline1 = number | null;
 export type Name5 = string;
 export type Finite = number;
-export type Direction5 = "max" | "min";
-export type Unit6 = string | null;
+export type Direction6 = "max" | "min";
+export type Unit7 = string | null;
+export type Runs = number;
+export type Spread1 = number;
 export type InputMetrics = MetricRow[];
 export type Metrics = MetricRow[];
 export type Check = "correctness" | "benchmark";
 export type Completed = number | null;
 export type Required = number | null;
-export type Unit7 = string | null;
+export type Unit8 = string | null;
 export type Call = number;
 export type HypothesisId1 = string | null;
 export type ParentRevision = string | null;
@@ -1609,9 +1619,12 @@ export interface ObjectiveOverview {
   correctness_check?: CorrectnessCheck;
 }
 /**
- * One axis the task compares candidates on, and which way is better.
+ * One axis candidates are ranked on, as a client is told it: its name and which way is better.
+ *
+ * The task's objective in core also holds the noise policy a comparison reads, which is not the
+ * run's to show; the wire carries only what a client marks.
  */
-export interface TaskObjective {
+export interface ObjectiveAxis {
   name: Name1;
   direction: Direction1;
 }
@@ -2364,7 +2377,21 @@ export interface MeasurementComparedData {
   verdict: MeasurementVerdict;
   candidate_samples: CandidateSamples;
   base_samples: BaseSamples;
+  objectives?: Objectives1;
   source?: FrameworkSource5;
+}
+/**
+ * How a candidate stands against its base on one objective. See ``vibesys.events``.
+ */
+export interface ComparedObjective {
+  metric: Metric4;
+  unit?: Unit4;
+  direction: Direction3;
+  candidate_value: CandidateValue1;
+  base_value: BaseValue1;
+  ratio: Ratio1;
+  noise: Noise1;
+  verdict: MeasurementVerdict;
 }
 /**
  * The comparison baselines a run read when it started or resumed; the newest event wins.
@@ -2387,9 +2414,9 @@ export interface ComparisonReadingData {
   name: Name3;
   label: Label2;
   status: ComparisonStatus;
-  metric?: Metric4;
-  unit?: Unit4;
-  direction?: Direction3;
+  metric?: Metric5;
+  unit?: Unit5;
+  direction?: Direction4;
   value?: Value4;
   spread?: Spread;
   samples?: Samples;
@@ -2589,8 +2616,8 @@ export interface IterationSummary {
 export interface IterationMetric {
   id: Id2;
   value?: Value5;
-  unit?: Unit5;
-  direction?: Direction4;
+  unit?: Unit6;
+  direction?: Direction5;
 }
 /**
  * Typed absence, kept distinct from a supported empty tree.
@@ -2827,13 +2854,15 @@ export interface GateAttrs {
   failed?: FailedCheck | null;
 }
 /**
- * One measured quantity on a declared axis.
+ * One measured quantity on a declared axis, and the runs its value rests on.
  */
 export interface MetricRow {
   name: Name5;
   value: Finite;
-  direction: Direction5;
-  unit?: Unit6;
+  direction: Direction6;
+  unit?: Unit7;
+  runs?: Runs;
+  spread?: Spread1;
 }
 /**
  * The trusted check that rejected a candidate, and how far it came when it reported that.
@@ -2845,7 +2874,7 @@ export interface FailedCheck {
   check: Check;
   completed?: Completed;
   required?: Required;
-  unit?: Unit7;
+  unit?: Unit8;
 }
 /**
  * A planning call: which call of the run it is.

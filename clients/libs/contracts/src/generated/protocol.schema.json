@@ -1047,6 +1047,66 @@
       "title": "CommandResultPayload",
       "type": "object"
     },
+    "ComparedObjective": {
+      "additionalProperties": false,
+      "description": "How a candidate stands against its base on one objective. See ``vibesys.events``.",
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "candidate_value": {
+          "title": "Candidate Value",
+          "type": "number"
+        },
+        "base_value": {
+          "title": "Base Value",
+          "type": "number"
+        },
+        "ratio": {
+          "title": "Ratio",
+          "type": "number"
+        },
+        "noise": {
+          "title": "Noise",
+          "type": "number"
+        },
+        "verdict": {
+          "$ref": "#/$defs/MeasurementVerdict"
+        }
+      },
+      "required": [
+        "metric",
+        "direction",
+        "candidate_value",
+        "base_value",
+        "ratio",
+        "noise",
+        "verdict"
+      ],
+      "title": "ComparedObjective",
+      "type": "object"
+    },
     "ComparisonReadingData": {
       "additionalProperties": false,
       "description": "One comparison baseline as the run read it from the project's store.\n\n``value`` is the mean of ``samples`` runs of the task's benchmark against the engine, and\n``spread`` their relative standard deviation (absent for one run). ``reason`` explains a\nfailed or unconfigured comparison. A hidden-from-agents comparison is still shown here:\nthe operator sees it; only the planner's prompt omits it.",
@@ -4056,6 +4116,14 @@
           "title": "Base Samples",
           "type": "integer"
         },
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ComparedObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
         "source": {
           "$ref": "#/$defs/FrameworkSource",
           "default": "gates"
@@ -4091,7 +4159,7 @@
     },
     "MetricRow": {
       "additionalProperties": false,
-      "description": "One measured quantity on a declared axis.",
+      "description": "One measured quantity on a declared axis, and the runs its value rests on.",
       "properties": {
         "name": {
           "minLength": 1,
@@ -4115,6 +4183,18 @@
           ],
           "default": null,
           "title": "Unit"
+        },
+        "runs": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Runs",
+          "type": "integer"
+        },
+        "spread": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Spread",
+          "type": "number"
         }
       },
       "required": [
@@ -4246,6 +4326,30 @@
       "title": "NarrationLine",
       "type": "object"
     },
+    "ObjectiveAxis": {
+      "additionalProperties": false,
+      "description": "One axis candidates are ranked on, as a client is told it: its name and which way is better.\n\nThe task's objective in core also holds the noise policy a comparison reads, which is not the\nrun's to show; the wire carries only what a client marks.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
+      ],
+      "title": "ObjectiveAxis",
+      "type": "object"
+    },
     "ObjectiveOverview": {
       "additionalProperties": false,
       "description": "What the run optimizes: the task's objective and the metric it is judged on.\n\n``unit`` and ``direction`` come from the run's own measurements and objectives once it has\nthem; ``correctness_check`` is the argv of the check a candidate must pass (empty when the\ntask gates on none).",
@@ -4297,7 +4401,7 @@
         "objectives": {
           "default": [],
           "items": {
-            "$ref": "#/$defs/TaskObjective"
+            "$ref": "#/$defs/ObjectiveAxis"
           },
           "title": "Objectives",
           "type": "array"
@@ -7935,31 +8039,6 @@
         "latest_sequence"
       ],
       "title": "SubscribedMessage",
-      "type": "object"
-    },
-    "TaskObjective": {
-      "additionalProperties": false,
-      "description": "One axis the task compares candidates on, and which way is better.",
-      "properties": {
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "direction": {
-          "enum": [
-            "max",
-            "min"
-          ],
-          "title": "Direction",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "direction"
-      ],
-      "title": "TaskObjective",
       "type": "object"
     },
     "TodoItemData": {

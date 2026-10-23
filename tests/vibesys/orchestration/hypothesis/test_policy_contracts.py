@@ -27,11 +27,12 @@ from vibesys.hypothesis.transitions import (
     select_final_candidate,
     trusted_candidate_records,
 )
-from vibesys.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.multi.models import ImplementerResponse, PreRoundDecision
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.prompts import PROMPTS_DIR, render_template
+from vs_core.api import ComparisonVerdict
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
     ValidationRecipe,
@@ -818,7 +819,7 @@ def _record(round_number: int, perf: float | None, unit: str = "tok/s") -> Round
         official_evaluation=perf is not None,
         official_evaluation_reason="cadence" if perf is not None else None,
         judge_verdict="pass" if perf is not None else "deferred",
-        perf_comparison=MetricComparison.INCOMPARABLE if perf is not None else None,
+        perf_comparison=ComparisonVerdict.INCONCLUSIVE if perf is not None else None,
         perf_provenance="framework" if perf is not None else None,
     )
 

@@ -2,7 +2,7 @@
 # with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
 # every saved document, or raises the version.
 shape WorkstreamResume
-version 1
+version 2
 $root {"additionalProperties":false,"type":"object"}
 $root.baseline optional {"anyOf":[{"$ref":"#/$defs/Baseline"},{"type":"null"}],"default":null}
 $root.blockers optional {"default":[],"items":{"$ref":"#/$defs/Blocker"},"type":"array"}
@@ -17,7 +17,7 @@ $root.result optional {"anyOf":[{"$ref":"#/$defs/Result"},{"type":"null"}],"defa
 $root.stage required {"$ref":"#/$defs/ResumeStage"}
 $root.start required {"$ref":"#/$defs/WorkstreamStart"}
 $root.unverified optional {"default":[],"items":{"$ref":"#/$defs/EvidenceRef"},"type":"array"}
-$root.version optional {"const":1,"default":1,"type":"integer"}
+$root.version optional {"default":2,"enum":[1,2],"type":"integer"}
 $root.workspace required {"$ref":"#/$defs/AttemptRef"}
 AcceptedReading {"additionalProperties":false,"type":"object"}
 AcceptedReading.evidence_id required {"$ref":"#/$defs/EvidenceId"}
@@ -125,7 +125,7 @@ EvidenceRef.kind required {"$ref":"#/$defs/EvidenceKind"}
 EvidenceRef.observation_sequence required {"$ref":"#/$defs/Count"}
 EvidenceRef.provenance required {"enum":["trusted","self-report"],"type":"string"}
 EvidenceRef.purpose required {"enum":["baseline","local-validation","official","profile"],"type":"string"}
-EvidenceRef.reading optional {"anyOf":[{"$ref":"#/$defs/Reading"},{"type":"null"}],"default":null}
+EvidenceRef.readings optional {"default":[],"items":{"$ref":"#/$defs/Reading"},"type":"array"}
 EvidenceRef.reused_from optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 EvidenceRef.scope required {"$ref":"#/$defs/Scope"}
 EvidenceRef.source_request required {"$ref":"#/$defs/RequestId"}
@@ -216,6 +216,8 @@ MergeSource.revision required {"$ref":"#/$defs/RevisionRef"}
 MetricRow {"additionalProperties":false,"type":"object"}
 MetricRow.direction required {"$ref":"#/$defs/Direction"}
 MetricRow.name required {"minLength":1,"type":"string"}
+MetricRow.runs optional {"default":1,"minimum":1,"type":"integer"}
+MetricRow.spread optional {"default":0.0,"minimum":0.0,"type":"number"}
 MetricRow.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 MetricRow.value required {"$ref":"#/$defs/Finite"}
 NonNegative {"maximum":1000,"minimum":0,"type":"integer"}

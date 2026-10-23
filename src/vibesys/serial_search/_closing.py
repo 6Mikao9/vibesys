@@ -14,14 +14,13 @@ from typing import TYPE_CHECKING
 
 from vibesys.candidates.api import (
     Baseline,
+    beats_input,
     gates_of,
-    input_metrics,
     settle_for,
-    space_of,
 )
 from vibesys.candidates.api import turned_down as checks_turned_down
 from vibesys.hypothesis import CandidateDisposition
-from vibesys.metrics import FrameworkBenchmarkOutcome, MetricComparison, MetricRow, reading_of
+from vibesys.metrics import FrameworkBenchmarkOutcome, MetricRow, reading_of
 from vs_core.api.search import Assessment, EvidenceKind
 
 if TYPE_CHECKING:
@@ -55,22 +54,6 @@ def turned_down(finished: FinishedRound, *, unsettled: frozenset[HypothesisOutco
     """
     discarded = finished.disposition is CandidateDisposition.DISCARD
     return discarded or checks_turned_down(finished, unsettled=unsettled)
-
-
-def beats_input(
-    baseline: Baseline, readings: tuple[AcceptedReading, ...], terms: TaskTerms
-) -> bool:
-    """Whether the candidate's benchmark beats the input's beyond noise.
-
-    The bar is `input_metrics` (a measured input's benchmark, or that of one that failed only
-    its accuracy check); an input with no bar leaves nothing to beat.
-    """
-    benchmark = reading_of(readings, EvidenceKind.BENCHMARK)
-    bar = input_metrics(baseline)
-    if not bar:
-        return True
-    metrics = () if benchmark is None else benchmark.metrics
-    return space_of(terms).compare_metrics(metrics, bar) is MetricComparison.BETTER
 
 
 def settle(

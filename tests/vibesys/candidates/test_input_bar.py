@@ -26,13 +26,13 @@ from vibesys.candidates.api import (
 from vibesys.metrics import (
     AcceptedReading,
     Direction,
-    MetricComparison,
     MetricRow,
     with_declared_directions,
 )
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
+    ComparisonVerdict,
     EvidenceId,
     EvidenceKind,
     RequestId,
@@ -87,9 +87,9 @@ def first_sample(tpot: float, ttft: float) -> Measured:
     )
 
 
-def compare(candidate: tuple[MetricRow, ...], baseline: Baseline) -> MetricComparison:
+def compare(candidate: tuple[MetricRow, ...], baseline: Baseline) -> ComparisonVerdict:
     """How a candidate relates to the input's bar."""
-    return SPACE.compare_metrics(candidate, input_metrics(baseline))
+    return SPACE.compare_rows(candidate, input_metrics(baseline))
 
 
 SAMPLES = st.lists(st.tuples(st.floats(40, 70), st.floats(20_000, 40_000)), min_size=1, max_size=5)
@@ -107,19 +107,25 @@ def test_the_bar_is_the_mean_of_the_recorded_samples_whichever_came_first(
         assert samples_of(baseline) == len(samples)
 
 
-def test_the_reproduced_first_draw_bar_flips_a_winner_that_the_mean_bar_keeps() -> None:
-    """Base TPOT 49.63 ms then 53.59 and 53.50 ms; a robust TTFT win at TPOT 52.25 ms."""
+def test_the_reproduced_first_draw_bar_no_longer_flips_a_winner_the_mean_bar_keeps() -> None:
+    """Base TPOT 49.63 ms then 53.59 and 53.50 ms; a robust TTFT win at TPOT 52.25 ms.
+
+    The first draw alone put the TPOT 5.3% above the base, past a flat 5% tolerance, and the
+    robust TTFT win was lost to it. The one rule holds each difference against the noise of both
+    sides, so the winner dominates the first draw as well as the mean of all three.
+    """
     samples = ((49.63, 29_800.0), (53.59, 30_400.0), (53.50, 30_200.0))
     winner = rows(52.25, 29_800.0 * 0.67)
     first_only = first_sample(*samples[0])
-    assert compare(winner, first_only) is not MetricComparison.BETTER
+    assert compare(winner, first_only) is ComparisonVerdict.BETTER
     refined = with_samples(first_only, tuple(reading(i, *s) for i, s in enumerate(samples)))
-    assert compare(winner, refined) is MetricComparison.BETTER
+    assert compare(winner, refined) is ComparisonVerdict.BETTER
+    assert [row.runs for row in input_metrics(refined)] == [3, 3]  # the bar states its weight
 
 
 @given(
     samples=SAMPLES,
-    ttft_gain=st.floats(0.15, 0.6),
+    ttft_gain=st.floats(0.3, 0.6),
     tpot_slack=st.floats(-0.04, 0.04),
 )
 def test_a_candidate_that_wins_within_tolerance_of_the_mean_is_better_whichever_sample_came_first(
@@ -131,7 +137,7 @@ def test_a_candidate_that_wins_within_tolerance_of_the_mean_is_better_whichever_
     readings = tuple(reading(i, *pair) for i, pair in enumerate(samples))
     for pair in itertools.islice(samples, 3):
         assert (
-            compare(winner, with_samples(first_sample(*pair), readings)) is MetricComparison.BETTER
+            compare(winner, with_samples(first_sample(*pair), readings)) is ComparisonVerdict.BETTER
         )
 
 
@@ -146,7 +152,7 @@ def test_a_candidate_worse_than_the_mean_is_never_better(
     for pair in samples:
         assert (
             compare(loser, with_samples(first_sample(*pair), readings))
-            is not MetricComparison.BETTER
+            is not ComparisonVerdict.BETTER
         )
 
 

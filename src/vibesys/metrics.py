@@ -1,27 +1,28 @@
-"""Objective axes and metric comparison owned by orchestration policy.
+"""Objective axes, and the one comparison of readings projected onto them.
 
 A run measures its candidates in a **metric space**: a set of directed
-objective axes plus the relative benchmark tolerance below which two readings
-are indistinguishable. :class:`MetricSpace` owns every question that needs both
-of those facts -- "is this reading better?", "does this row dominate that
-one?", "which rows are on the frontier?", "which reading is best?" -- so that
-noise and direction appear as parameters here and nowhere else. Callers hand it
-measurements and consume a :class:`MetricComparison`; they do not assemble a
-comparison out of a value, a direction, and a tolerance.
+objective axes plus the relative benchmark noise a task declares. Whether a
+reading is better, worse or within noise is decided once, by vs-core
+(``vs_core.api.judge`` per objective and ``dominance`` over them: the
+statistic, the stated default noise and the dominance rule are defined there
+and nowhere else). :class:`MetricSpace` only says which objectives a comparison
+judges, which way is better on each, and how much noise the task declares for
+it; every question that needs a verdict -- "is this reading better?", "does
+this row dominate that one?", "which rows are on the frontier?", "which reading
+is best?" -- asks :meth:`MetricSpace.compare`, so there is no second rule to
+disagree with the first. Callers hand it measurements and consume a
+``ComparisonVerdict``; they do not assemble a comparison out of a value, a
+direction, and a tolerance.
 
 The space is built once from the task's ``objectives.toml`` and persisted with
 the run, so the loop, ``--resume`` reprojection, and the server read path all
 compare within the same space instead of being handed a tolerance through a
 call chain (issue #507).
-
-``MetricComparison`` is persisted by hypothesis history and owned here with
-the comparison policy that produces it.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass as standard_dataclass
-from enum import StrEnum
 from statistics import fmean
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -29,15 +30,19 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 from pydantic.dataclasses import dataclass
 
 from vs_core.api import (
+    ComparisonVerdict,
     EvidenceId,
     EvidenceKey,
     EvidenceKind,
     EvidenceRef,
     ObservationStatus,
     RequestId,
+    Runs,
     RunView,
     Scope,
     Value,
+    dominance,
+    judge,
 )
 
 if TYPE_CHECKING:
@@ -52,7 +57,6 @@ __all__ = [
     "HostContention",
     "HostSampleView",
     "Measurement",
-    "MetricComparison",
     "MetricRow",
     "MetricSpace",
     "Objective",
@@ -64,23 +68,6 @@ __all__ = [
     "reading_of",
     "with_declared_directions",
 ]
-
-
-class MetricComparison(StrEnum):
-    """How one measurement relates to the measurement it is compared against.
-
-    ``WITHIN_NOISE`` and ``INCOMPARABLE`` are deliberately distinct.
-    ``WITHIN_NOISE`` means both readings exist on the same axis and their
-    difference does not exceed the declared measurement tolerance, so the
-    comparison ran and found no result. ``INCOMPARABLE`` means the comparison
-    could not run at all: a reading is missing, the axis has no known
-    direction, or the runs give no estimate of the noise. Consumers that collapse them still have to say so explicitly.
-    """
-
-    BETTER = "better"
-    WORSE = "worse"
-    WITHIN_NOISE = "within_noise"
-    INCOMPARABLE = "incomparable"
 
 
 @standard_dataclass(frozen=True, slots=True)
@@ -128,27 +115,35 @@ class Measurement:
     record written before its axis was declared in ``objectives.toml`` carries
     the direction the framework used at the time. When it is absent the space's
     configured axis supplies it.
+
+    ``runs`` and ``spread`` state what ``value`` rests on, which the comparison
+    needs for its noise (`vs_core.api.Runs`): ``value`` is the mean of ``runs``
+    runs whose relative standard deviation is ``spread``. A reading that states
+    neither is one run of unknown spread, which the comparison judges under the
+    task's declared noise, else the stated default (``vs_core.api.DEFAULT_RELATIVE_NOISE``).
     """
 
     metric: str
     value: float
     direction: Literal["max", "min"] | None = None
+    runs: Annotated[int, Field(ge=1)] = 1
+    spread: Annotated[FiniteFloat, Field(ge=0.0)] = 0.0
+
+    @property
+    def stands(self) -> Runs:
+        """The runs this reading is the mean of, as the comparison takes them."""
+        return Runs(mean=self.value, count=self.runs, spread=self.spread)
 
 
 class MetricSpace(BaseModel):
-    """The directed axes and measurement tolerance one run compares within.
+    """The directed axes and declared noise one run compares within.
 
-    ``relative_noise`` is the run's declared benchmark variation, read from
-    ``[pareto] relative_noise``. A reading is better than a baseline only when
-    its direction-signed improvement exceeds ``abs(baseline) * relative_noise``;
-    symmetrically for worse. A zero fraction therefore reproduces strict
-    comparison, and so does a zero baseline, for which a relative tolerance has
-    no scale.
-
-    The default is the empty strict space. It is the compatibility value for
-    run state written before the space was persisted, and the only sanctioned
-    way to get a zero tolerance: no function anywhere takes a tolerance
-    argument that could silently default to it.
+    ``relative_noise`` is the run's declared benchmark variation of one run,
+    read from ``[pareto] relative_noise``; an axis may declare its own, which
+    wins (`noise_of`). Neither is a tolerance of its own: they are the
+    ``declared`` argument of vs-core's judgement, which turns them, and the runs a
+    reading rests on, into the band a difference must exceed. A task that
+    declares none is judged under vs-core's stated default, never a zero band.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -203,42 +198,80 @@ class MetricSpace(BaseModel):
 
     # -- comparison ---------------------------------------------------------
 
-    def compare(
-        self,
-        candidate: Measurement | None,
-        baseline: Measurement | None,
-    ) -> MetricComparison:
-        """Order *candidate* against *baseline* within this space.
+    def noise_of(self, metric: str) -> float:
+        """The relative variation of one run the task declares for ``metric``; 0 declares none.
 
-        A missing reading, mismatched axes, or an axis with no known direction
-        yields ``INCOMPARABLE``: the framework must not read a verdict out of
-        evidence it does not have.
+        The axis's own declaration wins, else the space's: the same precedence as the task's
+        (`vs_core.api.ComparisonPolicy.floor_of`), so the product and core never read one
+        task's noise two ways.
         """
-        direction = self.direction(candidate)
-        if (
-            candidate is None
-            or baseline is None
-            or direction is None
-            or candidate.metric != baseline.metric
-        ):
-            return MetricComparison.INCOMPARABLE
-        improvement = (
-            candidate.value - baseline.value
-            if direction == "max"
-            else baseline.value - candidate.value
+        axis = self.axis(metric)
+        if axis is not None and axis.relative_noise is not None:
+            return axis.relative_noise
+        return self.relative_noise
+
+    def compare(
+        self, candidate: Sequence[Measurement], base: Sequence[Measurement]
+    ) -> ComparisonVerdict:
+        """``candidate`` against ``base`` by vs-core's rule: the one comparison in the system.
+
+        Each objective is judged by ``vs_core.api.judge`` under the noise the task declares for
+        it (`noise_of`) and the runs each side's reading rests on, and the verdicts give the
+        result by ``vs_core.api.dominance``: ``BETTER`` is no objective worse and at least one
+        better, whatever the others did; a tradeoff is ``WORSE``; ``WITHIN_NOISE`` is every
+        objective undecided; an objective that cannot be judged (a reading one side lacks, a
+        base of zero, no known direction) leaves the result ``INCONCLUSIVE``.
+
+        The objectives judged are the space's configured axes, which supply the directions
+        whatever order the readings come in or default a secondary reading carries. With none
+        configured, the headline (the first reading) of each side is judged, in the direction it
+        states.
+        """
+        if not self.objectives:
+            return self._headline(candidate, base)
+        mine = _by_metric(candidate)
+        theirs = _by_metric(base)
+        return dominance(
+            self._judged(mine.get(axis.name), theirs.get(axis.name), axis.direction)
+            for axis in self.objectives
         )
-        axis = self.axis(baseline.metric)
-        fraction = (
-            axis.relative_noise
-            if axis is not None and axis.relative_noise is not None
-            else self.relative_noise
-        )
-        tolerance = abs(baseline.value) * fraction
-        if improvement > tolerance:
-            return MetricComparison.BETTER
-        if improvement < -tolerance:
-            return MetricComparison.WORSE
-        return MetricComparison.WITHIN_NOISE
+
+    def compare_rows(
+        self, candidate: Sequence[MetricRow], base: Sequence[MetricRow]
+    ) -> ComparisonVerdict:
+        """`compare` for the rows of a benchmark, which state the runs each value rests on."""
+        return self.compare([row.reading() for row in candidate], [row.reading() for row in base])
+
+    def no_worse_metrics(self, candidate: Sequence[MetricRow], base: Sequence[MetricRow]) -> bool:
+        """Whether no objective of ``candidate`` is worse than ``base``'s, and every one could be judged.
+
+        Rejects a tradeoff, whatever the other objective gained, and a comparison that is
+        inconclusive: a regression is never assumed away.
+        """
+        return self.compare_rows(candidate, base) in {
+            ComparisonVerdict.BETTER,
+            ComparisonVerdict.WITHIN_NOISE,
+        }
+
+    def _headline(
+        self, candidate: Sequence[Measurement], base: Sequence[Measurement]
+    ) -> ComparisonVerdict:
+        """The first reading of each side, when no axis is configured to name the objectives."""
+        mine = candidate[0] if candidate else None
+        theirs = base[0] if base else None
+        if mine is None or theirs is None or mine.metric != theirs.metric:
+            return ComparisonVerdict.INCONCLUSIVE
+        return self._judged(mine, theirs, mine.direction)
+
+    def _judged(
+        self, mine: Measurement | None, theirs: Measurement | None, direction: Direction | None
+    ) -> ComparisonVerdict:
+        """One objective's verdict: inconclusive without both readings and a direction."""
+        if mine is None or theirs is None or direction is None:
+            return ComparisonVerdict.INCONCLUSIVE
+        return judge(
+            mine.stands, theirs.stands, direction=direction, declared=self.noise_of(mine.metric)
+        ).verdict
 
     def best[T](
         self,
@@ -247,7 +280,7 @@ class MetricSpace(BaseModel):
     ) -> T | None:
         """Return the member of *points* whose reading leads on its axis.
 
-        Ties, including ties within the tolerance, keep the earlier member, so
+        Ties, including ties within the noise, keep the earlier member, so
         callers order *points* to express their own tie-break. Members with no
         reading, or on an axis with no known direction, are skipped.
         """
@@ -257,102 +290,53 @@ class MetricSpace(BaseModel):
             item = reading(point)
             if item is None or self.direction(item) is None:
                 continue
-            if best_reading is None or self.compare(item, best_reading) is MetricComparison.BETTER:
+            if best_reading is None or self.compare((item,), (best_reading,)) is (
+                ComparisonVerdict.BETTER
+            ):
                 best, best_reading = point, item
         return best
-
-    def compare_metrics(
-        self, candidate: tuple[MetricRow, ...], baseline: tuple[MetricRow, ...]
-    ) -> MetricComparison:
-        """Compare complete objective rows by noise-aware Pareto dominance.
-
-        Configured axes supply directions, regardless of metric order or a
-        reporting default on a secondary metric. Tradeoffs and missing axes
-        are incomparable. With no configured axes, preserve headline comparison.
-
-        This is the one dominance rule: ``BETTER`` is "no objective worse beyond
-        its tolerance and at least one better beyond it", whatever the other
-        objectives say, so a large gain on one axis is never lost to a headline
-        that moved within its noise. `no_worse_metrics` and `dominates` read it.
-        """
-        return _dominance(self._metric_comparisons(candidate, baseline))
-
-    def no_worse_metrics(
-        self, candidate: tuple[MetricRow, ...], baseline: tuple[MetricRow, ...]
-    ) -> bool:
-        """Whether every objective is present and none regresses beyond its tolerance.
-
-        Unlike reversing dominance, this rejects a tradeoff with a material
-        regression, even when another objective improves.
-        """
-        return self.compare_metrics(candidate, baseline) in {
-            MetricComparison.BETTER,
-            MetricComparison.WITHIN_NOISE,
-        }
-
-    def objective_comparisons(
-        self, candidate: Mapping[str, float], baseline: Mapping[str, float]
-    ) -> dict[str, MetricComparison]:
-        """How ``candidate`` stands against ``baseline`` on each configured axis, by name."""
-        return {
-            axis.name: self.compare(_reading(axis, candidate), _reading(axis, baseline))
-            for axis in self.objectives
-        }
-
-    def _metric_comparisons(
-        self, candidate: tuple[MetricRow, ...], baseline: tuple[MetricRow, ...]
-    ) -> tuple[MetricComparison, ...]:
-        if not self.objectives:
-            return (
-                self.compare(
-                    Measurement(candidate[0].name, candidate[0].value, candidate[0].direction)
-                    if candidate
-                    else None,
-                    Measurement(baseline[0].name, baseline[0].value, baseline[0].direction)
-                    if baseline
-                    else None,
-                ),
-            )
-        mine = {item.name: item.value for item in candidate}
-        theirs = {item.name: item.value for item in baseline}
-        return tuple(self.objective_comparisons(mine, theirs).values())
 
     def compare_to_best(
         self,
         candidate: Measurement | None,
         prior: Sequence[Measurement],
-    ) -> MetricComparison:
+    ) -> ComparisonVerdict:
         """Order *candidate* against the best of *prior* on the same axis.
 
         An empty history is ``BETTER``: the first trusted reading advances an
         archive that holds nothing. A candidate whose direction is unknown is
-        ``INCOMPARABLE`` even then, because nothing about it can be ordered.
+        ``INCONCLUSIVE`` even then, because nothing about it can be ordered.
         """
         if candidate is None or self.direction(candidate) is None:
-            return MetricComparison.INCOMPARABLE
+            return ComparisonVerdict.INCONCLUSIVE
         best = self.best(
             [item for item in prior if item.metric == candidate.metric],
             lambda item: item,
         )
         if best is None:
-            return MetricComparison.BETTER
-        return self.compare(candidate, best)
+            return ComparisonVerdict.BETTER
+        return self.compare((candidate,), (best,))
 
     # -- frontier -----------------------------------------------------------
 
     def dominates(self, a: Mapping[str, float], b: Mapping[str, float]) -> bool:
-        """Return whether row *a* materially dominates row *b*.
+        """Return whether row *a* dominates row *b* by the rule of `compare`.
 
-        A row dominates only when it is no worse than *b* within the declared
-        tolerance on every configured axis and better by more than that
-        tolerance on at least one. A missing axis makes the rows incomparable.
+        A row dominates only when no configured axis is worse beyond its noise and at
+        least one is better beyond it. A missing axis leaves the comparison inconclusive.
         This intentionally retains near-equal alternatives instead of
         converting a sub-noise fluctuation into an automatic rollback.
         """
         if not self.objectives:
             return False
-        return (
-            _dominance(tuple(self.objective_comparisons(a, b).values())) is MetricComparison.BETTER
+        return self.compare(self._axes_of(a), self._axes_of(b)) is ComparisonVerdict.BETTER
+
+    def _axes_of(self, row: Mapping[str, float]) -> tuple[Measurement, ...]:
+        """The readings of *row* on the configured axes it carries, one run each."""
+        return tuple(
+            Measurement(metric=axis.name, value=row[axis.name], direction=axis.direction)
+            for axis in self.objectives
+            if axis.name in row
         )
 
     def frontier[T](
@@ -374,26 +358,12 @@ class MetricSpace(BaseModel):
         return bool(self.objectives) and all(objective.name in row for objective in self.objectives)
 
 
-def _dominance(comparisons: Sequence[MetricComparison]) -> MetricComparison:
-    """One verdict over per-objective ones: no objective worse and at least one better is ``BETTER``.
-
-    An objective that cannot be compared, or a better one beside a worse one (a tradeoff),
-    leaves the rows incomparable; all objectives within their noise is ``WITHIN_NOISE``.
-    """
-    found = set(comparisons)
-    if not found or MetricComparison.INCOMPARABLE in found:
-        return MetricComparison.INCOMPARABLE
-    found.discard(MetricComparison.WITHIN_NOISE)
-    if not found:
-        return MetricComparison.WITHIN_NOISE
-    return found.pop() if len(found) == 1 else MetricComparison.INCOMPARABLE
-
-
-def _reading(objective: Objective, row: Mapping[str, float]) -> Measurement | None:
-    value = row.get(objective.name)
-    if value is None:
-        return None
-    return Measurement(metric=objective.name, value=value, direction=objective.direction)
+def _by_metric(readings: Sequence[Measurement]) -> dict[str, Measurement]:
+    """The readings by metric, the first of a metric a side reports twice."""
+    found: dict[str, Measurement] = {}
+    for item in readings:
+        found.setdefault(item.metric, item)
+    return found
 
 
 # -- decoded readings of core evidence ------------------------------------------------------
@@ -408,12 +378,28 @@ type Direction = Literal["max", "min"]
 
 
 class MetricRow(Value):
-    """One measured quantity on a declared axis."""
+    """One measured quantity on a declared axis, and the runs its value rests on."""
 
     name: str = Field(min_length=1)
     value: Finite
     direction: Direction
     unit: str | None = None
+    runs: int = Field(default=1, ge=1, exclude_if=lambda value: value == 1)
+    """How many trusted runs ``value`` is the mean of (`mean_metrics`); a row that states none is one."""
+    spread: Annotated[float, Field(allow_inf_nan=False, ge=0.0)] = Field(
+        default=0.0, exclude_if=lambda value: value == 0
+    )
+    """The runs' relative standard deviation; 0 for a single run, or runs that all read alike."""
+
+    def reading(self) -> Measurement:
+        """This row as the reading a comparison judges (`MetricSpace.compare`)."""
+        return Measurement(
+            metric=self.name,
+            value=self.value,
+            direction=self.direction,
+            runs=self.runs,
+            spread=self.spread,
+        )
 
 
 class PartialRow(Value):
@@ -503,7 +489,8 @@ def mean_metrics(rows: Sequence[tuple[MetricRow, ...]]) -> tuple[MetricRow, ...]
     """The mean of each metric over the rows that report it, in the order first reported.
 
     Direction and unit are those of the first row that reports the metric. A metric reported by
-    one row is that row's.
+    one row is that row's. Each row is one run: the mean states how many rows it is the mean of
+    and the runs' spread (`vs_core.api.Runs`), which a comparison needs for its noise.
     """
     values: dict[str, list[float]] = {}
     first: dict[str, MetricRow] = {}
@@ -512,8 +499,14 @@ def mean_metrics(rows: Sequence[tuple[MetricRow, ...]]) -> tuple[MetricRow, ...]
             first.setdefault(metric.name, metric)
             values.setdefault(metric.name, []).append(metric.value)
     return tuple(
-        first[name].model_copy(update={"value": fmean(found)}) for name, found in values.items()
+        first[name] if len(found) == 1 else first[name].model_copy(update=_runs_of(found))
+        for name, found in values.items()
     )
+
+
+def _runs_of(values: Sequence[float]) -> dict[str, float]:
+    """The fields of a row that is the mean of ``values``: the mean, how many, and their spread."""
+    return {"value": fmean(values), "runs": len(values), "spread": Runs.of(values).spread}
 
 
 def pooled_benchmarks[R: EvidenceReading](readings: tuple[R, ...]) -> tuple[R, ...]:

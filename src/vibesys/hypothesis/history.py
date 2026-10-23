@@ -27,9 +27,9 @@ it from older records.
 
 ``perf_comparison`` records how the round's headline reading compared with
 its baseline. The framework decides that once, when the round is written,
-using the run's declared measurement tolerance; every later reader consumes
-the stored answer instead of recomputing it from a tolerance it would have to
-be handed.
+by the one rule of vs-core under the run's declared noise; every later reader
+consumes the stored answer instead of recomputing it from a noise it would have
+to be handed.
 
 ``RoundHistory`` owns only in-memory collection behavior and rollback-base
 resolution. The application-level project-state library owns persistence and
@@ -45,7 +45,7 @@ from pydantic import ConfigDict, Field, TypeAdapter, model_validator
 from pydantic.dataclasses import dataclass
 
 # lint-waiver: LW-007011 [TC001]; Pydantic resolves this dataclass field at runtime
-from vibesys.metrics import MetricComparison  # noqa: TC001
+from vs_core.api import ComparisonVerdict
 
 __all__ = [
     "CandidateDisposition",
@@ -249,7 +249,7 @@ class RoundRecord:
     # round was recorded. ``None`` identifies a record written before the
     # framework stored the comparison; readers then re-derive it from the
     # run's persisted metric space.
-    perf_comparison: MetricComparison | None = None
+    perf_comparison: ComparisonVerdict | None = None
 
     # Who produced ``perf_metric``. ``None`` identifies a legacy record written
     # before provenance was tracked; consumers treat those as trusted so
@@ -302,6 +302,8 @@ class RoundRecord:
 
 
 _ROUND_RECORD_ADAPTER: TypeAdapter[RoundRecord] = TypeAdapter(RoundRecord)
+_LEGACY_UNJUDGED = "incomparable"
+"""What a comparison that could not be made was called before the verdicts were one set."""
 
 
 def serialize_round_record(record: RoundRecord) -> dict[str, Any]:
@@ -321,6 +323,11 @@ def parse_round_record(data: dict[str, Any]) -> RoundRecord:
         # removed): records written before it was dropped still load. Any other
         # unknown key is still rejected by ``extra="forbid"``.
         data = {key: value for key, value in data.items() if key != "implementer_driver"}
+    if data.get("perf_comparison") == _LEGACY_UNJUDGED:
+        # The verdict a round was recorded with when its readings could not be compared; the
+        # one rule names it ``inconclusive`` (`vs_core.api.ComparisonVerdict`). The stored
+        # decision is the same one, so no past comparison is decided again.
+        data = {**data, "perf_comparison": ComparisonVerdict.INCONCLUSIVE.value}
     return _ROUND_RECORD_ADAPTER.validate_python(data)
 
 

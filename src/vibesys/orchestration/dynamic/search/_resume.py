@@ -55,11 +55,14 @@ class WorkstreamResume(Value):
     """A workstream's checkpoint inside its workspace: where it resumes after a code change.
 
     ``version`` is this model's own: a change an older checkpoint does not decode as is a new
-    version, and the workstream takes the union of the versions it can resume.
+    version, and the workstream takes the union of the versions it can resume. Version 2 is the
+    checkpoint of an envelope at version 44 or later, whose evidence records hold ``readings``;
+    a version 1 checkpoint that reaches here was brought to that shape with its envelope
+    (`vs_core._envelope_migrations`), so both read as one.
     """
 
     kind: Literal["workstream-resume"] = "workstream-resume"
-    version: Literal[1] = 1
+    version: Literal[1, 2] = 2
     start: WorkstreamStart
     workspace: AttemptRef
     stage: ResumeStage

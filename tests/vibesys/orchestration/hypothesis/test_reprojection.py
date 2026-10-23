@@ -26,7 +26,8 @@ from vibesys.hypothesis import (
 from vibesys.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.hypothesis.transitions import append_round, start_hypothesis
-from vibesys.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.metrics import MetricSpace, Objective
+from vs_core.api import ComparisonVerdict
 
 _NOISY_OPS = MetricSpace(
     objectives=(Objective(name="total_ops_per_sec", direction="max"),), relative_noise=0.05
@@ -53,7 +54,7 @@ def _round(  # noqa: PLR0913  # LW-040065 [PLR0913]; the parameters are independ
     *,
     hypothesis_id: str,
     parent_round: int | None = None,
-    comparison: MetricComparison | None = None,
+    comparison: ComparisonVerdict | None = None,
     outcome: str = "proven",
 ) -> RoundRecord:
     return RoundRecord(
@@ -69,7 +70,7 @@ def _round(  # noqa: PLR0913  # LW-040065 [PLR0913]; the parameters are independ
         hypothesis_outcome=outcome,
         hypothesis_parent_round=parent_round,
         official_evaluation=True,
-        perf_comparison=comparison or MetricComparison.INCOMPARABLE,
+        perf_comparison=comparison or ComparisonVerdict.INCONCLUSIVE,
         perf_provenance="framework",
     )
 
@@ -92,7 +93,7 @@ def _within_noise_run() -> HypothesisState:
             101.0,
             hypothesis_id="H-1",
             parent_round=1,
-            comparison=MetricComparison.WITHIN_NOISE,
+            comparison=ComparisonVerdict.WITHIN_NOISE,
             outcome="inconclusive",
         ),
         keep_active=False,
@@ -121,8 +122,8 @@ def test_a_stored_comparison_survives_a_space_whose_tolerance_changed() -> None:
     """
     recorded = _within_noise_run()
     assert [record.perf_comparison for record in recorded.rounds] == [
-        MetricComparison.INCOMPARABLE,
-        MetricComparison.WITHIN_NOISE,
+        ComparisonVerdict.INCONCLUSIVE,
+        ComparisonVerdict.WITHIN_NOISE,
     ]
     strict = MetricSpace(objectives=_NOISY_OPS.objectives)
 

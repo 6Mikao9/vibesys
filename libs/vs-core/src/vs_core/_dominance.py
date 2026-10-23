@@ -16,7 +16,9 @@ its standard deviation over its mean. The runs' mean has a standard error of tha
     noise = |r| * sqrt(v_c**2 / m + v_b**2 / n)
 
 where ``v_c`` and ``v_b`` are each side's relative variation of one run. The candidate gains by
-``g = r - 1`` on a ``max`` objective and ``1 - r`` on a ``min`` one, and the objective's verdict
+``g = r - 1`` on a ``max`` objective and ``1 - r`` on a ``min`` one (relative to the magnitude of
+the base's mean: for a negative base the sign of ``g`` is flipped, so a reading above it is a
+gain on a ``max`` objective whatever the sign), and the objective's verdict
 is ``better`` when ``g > VERDICT_NOISES * noise``, ``worse`` when ``g < -VERDICT_NOISES * noise``
 and ``within_noise`` otherwise: a difference counts only once it exceeds two standard errors
 (about 95% two-sided), so a run-to-run fluctuation is not called a gain or a loss, and more runs
@@ -58,7 +60,7 @@ result and a regression are decided, whatever the other objectives would say wit
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import floor, inf, sqrt
+from math import copysign, floor, inf, sqrt
 from typing import TYPE_CHECKING
 
 from .types.measurement import ComparisonVerdict, Direction
@@ -154,7 +156,10 @@ def judge(candidate: Runs, base: Runs, *, direction: Direction, declared: float 
     parts = ((mine**2 / candidate.count, free_mine), (theirs**2 / base.count, free_theirs))
     error = abs(ratio) * sqrt(sum(part for part, _ in parts))
     noise = error * _critical(parts) / VERDICT_NOISES
-    gain = ratio - 1 if direction == "max" else 1 - ratio
+    gain = (ratio - 1) * copysign(
+        1.0, base.mean
+    )  # relative to the base's magnitude, whatever its sign
+    gain = gain if direction == "max" else -gain
     if gain > VERDICT_NOISES * noise:
         verdict = ComparisonVerdict.BETTER
     elif gain < -VERDICT_NOISES * noise:

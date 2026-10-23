@@ -54,7 +54,7 @@ from vibesys.candidates._task import (
     space_of,
     terms_of,
 )
-from vibesys.candidates._winner import Unranked, best_by, improves_on
+from vibesys.candidates._winner import Unranked, beats_input, best_by, improves_on
 from vibesys.candidates._workspace_mode import workspace_mode_for
 
 __all__ = [
@@ -82,6 +82,7 @@ __all__ = [
     "Winner",
     "again_after",
     "assessment",
+    "beats_input",
     "best_by",
     "choose_winner",
     "declared_directions",

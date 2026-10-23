@@ -44,7 +44,8 @@ from vibesys.hypothesis.state import (
     HypothesisState,
     HypothesisStrategy,
 )
-from vibesys.metrics import Measurement, MetricComparison, MetricSpace
+from vibesys.metrics import Measurement, MetricSpace
+from vs_core.api import ComparisonVerdict
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -82,7 +83,7 @@ class ResolutionEvidence:
     declared: HypothesisOutcome | None
     passed: bool
     reviewed: bool
-    comparison: MetricComparison | None
+    comparison: ComparisonVerdict | None
 
 
 def resolve_hypothesis_outcome(evidence: ResolutionEvidence) -> HypothesisResolution | None:
@@ -116,18 +117,18 @@ def resolve_hypothesis_outcome(evidence: ResolutionEvidence) -> HypothesisResolu
     return resolution
 
 
-def _resolve_metric_evidence(comparison: MetricComparison) -> HypothesisResolution:
+def _resolve_metric_evidence(comparison: ComparisonVerdict) -> HypothesisResolution:
     match comparison:
-        case MetricComparison.BETTER:
+        case ComparisonVerdict.BETTER:
             return HypothesisResolution.PROVEN
-        case MetricComparison.WORSE:
+        case ComparisonVerdict.WORSE:
             return HypothesisResolution.DISPROVEN
-        case MetricComparison.WITHIN_NOISE | MetricComparison.INCOMPARABLE:
+        case ComparisonVerdict.WITHIN_NOISE | ComparisonVerdict.INCONCLUSIVE:
             return HypothesisResolution.INCONCLUSIVE
     assert_never(comparison)
 
 
-def scalar_candidate_retained(comparison: MetricComparison) -> bool | None:
+def scalar_candidate_retained(comparison: ComparisonVerdict) -> bool | None:
     """Return whether an official scalar candidate advances the best checkpoint.
 
     *comparison* orders the candidate against the best prior official
@@ -135,11 +136,11 @@ def scalar_candidate_retained(comparison: MetricComparison) -> bool | None:
     as ``BETTER``, so the first trusted checkpoint is retained.
     """
     match comparison:
-        case MetricComparison.BETTER:
+        case ComparisonVerdict.BETTER:
             return True
-        case MetricComparison.WORSE | MetricComparison.WITHIN_NOISE:
+        case ComparisonVerdict.WORSE | ComparisonVerdict.WITHIN_NOISE:
             return False
-        case MetricComparison.INCOMPARABLE:
+        case ComparisonVerdict.INCONCLUSIVE:
             return None
 
 
@@ -414,7 +415,7 @@ def project_round_evidence(
     return Hypothesis.model_validate(updated.model_dump())
 
 
-def round_comparison(record: RoundRecord) -> MetricComparison | None:
+def round_comparison(record: RoundRecord) -> ComparisonVerdict | None:
     """Return how one round's headline reading compared with its baseline.
 
     The writer decides and stores this comparison once. Later projections do

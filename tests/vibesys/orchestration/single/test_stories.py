@@ -27,6 +27,7 @@ from tests.vibesys.serial_search._host import (
     World,
 )
 from tests.vibesys.serial_search._replies import plan_reply
+from tests.vibesys.the_one_rule import beats, lead_of
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.serial_search.api import PlanPrompt
@@ -214,10 +215,10 @@ def test_the_best_eligible_candidate_of_the_rounds_is_adopted_not_the_last(
     eligible = {
         name: speed
         for name, speed, passed in zip(("c1", "c2"), throughputs, reviewed, strict=True)
-        if passed and speed > INPUT_THROUGHPUT
+        if passed and beats(speed, INPUT_THROUGHPUT)
     }
     if eligible:
-        assert selection_of(host) == ("retained_candidate", max(eligible, key=eligible.__getitem__))
+        assert selection_of(host) == ("retained_candidate", lead_of(list(eligible.items())))
     else:
         assert selection_of(host) == ("trusted_baseline", None)
     assert_flow_closed(host)

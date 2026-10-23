@@ -161,6 +161,19 @@ class InputReading(Value):
     (`with_samples`); a record written before this was kept holds one."""
     partial: PartialRow | None = None
 
+    def bar(self) -> tuple[MetricRow, ...]:
+        """The rows a candidate is compared with: each states the runs it is the mean of.
+
+        A record written before rows stated their runs holds a bar that is the mean of
+        ``samples`` readings in rows that state one. The comparison rests a value on the runs
+        its row states (`MetricSpace.compare`), so those rows are read as what the record says
+        they are: no past decision is made again, and the bar keeps the weight it had.
+        """
+        return tuple(
+            row if row.runs >= self.samples else row.model_copy(update={"runs": self.samples})
+            for row in self.metrics
+        )
+
 
 class Measured(Value):
     """The input has a trusted reading: it passed every gate it was measured by.
@@ -296,13 +309,13 @@ def input_metrics(baseline: Baseline | None) -> tuple[MetricRow, ...]:
     """
     match baseline:
         case Measured(reading=seen):
-            return seen.metrics
+            return seen.bar()
         case Unmeasurable(failure=why, reading=seen) if (
             why.kind is InputFailureKind.ACCURACY_FAILED
             and seen is not None
             and seen.benchmark_passed is True
         ):
-            return seen.metrics
+            return seen.bar()
         case _:
             return ()
 

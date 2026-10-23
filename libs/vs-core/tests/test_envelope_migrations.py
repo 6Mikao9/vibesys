@@ -227,3 +227,123 @@ def test_every_migration_since_compatible_changes_keep_the_version_rewrites_its_
         "the version raise if every saved envelope decodes as is, or save a fixture holding the "
         "data the step rewrites"
     )
+
+
+def _embedded_documents(envelope: dict[str, Json]) -> dict[str, str]:
+    """The JSON documents the fixture envelope holds as text, by where it keeps them."""
+    live = _object(_object(envelope["strategy"])["live"])
+    flows = live["flows"]
+    assert isinstance(flows, list)
+    held = {f"flow:{_object(flow)['path']}": _object(flow)["snapshot_json"] for flow in flows}
+    held["published"] = live["published"]
+    assert all(isinstance(text, str) for text in held.values())
+    return {key: text for key, text in held.items() if isinstance(text, str)}
+
+
+def _legacy_nodes(value: Json) -> int:
+    """How many version 42 shapes ``value`` holds: a lone ``reading``, a flat headline."""
+    if isinstance(value, list):
+        return sum(_legacy_nodes(item) for item in value)
+    if not isinstance(value, dict):
+        return 0
+    own = int(
+        (
+            "reading" in value
+            and ("evidence_id" in value or {"run", "measured_input"} <= value.keys())
+        )
+        or {"candidate_input", "base_input", "candidate_value", "metric"} <= value.keys()
+    )
+    return own + sum(_legacy_nodes(item) for item in value.values())
+
+
+def test_the_documents_a_version_43_envelope_holds_as_text_are_brought_to_the_version_43_shapes() -> (
+    None
+):
+    """A save of version 42 kept its checkpoints, published record and requests as text.
+
+    Version 43 rewrote the envelope's own fields and not these, so the strict models refused the
+    old ``reading`` and flat comparison inside them. Each such document is rewritten; the
+    documents that hold no old shape, and everything the envelope types, are left as they were.
+    """
+    source = (_FIXTURES / "v43-embedded.json").read_text(encoding="utf-8")
+    stored, upgraded = json.loads(source), _upgraded(source)
+    before, after = _embedded_documents(stored), _embedded_documents(upgraded)
+
+    assert {key: _legacy_nodes(json.loads(text)) for key, text in before.items()} == {
+        "flow:": 2,
+        "flow:other": 0,
+        "published": 2,
+    }
+    assert {key: _legacy_nodes(json.loads(text)) for key, text in after.items()} == dict.fromkeys(
+        before, 0
+    )
+    assert after["flow:other"] == before["flow:other"]  # not one byte of an untouched document
+    nested = json.loads(json.loads(after["published"])["operation"]["payload_json"])
+    assert nested["evidence"][0]["readings"] == [stored_reading(before["published"])]
+    assert (
+        json.loads(after["flow:"])["record"]["parents"][0]["proof"][0]["readings"][0]["metric"]
+        == "throughput"
+    )
+
+    def blank(envelope: dict[str, Json]) -> dict[str, Json]:
+        live = _object(_object(envelope["strategy"])["live"])
+        flows = live["flows"]
+        assert isinstance(flows, list)
+        return {
+            **envelope,
+            "schema_version": 0,
+            "strategy": {
+                **_object(envelope["strategy"]),
+                "live": {
+                    **live,
+                    "published": None,
+                    "flows": [{**_object(flow), "snapshot_json": ""} for flow in flows],
+                },
+            },
+        }
+
+    assert blank(upgraded) == blank(stored)  # only the documents held as text changed
+
+
+def stored_reading(published: str) -> Json:
+    """The one ``reading`` of the evidence record in the request the published record holds."""
+    request = json.loads(json.loads(published)["operation"]["payload_json"])
+    return request["evidence"][0]["reading"]
+
+
+@given(
+    texts=st.lists(
+        st.one_of(
+            st.text(max_size=30),
+            st.integers().map(str),
+            st.just("null"),
+            st.just("[1,2,3]"),
+            st.just('{"reading":1}'),
+            st.just('{"width":2,"ratio":1.0}'),
+        ),
+        min_size=1,
+        max_size=4,
+    )
+)
+def test_a_text_that_is_not_a_document_with_an_old_shape_is_never_touched(
+    texts: list[str],
+) -> None:
+    stored = _object(json.loads((_FIXTURES / "v43-embedded.json").read_text(encoding="utf-8")))
+    live = _object(_object(stored["strategy"])["live"])
+    flows = live["flows"]
+    assert isinstance(flows, list)
+    live["flows"] = [
+        {**_object(flows[0]), "path": f"p{index}", "snapshot_json": text}
+        for index, text in enumerate(texts)
+    ]
+    live["published"] = None
+    upgraded = _object(_object(_upgraded(json.dumps(stored))["strategy"])["live"])
+    kept = upgraded["flows"]
+    assert isinstance(kept, list)
+    assert [_object(flow)["snapshot_json"] for flow in kept] == texts
+
+
+def test_upgrading_a_version_44_envelope_twice_changes_nothing() -> None:
+    source = (_FIXTURES / "v43-embedded.json").read_text(encoding="utf-8")
+    once = core.upgrade_envelope(source, ("schema_version",))
+    assert core.upgrade_envelope(once, ("schema_version",)) == once

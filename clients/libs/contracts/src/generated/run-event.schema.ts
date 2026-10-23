@@ -549,6 +549,66 @@ const runEventSchema: Record<string, unknown> = {
       "title": "CommandResultPayload",
       "type": "object"
     },
+    "ComparedObjective": {
+      "additionalProperties": false,
+      "description": "How a candidate stands against its base on one objective. See ``vibesys.events``.",
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "candidate_value": {
+          "title": "Candidate Value",
+          "type": "number"
+        },
+        "base_value": {
+          "title": "Base Value",
+          "type": "number"
+        },
+        "ratio": {
+          "title": "Ratio",
+          "type": "number"
+        },
+        "noise": {
+          "title": "Noise",
+          "type": "number"
+        },
+        "verdict": {
+          "$ref": "#/$defs/MeasurementVerdict"
+        }
+      },
+      "required": [
+        "metric",
+        "direction",
+        "candidate_value",
+        "base_value",
+        "ratio",
+        "noise",
+        "verdict"
+      ],
+      "title": "ComparedObjective",
+      "type": "object"
+    },
     "ComparisonReadingData": {
       "additionalProperties": false,
       "description": "One comparison baseline as the run read it from the project's store.\n\n``value`` is the mean of ``samples`` runs of the task's benchmark against the engine, and\n``spread`` their relative standard deviation (absent for one run). ``reason`` explains a\nfailed or unconfigured comparison. A hidden-from-agents comparison is still shown here:\nthe operator sees it; only the planner's prompt omits it.",
@@ -1670,6 +1730,14 @@ const runEventSchema: Record<string, unknown> = {
           "title": "Base Samples",
           "type": "integer"
         },
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ComparedObjective"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
         "source": {
           "$ref": "#/$defs/FrameworkSource",
           "default": "gates"
@@ -1702,6 +1770,30 @@ const runEventSchema: Record<string, unknown> = {
       ],
       "title": "MeasurementVerdict",
       "type": "string"
+    },
+    "ObjectiveAxis": {
+      "additionalProperties": false,
+      "description": "One axis candidates are ranked on, as a client is told it: its name and which way is better.\n\nThe task's objective in core also holds the noise policy a comparison reads, which is not the\nrun's to show; the wire carries only what a client marks.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
+      ],
+      "title": "ObjectiveAxis",
+      "type": "object"
     },
     "ObjectiveOverview": {
       "additionalProperties": false,
@@ -1754,7 +1846,7 @@ const runEventSchema: Record<string, unknown> = {
         "objectives": {
           "default": [],
           "items": {
-            "$ref": "#/$defs/TaskObjective"
+            "$ref": "#/$defs/ObjectiveAxis"
           },
           "title": "Objectives",
           "type": "array"
@@ -3551,31 +3643,6 @@ const runEventSchema: Record<string, unknown> = {
         "content"
       ],
       "title": "SubprocessOutputData",
-      "type": "object"
-    },
-    "TaskObjective": {
-      "additionalProperties": false,
-      "description": "One axis the task compares candidates on, and which way is better.",
-      "properties": {
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "direction": {
-          "enum": [
-            "max",
-            "min"
-          ],
-          "title": "Direction",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "direction"
-      ],
-      "title": "TaskObjective",
       "type": "object"
     },
     "TodoItemData": {

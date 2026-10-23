@@ -20,6 +20,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.multi._host import config
 from tests.vibesys.serial_search._host import INPUT_THROUGHPUT
+from tests.vibesys.the_one_rule import lead_of
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vs_sim.api.testing import examples
@@ -106,29 +107,30 @@ def test_a_round_records_and_labels_the_settled_figure_not_its_first_runs(
 def test_the_best_is_the_candidate_that_settled_highest_though_another_read_higher_first(
     *, restarting: bool
 ) -> None:
-    """c1 read 100 on its first run and settled at 80; c2 read 90 and settled at 90: c2 is best."""
-    host = play(restarting=restarting, firsts=(100.0, 90.0), ratios=(1.6, 1.8))
+    """c1 read 100 on its first run and settled at 70; c2 read 90 and settled at 120: c2 is best."""
+    host = play(restarting=restarting, firsts=(100.0, 90.0), ratios=(1.4, 2.4))
 
     assert selection_of(host) == ("retained_candidate", "c2")
-    assert recorded(host) == [settled_value(1.6), settled_value(1.8)]
+    assert recorded(host) == [settled_value(1.4), settled_value(2.4)]
     adopted = attrs_of(host, "adoption")[-1]
     assert adopted["candidate"] == "c2"
-    assert adopted["metric_value"] == settled_value(1.8)
-    assert adopted["vs_baseline"] == pytest.approx(1.8)
+    assert adopted["metric_value"] == settled_value(2.4)
+    assert adopted["vs_baseline"] == pytest.approx(2.4)
 
 
 @across_restarts
 @settings(max_examples=examples(pr=10, nightly=60), deadline=None, derandomize=True, database=None)
 @given(firsts=st.tuples(FIRST_RUNS, FIRST_RUNS), ratios=st.tuples(RATIOS, RATIOS))
-def test_whatever_the_first_runs_read_the_adopted_figure_is_the_highest_settled_one(
+def test_whatever_the_first_runs_read_the_adopted_figure_is_the_settled_one_that_leads(
     *, restarting: bool, firsts: tuple[float, float], ratios: tuple[float, float]
 ) -> None:
+    """The settled figures lead by the one rule: a later one takes over only beyond the noise."""
     host = play(restarting=restarting, firsts=firsts, ratios=ratios)
 
     assert recorded(host) == [settled_value(ratios[0]), settled_value(ratios[1])]
-    best = max(ratios)
+    led = lead_of([("c1", settled_value(ratios[0])), ("c2", settled_value(ratios[1]))])
+    best = ratios[0] if led == "c1" else ratios[1]
     adopted = attrs_of(host, "adoption")[-1]
     assert adopted["metric_value"] == settled_value(best)
     assert adopted["vs_baseline"] == pytest.approx(best)
-    if ratios[0] != ratios[1]:
-        assert selection_of(host)[1] == ("c1" if ratios[0] > ratios[1] else "c2")
+    assert selection_of(host)[1] == led

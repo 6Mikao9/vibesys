@@ -59,8 +59,8 @@ class FinishedAttempt(Protocol):
 
 
 def measurement(row: MetricRow | None) -> Measurement | None:
-    """A metric row as the comparable value `MetricSpace` orders."""
-    return None if row is None else Measurement(row.name, row.value, row.direction)
+    """A metric row as the comparable value `MetricSpace` orders, with the runs it rests on."""
+    return None if row is None else row.reading()
 
 
 def _gate(reading: AcceptedReading | None, *, configured: bool) -> bool:

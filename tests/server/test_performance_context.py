@@ -12,7 +12,7 @@ from server.api.performance import build_performance_context, summarize_objectiv
 from server.api.protocol import PerformanceQuery
 from vibesys.api.contracts import RunStatus
 from vibesys.api.hypothesis import RoundRecord
-from vibesys.api.metrics import MetricComparison, MetricSpace
+from vibesys.api.metrics import MetricSpace
 from vibesys.events import (
     BenchmarkVersions,
     CoreEventType,
@@ -30,6 +30,7 @@ from vibesys.hypothesis.state import (
     HypothesisState,
 )
 from vibesys.hypothesis.transitions import reproject_run_evidence
+from vs_core.api import ComparisonVerdict
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 
@@ -141,7 +142,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
                             perf_metric=2000.0,
                             perf_unit="total_ops_per_sec",
                             perf_provenance="framework",
-                            perf_comparison=MetricComparison.BETTER,
+                            perf_comparison=ComparisonVerdict.BETTER,
                             judge_verdict="pass",
                             perf_baseline_round=1,
                             perf_baseline_commit="e17fce8123abc",

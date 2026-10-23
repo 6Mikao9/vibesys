@@ -25,6 +25,7 @@ was told and done, as it was).
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
@@ -159,6 +160,65 @@ def _v42_to_v43(envelope: JsonObject) -> JsonObject:
     return {**_object(_rewritten(envelope)), "schema_version": 43}
 
 
+def _v43_to_v44(envelope: JsonObject) -> JsonObject:
+    """Version 44 reads the JSON documents the envelope holds as text at the version 43 shapes.
+
+    Version 43 rewrote the fields the envelope types, but a run also keeps documents as text: an
+    operation's request and outcome, a flow's recorded result, its checkpoint and its published
+    record (`_EMBEDDED_JSON`). A save of version 42 still held a sample's or a record's single
+    ``reading`` and a comparison's flat headline inside them, where the version 43 models refuse
+    them, so no run saved by version 42 with a benchmark in its history could be resumed. Each
+    such document is parsed, rewritten the way version 43 rewrote the envelope, and written
+    back; a document that holds none of those shapes is left exactly as it was written, so no
+    request and no digest that names it changes. Nothing is invented and nothing decided is
+    decided again: the rewrite only restates a reading or a verdict in the shape that holds it.
+    """
+    return {**_object(_embedded(envelope)), "schema_version": 44}
+
+
+_EMBEDDED_JSON: Final = (
+    "payload_json",
+    "outcome_json",
+    "result_json",
+    "snapshot_json",
+    "published",
+    "output_json",
+    "attrs_json",
+)
+"""The fields of the envelope that hold a JSON document as text."""
+
+
+def _embedded(value: JsonValue) -> JsonValue:
+    """``value`` with the JSON documents held as text in it at the version 43 shapes."""
+    if isinstance(value, list):
+        return [_embedded(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    return {
+        key: _embedded_text(item)
+        if key in _EMBEDDED_JSON and isinstance(item, str)
+        else _embedded(item)
+        for key, item in value.items()
+    }
+
+
+def _embedded_text(text: str) -> str:
+    """``text``, a JSON document, at the version 43 shapes.
+
+    Any other text, and a document that has none of the old shapes, is returned as it is.
+    """
+    try:
+        document = json.loads(text)
+    except ValueError:
+        return text
+    if not isinstance(document, dict | list):
+        return text
+    rewritten = _rewritten(_embedded(document))
+    if rewritten == document:
+        return text
+    return json.dumps(rewritten, separators=(",", ":"), ensure_ascii=False)
+
+
 _OBJECTIVE_FIELDS: Final = (
     "metric",
     "unit",
@@ -221,6 +281,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     40: _v40_to_v41,
     41: _v41_to_v42,
     42: _v42_to_v43,
+    43: _v43_to_v44,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 

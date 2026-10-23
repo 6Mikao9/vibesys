@@ -18,7 +18,7 @@ from vibesys.candidates.api import (
     measurement,
     reading,
 )
-from vibesys.metrics import MetricComparison, MetricRow, MetricSpace, reading_of
+from vibesys.metrics import MetricRow, MetricSpace, reading_of
 from vibesys.orchestration.dynamic.models import ProfileOffer
 from vibesys.orchestration.dynamic.search import _briefs as briefs
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
@@ -58,6 +58,7 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkPlan,
     fact_coverage,
 )
+from vs_core.api import ComparisonVerdict
 from vs_core.api.search import EvidenceKind, InvocationRef, RevisionRef
 
 
@@ -250,9 +251,9 @@ def best_part(parts: tuple[CombineSource, ...], space: MetricSpace) -> CombineSo
 
 
 _VERDICTS = {
-    MetricComparison.BETTER: PartsVerdict.BETTER,
-    MetricComparison.WORSE: PartsVerdict.WORSE,
-    MetricComparison.WITHIN_NOISE: PartsVerdict.WITHIN_NOISE,
+    ComparisonVerdict.BETTER: PartsVerdict.BETTER,
+    ComparisonVerdict.WORSE: PartsVerdict.WORSE,
+    ComparisonVerdict.WITHIN_NOISE: PartsVerdict.WITHIN_NOISE,
 }
 
 
@@ -261,16 +262,18 @@ def versus_parts(
 ) -> PartsVerdict:
     """How a composite's headline compares with the strongest part's (`best_part`).
 
-    The comparison applies the task's declared noise (a strict one when it declares none).
-    Without a headline on either side, a space to compare in, or with the composite on another
-    metric than the parts, the verdict is unknown.
+    The comparison is the system's one (`MetricSpace.compare`), under the task's declared noise or
+    the stated default. Without a headline on either side, a space to compare in, or with the
+    composite on another metric than the parts, the verdict is unknown.
     """
     if not metrics or space is None:
         return PartsVerdict.UNKNOWN
     best = best_part(parts, space)
     if best is None:
         return PartsVerdict.UNKNOWN
-    found = space.compare(measurement(metrics[0]), measurement(best.metric))
+    found = space.compare(
+        (metrics[0].reading(),), () if best.metric is None else (best.metric.reading(),)
+    )
     return _VERDICTS.get(found, PartsVerdict.UNKNOWN)
 
 
