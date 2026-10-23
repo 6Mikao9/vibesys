@@ -3,7 +3,9 @@
 A round is a task of the root: it takes where the search stands and ends with what it left behind.
 A hypothesis the ledger keeps active is continued without the designer. A new one is designed
 first (the attribution command in the profile-guided preset, the router and the profiler when
-the run offers one, then the designer's plan). The implementer then works in an isolated
+the run offers one, then the designer's plan). The run root holds the input until the winner is
+adopted, so the router is pointed at the round's base revision and the profiler works in a
+workspace opened at it, which it leaves unretained. The implementer then works in an isolated
 candidate workspace; the judge reads the exact candidate it retained when the cadence asks for a
 review; the implementer's validation recipes run when it wrote any and the run offers them; and,
 when the cadence says so, the trusted gates measure what it kept. The workspace is a resource, so
@@ -29,16 +31,22 @@ from vibesys.search_spans.api import turn_label
 from vibesys.serial_search import api as serial
 from vibesys.serial_search.api import LastProfile, RoundDone, RoundStart
 from vs_core.api.search import (
+    AttemptBudget,
     Declined,
     Failed,
     FailureReason,
     Flow,
+    NotOpened,
     Session,
     Settlement,
     Stopped,
     TurnFinished,
     Workspace,
+    WorkspaceMode,
+    WorkspacePlan,
+    attempt_id,
     flow,
+    item_id,
 )
 
 DEFAULT_PROFILE_FOCUS = "general steady-state benchmark hotspots"
@@ -147,6 +155,8 @@ def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:
             router,
             PreRoundPrompt(
                 round_number=start.number,
+                base_revision=start.base,
+                base_round=start.best_round,
                 has_history=bool(evidence.history),
                 regression_kind=evidence.regression_kind,
                 regression_round=evidence.regression_round,
@@ -156,15 +166,40 @@ def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:
         )
         if routed is None or not routed.need_profile:
             return None
-        return await profile(
-            ctx.agents.session(PROFILER, started_by=(router.agent,)),
+        return await profile_base(
+            ctx,
+            start,
             ProfilerPrompt(
                 round_number=start.number,
                 profile_focus=routed.profile_focus or DEFAULT_PROFILE_FOCUS,
             ),
+            started_by=router.agent,
         )
 
     return advise
+
+
+async def profile_base(
+    ctx: Flow, start: MultiRound, prompt: ProfilerPrompt, *, started_by: str
+) -> LastProfile | None:
+    """Profile the round's base in a workspace opened at it; None when it has no profile.
+
+    The run root holds the input until the winner is adopted, so a profiler there would
+    capture none of the search's work. The workspace is advisory: it is settled unretained.
+    """
+    subject = f"profile-round-{start.number}"
+    async with ctx.workspaces.open(
+        attempt=attempt_id(subject, 1),
+        item=item_id(subject, 1),
+        plan=WorkspacePlan(mode=WorkspaceMode.READ_ONLY_REVISION, base=start.base),
+        budget=AttemptBudget(admission_charge=1, paid_invocation_limit=1),
+    ) as opened:
+        if isinstance(opened, NotOpened):
+            return None
+        profiler = ctx.agents.session(
+            PROFILER, workspace=opened, revision=start.base, started_by=(started_by,)
+        )
+        return await profile(profiler, prompt)
 
 
 async def route(router: Session, prompt: PreRoundPrompt) -> PreRoundDecision | None:

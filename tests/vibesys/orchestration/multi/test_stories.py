@@ -46,9 +46,11 @@ from vs_core.api import (
     Retained,
     RevisionRef,
     Settle,
+    StartAttempt,
     ValidateLocalBase,
     Wait,
     Withdraw,
+    WorkspaceRef,
 )
 from vs_sim.api.testing import examples
 
@@ -197,6 +199,46 @@ def test_the_router_may_ask_for_a_profile_and_the_profiler_is_asked_before_the_d
     host.drain()
 
     assert selection_of(host) == ("retained_candidate", "def456")
+    assert_flow_closed(host)
+
+
+@MODES
+def test_a_later_rounds_router_and_profiler_see_the_retained_candidate_not_the_input(
+    *, restarting: bool
+) -> None:
+    """Regression: the run root holds the input until adoption, so advisors there saw no work.
+
+    A live run's router read the root, found only the input's README, and declined to profile a
+    server that had already passed the gates; its profiler, run in the root, could not have
+    captured the candidate either.
+    """
+    host = MultiHost.start(config(max_rounds=2, profiling=True), restarting=restarting)
+    host.drain_until_turn(ROUTER)
+    host.run.reply(host.run.expect_turn(role=ROUTER), routed())
+    host.drain_until_turn(PLANNER)
+    design(host, "h1")
+    implement(host, candidate="def456")
+    judge(host, passed=True)
+    host.drain_until_turn(ROUTER)
+
+    retained = RevisionRef.of_git_commit("def456")
+    router = host.run.expect_turn(role=ROUTER)
+    assert getattr(router.context, "base_revision", None) == retained
+    host.run.reply(router, routed(need_profile=True, focus="decode step"))
+    host.drain_until_turn(PROFILER)
+
+    profiler = host.run.expect_turn(role=PROFILER)
+    assert isinstance(profiler.request, RequestTurn)
+    workspace = profiler.request.turn.workspace
+    assert isinstance(workspace, WorkspaceRef)
+    assert workspace.revision == retained
+    assert retained in [
+        item.request.workspace.base
+        for item in host.run.decisions
+        if isinstance(item, Wait) and isinstance(item.request, StartAttempt)
+    ]
+    host.run.reply(profiler, profiled())
+    host.drain()
     assert_flow_closed(host)
 
 

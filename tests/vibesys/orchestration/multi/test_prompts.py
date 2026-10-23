@@ -137,6 +137,8 @@ _JUDGE = st.builds(
 _PRE_ROUND = st.builds(
     PreRoundPrompt,
     round_number=st.integers(1, 5),
+    base_revision=_REVISIONS,
+    base_round=st.none() | st.integers(1, 4),
     has_history=st.booleans(),
     regression_kind=st.none() | _TEXT,
     regression_round=st.none() | st.integers(1, 4),
@@ -208,6 +210,22 @@ def _render(
 @given(context=_PRE_ROUND, kind=st.sampled_from(("none", "linux_cpu")))
 def test_the_routing_prompt_renders_for_every_context(context: PreRoundPrompt, kind: str) -> None:
     assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, context, profiler_kind=kind)
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_PRE_ROUND)
+def test_the_routing_prompt_points_at_the_base_revision_not_the_input_in_the_workspace(
+    context: PreRoundPrompt,
+) -> None:
+    """The run root holds the input until adoption; the router must judge the round's base."""
+    text = _render(PromptTemplate.PRE_ROUND, context, profiler_kind="neuron")
+    assert "Your workspace holds the run's input, not candidate work" in text
+    assert f"`{context.base_revision.revision_id.root}`" in text
+    assert "git show REVISION:PATH" in text
+    if context.base_round is None:
+        assert "the input itself" in text
+    else:
+        assert f"made in round {context.base_round}" in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
@@ -377,7 +395,9 @@ def test_every_reply_prompt_tells_the_agent_its_prose_fields_are_markdown(
 ) -> None:
     plan = _prose_plan("claim")
     contexts: dict[PromptTemplate, Value] = {
-        PromptTemplate.PRE_ROUND: PreRoundPrompt(round_number=1, has_history=False),
+        PromptTemplate.PRE_ROUND: PreRoundPrompt(
+            round_number=1, base_revision=_REVISION, has_history=False
+        ),
         PromptTemplate.PROFILER: ProfilerPrompt(round_number=1, profile_focus="focus"),
         PromptTemplate.IMPLEMENT: _implement_context(plan),
         PromptTemplate.JUDGE: _judge_context(plan, "claim"),
