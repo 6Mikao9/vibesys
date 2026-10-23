@@ -1781,10 +1781,12 @@ Step.reads optional {"default":[],"items":{"type":"string"},"type":"array"}
 Step.recorded optional {"anyOf":[{"$ref":"#/$defs/Recorded"},{"type":"null"}],"default":null}
 StopLiftRecorded {"additionalProperties":false,"type":"object"}
 StopLiftRecorded.control required {"$ref":"#/$defs/ControlInput"}
+StopLiftRecorded.ended optional {"default":false,"type":"boolean"}
 StopLiftRecorded.kind optional {"const":"stop_lift_recorded","default":"stop_lift_recorded","type":"string"}
 StopLiftRecorded.new_epoch optional {"default":false,"type":"boolean"}
 StopLifted {"additionalProperties":false,"type":"object"}
 StopLifted.control required {"$ref":"#/$defs/ControlInput"}
+StopLifted.ended optional {"default":false,"type":"boolean"}
 StopLifted.kind optional {"const":"stop_lifted","default":"stop_lifted","type":"string"}
 StopLifted.new_epoch optional {"default":false,"type":"boolean"}
 StopMode {"enum":["drain","cancel"],"type":"string"}

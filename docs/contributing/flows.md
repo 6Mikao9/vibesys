@@ -545,8 +545,10 @@ workspaces, adoption) a toy search runs through the real core with scripted exec
   completion authority, cancels active invocations and releases evaluation interests with
   bounded cleanup. Interrupted work stays unfinished without spending a role's correction
   or lost-turn allowance.
-- Resume opens a new epoch after every ending. `StopLifted(new_epoch=True)` restarts flows
-  from their retained checkpoints with the old shutdown cleared. The duration is fresh;
+- Resume opens a new epoch after every ending. `StopLifted(ended=True)`, the lift of a run core
+  had ended, restarts flows from their retained checkpoints with the old shutdown cleared:
+  what they waited for belongs to the authority that ended. A lift of a run core had not
+  ended (paused, parked) keeps the flows' live waits. The duration is fresh;
   lifetime usage and accepted results remain recorded. The original input baseline is fixed,
   and resumed adoption is guarded until project-edit protection can prove it safe. Root
   restores are guarded, and snapshots refuse edits present at Resume. Ordinary writer recovery
