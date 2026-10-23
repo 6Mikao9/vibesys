@@ -166,6 +166,7 @@ def fake_search[C](
     spans: tuple[SpanKind, ...] = (),
     *,
     snapshot: type[Any] | None = None,
+    resumed_under: Callable[[Any, C], Any] | None = None,
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """``@search`` over the fake namespace: renders are answered by ``FlowRun``."""
     return search(
@@ -175,6 +176,7 @@ def fake_search[C](
         roles=roles,
         spans=spans,
         snapshot=snapshot,
+        resumed_under=resumed_under,
     )
 
 
@@ -621,10 +623,15 @@ class FlowRun[C]:
         else:
             self.driver = self.driver.fresh()
 
-    def swap(self, search: SearchDef[C]) -> None:
-        """Continue the run under another definition of the search: the code changed on resume."""
+    def swap(self, search: SearchDef[C], config: C | None = None) -> None:
+        """Continue the run under another definition of the search: the code changed on resume.
+
+        ``config`` is the one the operator resumes with, when it is not the run's own.
+        """
         self.definition = search
         self.registry = search.registry() or FAKE_REGISTRY
+        if config is not None:
+            self.config = config
         self.driver = search.driver(self.config, self.registry)
 
     # -- bookkeeping -------------------------------------------------------------------------

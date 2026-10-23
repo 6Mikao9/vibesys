@@ -92,7 +92,7 @@ DynamicConfig {"additionalProperties":false,"type":"object"}
 DynamicConfig.evaluation_slots optional {"anyOf":[{"$ref":"#/$defs/Width"},{"type":"null"}],"default":null}
 DynamicConfig.input_wait_seconds optional {"anyOf":[{"$ref":"#/$defs/Wait"},{"type":"null"}],"default":3600.0}
 DynamicConfig.judge_every optional {"$ref":"#/$defs/Positive","default":1}
-DynamicConfig.max_backlog optional {"default":0,"maximum":32,"minimum":0,"type":"integer"}
+DynamicConfig.max_backlog optional {"anyOf":[{"maximum":32,"minimum":0,"type":"integer"},{"type":"null"}],"default":null}
 DynamicConfig.max_continuation_rounds optional {"$ref":"#/$defs/NonNegative","default":2}
 DynamicConfig.max_in_flight optional {"$ref":"#/$defs/Width","default":2}
 DynamicConfig.max_rounds required {"$ref":"#/$defs/Positive"}
@@ -125,7 +125,7 @@ EvidenceRef.kind required {"$ref":"#/$defs/EvidenceKind"}
 EvidenceRef.observation_sequence required {"$ref":"#/$defs/Count"}
 EvidenceRef.provenance required {"enum":["trusted","self-report"],"type":"string"}
 EvidenceRef.purpose required {"enum":["baseline","local-validation","official","profile"],"type":"string"}
-EvidenceRef.reading optional {"anyOf":[{"$ref":"#/$defs/Reading"},{"type":"null"}],"default":null}
+EvidenceRef.readings optional {"default":[],"items":{"$ref":"#/$defs/Reading"},"type":"array"}
 EvidenceRef.reused_from optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 EvidenceRef.scope required {"$ref":"#/$defs/Scope"}
 EvidenceRef.source_request required {"$ref":"#/$defs/RequestId"}

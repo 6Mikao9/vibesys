@@ -2,8 +2,9 @@
 
 A workstream whose candidate is reviewed submits it to the run's evaluation queue and parks: its
 agent slot goes to new work at once, whether or not an evaluation slot is free, within the run's
-backlog (``max_backlog``); a run launched with no backlog, the default, keeps each agent slot
-until its workstream ends. Which candidate an evaluation slot measures is decided only when the slot frees: the
+backlog (``max_backlog``, by default as many as ``max_in_flight``: an agent is never blocked on the
+evaluation queue); a run launched with ``max_backlog=0`` keeps each agent slot until its workstream
+ends. Which candidate an evaluation slot measures is decided only when the slot frees: the
 newest waiting one. A parked hypothesis is still in flight, so it is not continued until its
 result is in. A stop keeps the reviewed code of what it kept from its measurement. A workstream
 that waits longer than the run allows for the input's measurement is not left hanging silently:
@@ -147,23 +148,20 @@ def _record(host: Host) -> RunSnapshot:
 
 @MODES
 @settings(max_examples=examples(pr=4, nightly=20), deadline=None, derandomize=True, database=None)
-@given(waiting=st.integers(2, 5))
-def test_with_a_backlog_the_planner_fills_agent_slots_while_candidates_wait_for_a_measurement(
-    *, restarting: bool, waiting: int
+@given(rounds=st.integers(2, 5))
+def test_by_default_the_planner_fills_agent_slots_while_candidates_wait_for_a_measurement(
+    *, restarting: bool, rounds: int
 ) -> None:
-    """Two queued candidates hold no agent slot within the backlog, so the run plans and implements
-    while the evaluation queue is busy."""
-    host = begin(DynamicConfig(max_rounds=waiting, max_backlog=waiting), restarting=restarting)
+    """Regression: the default backlog was 0, so two queued candidates held both agent slots and
+    the run sat idle behind a busy evaluation queue instead of planning and implementing."""
+    host = begin(DynamicConfig(max_rounds=rounds), restarting=restarting)
     _plan(host, implement("h1"), implement("h2"))
     _work(host, "000001.h1", "c1")
     _work(host, "000002.h2", "c2")
-    for n in range(3, waiting + 1):
-        _plan(host, implement(f"h{n}"))
-        _work(host, f"{n:06d}.h{n}", f"c{n}")
 
-    # Every candidate waits for, or holds, the one evaluation slot; none holds an agent slot.
+    # Both candidates wait for, or hold, the one evaluation slot; neither holds an agent slot.
     assert len(_measuring(host)) == 1
-    assert len(_record(host).running) == waiting
+    assert len(_record(host).running) == 2
     _plan(host, implement("next"))
     _answer_but_measurements(host)
     assert [

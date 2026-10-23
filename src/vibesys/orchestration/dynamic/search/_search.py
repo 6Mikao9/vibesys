@@ -89,6 +89,7 @@ from vs_core.api.search import (
     operations=OPERATIONS,
     roles=ROLES,
     snapshot=DynamicResume,
+    resumed_under=DynamicResume.resumed_under,
     owned=(HANDOFF,),
     spans=SPANS,
 )

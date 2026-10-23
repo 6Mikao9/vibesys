@@ -8,10 +8,10 @@ the results of the decisions that were in flight are dropped.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -242,6 +242,56 @@ def test_a_change_to_a_root_that_checkpointed_restarts_it_from_the_snapshot() ->
     assert run.driver.published(run.state, Seen) == Seen(marker="width 3")
     run.reply(run.expect_turn("c"), Plan(n=3))
     assert run.finished is not None
+
+
+class Resting(core.Value):
+    """What a root checkpoints: the width it ran under."""
+
+    kind: Literal["resting"] = "resting"
+    width: int
+
+
+def _taking_the_width(snapshot: Resting, config: Config) -> Resting:
+    return Resting(width=config.width)
+
+
+def _widths_seen_after_a_restart(
+    resumed_under: Callable[[Resting, Config], Resting] | None, recorded: int, resumed: int
+) -> int:
+    async def v1(ctx: core.Flow, config: Config | Resting) -> None:
+        ctx.checkpoint(Resting(width=config.width))
+        await ask(ctx, "a")
+
+    async def v2(ctx: core.Flow, given: Config | Resting) -> None:
+        ctx.publish(Seen(marker=f"width {given.width}"))
+        await ask(ctx, "c")
+
+    def search_of(root: Callable[..., Coroutine[Any, Any, None]]) -> SearchDef[Config]:
+        return fake_search("flows", Config, ROLES, snapshot=Resting, resumed_under=resumed_under)(
+            root
+        )
+
+    run = FlowRun.start(search_of(v1), Config(width=recorded))
+    stale = run.expect_turn("a")
+    run.swap(search_of(v2), Config(width=resumed))
+    run.reply(stale, Plan(n=1))
+    published = run.driver.published(run.state, Seen)
+    assert published is not None
+    return int(published.marker.removeprefix("width "))
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=10, nightly=50), deadline=None)
+@example(recorded=2, resumed=4)
+@given(recorded=st.integers(1, 32), resumed=st.integers(1, 32))
+def test_a_restart_resumes_under_the_configs_settings_the_search_declares(
+    recorded: int, resumed: int
+) -> None:
+    """The root's snapshot holds the config the run started under; a resume with another one,
+    after a code change, took the recorded width and ignored the operator's."""
+    assert _widths_seen_after_a_restart(_taking_the_width, recorded, resumed) == resumed
+    # a search that declares nothing resumes as recorded
+    assert _widths_seen_after_a_restart(None, recorded, resumed) == recorded
 
 
 def test_a_task_the_new_code_starts_as_another_flow_cannot_be_restarted() -> None:

@@ -34,6 +34,7 @@ from vibesys.orchestration.dynamic.core_policy.api import (
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vibesys.orchestration.dynamic.search.api import (
     OPERATIONS,
+    DynamicConfig,
     RunSnapshot,
     budget,
     dynamic,
@@ -69,7 +70,7 @@ from vs_runtime.api.core import (
 )
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel, JsonValue
+    from pydantic import BaseModel
 
     from vibesys.run.contracts import PluginProjection
     from vs_core.api import TaskTerms
@@ -261,40 +262,40 @@ def _project_max_rounds(options: BaseModel) -> int:
 
 
 _BUDGET_OPTION = "max_rounds"
-
-
-def _unbudgeted(descriptor: OrchestrationDescriptor) -> dict[str, JsonValue]:
-    """The options a resume holds exact: all but ``max_rounds``, a legacy ``null`` backlog read as 0.
-
-    A run recorded before the backlog defaulted to 0 spells that default ``null``.
-    """
-    options = {k: v for k, v in descriptor.options.items() if k != _BUDGET_OPTION}
-    if options.get("max_backlog", 0) is None:
-        options["max_backlog"] = 0
-    return options
+_ADJUSTABLE = frozenset(DynamicConfig.ADJUSTABLE_ON_RESUME)
 
 
 def dynamic_resume_policy(
     recorded: OrchestrationDescriptor, requested: OrchestrationDescriptor
 ) -> OrchestrationResumeDecision:
-    """Accept a resume whose only change is a larger ``--max-rounds``; every other option is exact.
+    """Accept a resume that sets what the operator adjusts; every other option is exact.
 
-    ``max_rounds`` only sets how many workstreams the run may still admit: the resumed run's
-    admission limit is ``budget(config).attempts`` of the requested options (the runtime raises
-    core's stored limits to it, never lowers them), so the descriptor recorded is the one that
-    plans the budget. A lower value is refused, naming the option and both values. Nothing else
-    qualifies: ``max_in_flight``, the backlog and the other options shape work already in
-    flight or already decided, and the run's clients read them from the recorded descriptor.
+    The operator adjusts how much the run may spend and how wide it works
+    (`DynamicConfig.ADJUSTABLE_ON_RESUME`): ``max_rounds`` only upward, ``max_in_flight`` and
+    ``max_backlog`` in either direction, exactly as ``set_max_parallel`` moves a running run's
+    admission limit. The admission limit and the budget the resumed run plans are those of the
+    requested options (the runtime raises core's stored budget to it, never lowers it, and
+    replaces its admission limit), and the search resumes under the requested widths
+    (`DynamicResume.resumed_under`), so the descriptor recorded is the one that plans the run.
+    A lower ``max_rounds`` is refused, naming the option and both values. Nothing else
+    qualifies: the other options shape work already in flight or already decided, and the
+    run's clients read them from the recorded descriptor.
     """
     if recorded == requested:
         return OrchestrationResumeDecision(descriptor=None)
     old, new = recorded.options.get(_BUDGET_OPTION), requested.options.get(_BUDGET_OPTION)
-    others_equal = _unbudgeted(recorded) == _unbudgeted(requested)
+    names = recorded.options.keys() | requested.options.keys()
+    changed = sorted(
+        name
+        for name in names - _ADJUSTABLE
+        if recorded.options.get(name) != requested.options.get(name)
+    )
+    if old != new and not (isinstance(old, int) and isinstance(new, int)):
+        changed = sorted([*changed, _BUDGET_OPTION])
     if (
         recorded.id != requested.id
         or recorded.config_version != requested.config_version
-        or not others_equal
-        or not (isinstance(old, int) and isinstance(new, int))
+        or changed
     ):
         raise ConfigurationError(
             ConfigurationDiagnostic(
@@ -302,11 +303,16 @@ def dynamic_resume_policy(
                 stage="resume_resolution",
                 message=(
                     f"resuming orchestration {recorded.id!r} cannot change its descriptor "
-                    f"except to raise {_BUDGET_OPTION!r}"
+                    f"except {', '.join(repr(name) for name in sorted(_ADJUSTABLE))}"
+                    + (
+                        f" (changed: {', '.join(repr(name) for name in changed)})"
+                        if changed
+                        else ""
+                    )
                 ),
             )
         )
-    if new < old:
+    if isinstance(old, int) and isinstance(new, int) and new < old:
         raise ConfigurationError(
             ConfigurationDiagnostic(
                 code="project_resume_configuration_mismatch",

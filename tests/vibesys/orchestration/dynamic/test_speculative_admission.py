@@ -1,4 +1,4 @@
-"""A busy evaluator imposes no default ceiling on speculative work or corrupts its diff base."""
+"""A busy evaluator parks as many waiters as the run is wide, and never corrupts a diff base."""
 
 import pytest
 from hypothesis import example, given
@@ -23,11 +23,13 @@ from vibesys.orchestration.dynamic.search.api import (
 
 
 @pytest.mark.regression
-@example(waiting=33)
-@given(waiting=st.integers(2, 100))
-def test_by_default_no_waiter_parks_and_the_admission_limit_is_the_width(waiting: int) -> None:
+@example(waiting=33, width=1)
+@given(waiting=st.integers(2, 100), width=st.integers(1, 4))
+def test_the_default_backlog_is_the_width_so_the_admission_limit_is_twice_it(
+    waiting: int, width: int
+) -> None:
     """The reported run: the default backlog parked every waiter, so core admitted the budget."""
-    config = DynamicConfig(max_rounds=waiting + 1, max_in_flight=1)
+    config = DynamicConfig(max_rounds=waiting + 1, max_in_flight=width)
     run = run_record(config)
     for i in range(waiting):
         start = workstream_start(sequence=i + 1, work_id=f"h{i}")
@@ -42,9 +44,9 @@ def test_by_default_no_waiter_parks_and_the_admission_limit_is_the_width(waiting
                 at=0,
             )
         )
-    assert not run.parked
-    assert run.capacity() == 0
-    assert budget(config).parallel == 1
+    assert len(run.parked) == min(waiting, width)
+    assert budget(config).parallel == 2 * width
+    assert budget(config).parallel == config.admission_limit
 
 
 @pytest.mark.regression

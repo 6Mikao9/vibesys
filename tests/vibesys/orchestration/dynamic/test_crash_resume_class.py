@@ -23,7 +23,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     reviewed,
 )
 
-from vibesys.orchestration.dynamic.search.api import RunSnapshot, dynamic
+from vibesys.orchestration.dynamic.search.api import MergeOutcome, RunSnapshot, dynamic
 from vs_core.api import DispatchTurn, FlowDriver, RecoveryPhase, ResumeSessionTurn, RunStatus
 from vs_core.api.testing import Faults, drive
 from vs_faults.api import AgentFault, Boundary, FaultPlan, FaultRule
@@ -55,6 +55,15 @@ def _run(*, width: int, fault: Faults | None = None) -> Trace[FlowState]:
 def _uninterrupted(width: int) -> Trace[FlowState]:
     """The run no fault touches: each example compares its recovery with it, never changes it."""
     return _run(width=width)
+
+
+def _moved_to(snapshot: RunSnapshot) -> bool:
+    """Whether main is a revision a recorded merge or fast-forward moved it to."""
+    return snapshot.main in {
+        item.revision
+        for item in snapshot.merges
+        if item.outcome is MergeOutcome.MERGED and item.revision is not None
+    }
 
 
 def _snapshot(trace: Trace[FlowState]) -> RunSnapshot:
@@ -116,7 +125,9 @@ def test_dynamic_recovery_converges_at_generated_commits_and_inside_agent_turns(
     assert "outcome unknown" not in (recovered.core.run.result.reason or "")
     assert max(Counter(recovered.effects).values(), default=0) == 1
     before, after = _snapshot(normal), _snapshot(recovered)
-    assert after.main == before.main
+    # Main moves to the first settled candidate built on it that beats it, so it follows the order
+    # the candidates settled in, which a recovery may change; either way a recorded move left it.
+    assert after.main == before.main or all(_moved_to(snapshot) for snapshot in (before, after))
     assert after.baseline == before.baseline
     # An interrupted provider never consumed its reply. Settled scientific results
     # therefore agree even when recovery changes the turn or settlement identities.

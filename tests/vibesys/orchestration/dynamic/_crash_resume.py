@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
-    from pydantic import BaseModel
+    from pydantic import BaseModel, JsonValue
 
     from vs_core.api import CoreState, OperationRegistry, Request, SchemaRef
     from vs_core.api.testing import Answer, Journal
@@ -195,11 +195,15 @@ class DurableStore(FakeStateStore):
 class ResumeWorld:
     """A scripted dynamic flow that really creates, snapshots and discards Fake Git trees.
 
-    ``width`` is the run's ``--max-in-flight`` and ``resume_width`` the one its resume plans.
+    ``width`` is the run's ``--max-in-flight`` and ``resume_width`` the one its resume plans;
+    ``backlog`` and ``resume_backlog`` are the same for ``--max-backlog`` (None: its default, as
+    many as the width).
     """
 
     width: ClassVar[int] = 1
     resume_width: ClassVar[int] = 1
+    backlog: ClassVar[int | None] = None
+    resume_backlog: ClassVar[int | None] = None
 
     def __init__(
         self,
@@ -229,37 +233,41 @@ class ResumeWorld:
             framework_version="test",
             run_environment=RunEnvironmentRecord(name="docker"),
             execution=run_execution_record(),
-            orchestration=self.descriptor(self.rounds, self.width),
+            orchestration=self.descriptor(self.rounds, self.width, self.backlog),
         )
         self.resources: ProjectRunResources | None = None
+        widest = max(self.width, self.resume_width)
         self.script = Executors(
             planner=deque(
-                plan_reply(*(implement(f"h{n}-{m}") for m in range(self.width)))
+                plan_reply(*(implement(f"h{n}-{m}") for m in range(widest)))
                 for n in range(self.rounds + extra)
             ),
-            implementer=deque(implemented() for _ in range((self.rounds + extra) * self.width)),
-            judge=deque(reviewed() for _ in range((self.rounds + extra) * self.width)),
+            implementer=deque(implemented() for _ in range((self.rounds + extra) * widest)),
+            judge=deque(reviewed() for _ in range((self.rounds + extra) * widest)),
             exhausted="not json",
         )
         self.workspaces: dict[str, str] = {}
 
     @staticmethod
-    def descriptor(rounds: int, width: int = 1) -> OrchestrationDescriptor:
-        return OrchestrationDescriptor(
-            id="dynamic",
-            config_version=1,
-            options={"interface": "inprocess", "max_rounds": rounds, "max_in_flight": width},
-        )
+    def descriptor(
+        rounds: int, width: int = 1, backlog: int | None = None
+    ) -> OrchestrationDescriptor:
+        options: dict[str, JsonValue] = {
+            "interface": "inprocess",
+            "max_rounds": rounds,
+            "max_in_flight": width,
+        }
+        if backlog is not None:
+            options["max_backlog"] = backlog
+        return OrchestrationDescriptor(id="dynamic", config_version=1, options=options)
 
     def open(self, *, resume: bool) -> ProjectRunResources:
         requested = (
-            self.descriptor(self.rounds + self.extra, self.resume_width)
+            self.descriptor(self.rounds + self.extra, self.resume_width, self.resume_backlog)
             if resume
-            else self.descriptor(self.rounds, self.width)
+            else self.descriptor(self.rounds, self.width, self.backlog)
         )
         policy = REGISTRATION.resume_policy or exact_resume_descriptor
-        if self.resume_width != self.width:
-            policy = _any_width
 
         def resolve(recorded: OrchestrationRunManifest) -> OrchestrationResumeDecision:
             return resume_orchestration_decision(
@@ -289,9 +297,13 @@ class ResumeWorld:
         resources = self.resources
         assert resources is not None
         selected = (
-            config(max_rounds=self.rounds + self.extra, max_in_flight=self.resume_width)
+            config(
+                max_rounds=self.rounds + self.extra,
+                max_in_flight=self.resume_width,
+                max_backlog=self.resume_backlog,
+            )
             if resume
-            else config(max_rounds=self.rounds, max_in_flight=self.width)
+            else config(max_rounds=self.rounds, max_in_flight=self.width, max_backlog=self.backlog)
         )
         baseline = resources.git.trusted_input_baseline
         assert baseline is not None
@@ -389,22 +401,19 @@ class WideWorld(ResumeWorld):
 
 
 class NarrowedWorld(ResumeWorld):
-    """A run two attempts wide whose resume plans one.
-
-    The CLI keeps ``--max-in-flight`` exact on a resume, so this is the state a run stored under
-    a wrong admission limit leaves; the world resolves that resume with a policy that accepts it.
-    """
+    """A run two attempts wide whose resume plans one: ``--max-in-flight 1 --max-backlog 0``."""
 
     width = 2
     resume_width = 1
+    resume_backlog = 0
 
 
-def _any_width(
-    recorded: OrchestrationDescriptor, requested: OrchestrationDescriptor
-) -> OrchestrationResumeDecision:
-    """Accept the requested descriptor, whatever width it plans."""
-    del recorded
-    return OrchestrationResumeDecision(descriptor=requested)
+class WidenedWorld(ResumeWorld):
+    """A run one attempt wide, with no backlog, whose resume plans two with the default backlog."""
+
+    width = 1
+    backlog = 0
+    resume_width = 2
 
 
 def _emit(text: str, writer: TextIO) -> None:

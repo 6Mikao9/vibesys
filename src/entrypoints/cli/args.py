@@ -724,14 +724,14 @@ def _build_agent_parser() -> _RunArgumentParser:
     parser.add_argument(
         "--max-backlog",
         type=int,
-        default=0,
+        default=None,
         metavar="N",
         help=(
             "Dynamic loop: workstreams that may wait for or hold a trusted evaluation without "
             "holding an agent slot, so new work starts meanwhile; each adds one to the attempts "
-            "the run holds at once. 0 keeps each agent slot until its workstream ends, so the "
-            "run holds --max-in-flight workstreams and new work waits for measurements "
-            "(default: 0)."
+            "the run holds at once. 0 keeps each agent slot until its workstream ends, so new "
+            "work waits for measurements (default: --max-in-flight, so an agent never waits "
+            "behind the evaluation queue)."
         ),
     )
     parser.add_argument(

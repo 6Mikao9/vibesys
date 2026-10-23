@@ -74,6 +74,12 @@ class SearchDef[C]:
     """Operations other libraries' owners perform for the search (``ctx.owners.perform``)."""
     snapshot: type[Any] | None = None
     """What the root may checkpoint besides its config, and is restarted from (``search``)."""
+    resumed_under: Callable[[Any, C], Any] | None = None
+    """How a restart takes the config of the run being resumed into the snapshot it resumes from.
+
+    The snapshot holds the config the run started under; an operator who resumes with other
+    budget or width settings changes the config, and a restart resumes under that. None: the
+    snapshot resumes as recorded."""
     spans: tuple[SpanKind, ...] = ()
     """The kinds of span the search labels (``ctx.label``, ``label=`` on an aspect call)."""
 
@@ -139,6 +145,7 @@ class Declarations(TypedDict, total=False):
     owned: tuple[OperationRegistration, ...]
     spans: tuple[SpanKind, ...]
     snapshot: type[Any] | None
+    resumed_under: Callable[[Any, Any], Any] | None
 
 
 def search[C](
@@ -158,12 +165,16 @@ def search[C](
     run, so a restart after a code change resumes it with that knowledge. The root then takes
     ``config | snapshot``: the config when the run starts, its latest checkpoint after a
     restart. Neither model may decode the other's JSON (give the snapshot a ``kind``).
+    ``resumed_under(snapshot, config)`` says which of the config's settings the snapshot takes
+    when the operator resumes with a new one (the same settings must be changeable on a replay
+    and on a restart, so the search declares them once).
     """
     operations = declared_.get("operations")
     roles = declared_.get("roles", ())
     owned = declared_.get("owned", ())
     spans = declared_.get("spans", ())
     snapshot = declared_.get("snapshot")
+    resumed_under = declared_.get("resumed_under")
     names = [role.name for role in roles]
     if len(set(names)) != len(names):
         message = f"roles of search {name!r} must have distinct names: {sorted(names)}"
@@ -173,7 +184,15 @@ def search[C](
 
     def register(root: Root[C]) -> SearchDef[C]:
         return SearchDef(
-            name, config, root, operations, roles, owned, snapshot=snapshot, spans=spans
+            name,
+            config,
+            root,
+            operations,
+            roles,
+            owned,
+            snapshot=snapshot,
+            resumed_under=resumed_under,
+            spans=spans,
         )
 
     return register
@@ -205,8 +224,12 @@ class FlowDriver[C]:
         )
         root = definition.root
 
-        async def supervised(ctx: Flow, config: C) -> None:
-            await conclude(kit_of(ctx), await root(ctx, config))
+        snapshot, resumed_under = definition.snapshot, definition.resumed_under
+
+        async def supervised(ctx: Flow, given: C) -> None:
+            if snapshot is not None and resumed_under is not None and isinstance(given, snapshot):
+                given = resumed_under(given, self._config)
+            await conclude(kit_of(ctx), await root(ctx, given))
 
         resumes = (
             type(config) if definition.snapshot is None else definition.snapshot | type(config)

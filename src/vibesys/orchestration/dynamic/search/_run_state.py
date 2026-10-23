@@ -254,6 +254,10 @@ class DynamicResume(Value):
     config: DynamicConfig
     record: RecordState
 
+    def resumed_under(self, current: DynamicConfig) -> "DynamicResume":
+        """This checkpoint, resumed under the operator's present budget and widths."""
+        return self.model_copy(update={"config": self.config.resumed_under(current)})
+
 
 @dataclass
 class RunRecord:
@@ -504,7 +508,7 @@ class RunRecord:
 
         These are the earliest to wait, up to the run's backlog; any later one keeps its slot.
         """
-        return frozenset(list(self.waits)[: self.config.max_backlog])
+        return frozenset(list(self.waits)[: self.config.backlog])
 
     @property
     def working(self) -> tuple[WorkstreamStart, ...]:

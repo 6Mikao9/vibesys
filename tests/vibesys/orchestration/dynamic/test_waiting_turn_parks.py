@@ -59,7 +59,7 @@ def admissible(host: Host, *, limit: int | None = None) -> list[Asked]:
 def all_waiting(*, restarting: bool | RestartPolicy) -> tuple[Host, list[Continuation]]:
     """A run whose ``WIDTH`` workstreams each suspended their implementer's first turn."""
     host = begin(
-        config(max_rounds=3, max_in_flight=WIDTH, max_backlog=3),
+        config(max_rounds=3, max_in_flight=WIDTH, max_backlog=None),
         restarting=restarting,
         view=offering(),
     )

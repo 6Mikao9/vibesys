@@ -3,9 +3,10 @@
 The run schedules `max_rounds * max_in_flight` workstreams, and each is one admitted attempt.
 Agents work in at most `max_in_flight` of them at once; a parked one (waiting for its trusted
 measurement, or in a turn suspended on its evaluations) keeps its attempt open without an agent,
-so core admits up to `max_in_flight + max_backlog` attempts (`DynamicConfig.admission_limit`,
-`RunRecord.parked`) and new work runs beside the parked. The backlog defaults to none, so the
-limit is the width the operator asked for and the budget never moves it. That is throughput, not
+so core admits up to `max_in_flight + backlog` attempts (`DynamicConfig.admission_limit`,
+`RunRecord.parked`) and new work runs beside the parked. The backlog defaults to the width, so an
+agent is never blocked on the evaluation queue, and the limit follows what the operator set; the
+budget only caps it and never raises it. That is throughput, not
 liveness: the search lends an agent slot only to an admitted attempt (`RunRecord.unseated`), so
 any admission limit of 1 or more completes the run.
 Core enforces the numbers; this module is the one place that derives them from what the search

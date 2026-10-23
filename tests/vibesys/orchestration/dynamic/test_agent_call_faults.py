@@ -27,10 +27,11 @@ from tests.vibesys.orchestration.dynamic._crash_resume import (
     NarrowedWorld,
     Point,
     ResumeWorld,
+    WidenedWorld,
     WideWorld,
 )
 
-from vs_core.api import FlowState, RecoveryPhase, RunStatus
+from vs_core.api import CoreState, FlowState, RecoveryPhase, RunStatus
 from vs_faults.api import HostCrashError
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import RuntimeRecord
@@ -73,6 +74,29 @@ def test_a_provider_outage_on_agent_calls_ends_the_run_in_a_typed_terminal_state
         assert all(item.outcome == "succeeded" for item in run.core.settlement.settlements)
 
 
+def _resumed_after_a_crash(world: ResumeWorld) -> tuple[CoreState, CoreState]:
+    """The core state a crash left in the store, and the state the resumed run ends in."""
+    with world.open(resume=False):
+        first = world.host(resume=False, now=1)
+        with suppress(HostCrashError):
+            first.run()
+        stored = world.store.load()
+        assert isinstance(stored, StoredEnvelope)
+        before = RuntimeRecord[FlowState].decode(stored, REGISTRY).envelope.core
+        first.shell.release_lease(now_at=first.clock.now())
+    with world.open(resume=True):
+        run = world.host(resume=True, now=first.clock.now() + 1000).run()
+    assert run.halted is None, run.halted
+    assert run.core.run.status is RunStatus.TERMINAL
+    assert run.core.records.recovery.phase is RecoveryPhase.READY
+    recorded = {item.settlement_id: item for item in run.core.settlement.settlements}
+    assert all(recorded[item.settlement_id] == item for item in before.settlement.settlements)
+    assert {row.attempt_id for row in before.attempts.attempts} <= {
+        row.attempt_id for row in run.core.attempts.attempts
+    }
+    return before, run.core
+
+
 @pytest.mark.regression
 @settings(
     max_examples=examples(pr=3, nightly=20), phases=(Phase.explicit, Phase.generate), database=None
@@ -87,22 +111,27 @@ def test_a_resume_under_a_narrower_width_keeps_every_admitted_attempt_and_ends_u
     with TemporaryDirectory() as directory, pytest.MonkeyPatch.context() as environment:
         environment.setenv("VIBESYS_STATE_HOME", str(Path(directory) / "state"))
         world = NarrowedWorld(Path(directory) / "project", extra=extra, fault=Fault.CRASH, at=at)
-        with world.open(resume=False):
-            first = world.host(resume=False, now=1)
-            with suppress(HostCrashError):
-                first.run()
-            stored = world.store.load()
-            assert isinstance(stored, StoredEnvelope)
-            before = RuntimeRecord[FlowState].decode(stored, REGISTRY).envelope.core
-            first.shell.release_lease(now_at=first.clock.now())
-        with world.open(resume=True):
-            run = world.host(resume=True, now=first.clock.now() + 1000).run()
-        assert run.halted is None, run.halted
-        assert run.core.run.status is RunStatus.TERMINAL
-        assert run.core.records.recovery.phase is RecoveryPhase.READY
-        assert run.core.run.limits.max_parallel == 1
-        recorded = {item.settlement_id: item for item in run.core.settlement.settlements}
-        assert all(recorded[item.settlement_id] == item for item in before.settlement.settlements)
-        assert {row.attempt_id for row in before.attempts.attempts} <= {
-            row.attempt_id for row in run.core.attempts.attempts
-        }
+        before, after = _resumed_after_a_crash(world)
+        assert before.run.limits.max_parallel == 2
+        assert after.run.limits.max_parallel == 1
+
+
+@pytest.mark.regression
+@settings(
+    max_examples=examples(pr=3, nightly=20), phases=(Phase.explicit, Phase.generate), database=None
+)
+@example(at=30, extra=1)
+@example(at=45, extra=0)
+@given(at=st.integers(1, 90), extra=st.integers(0, 1))
+def test_a_resume_under_a_wider_width_admits_up_to_its_new_limit_and_keeps_every_settlement(
+    at: int, extra: int
+) -> None:
+    """The stored run held one attempt at a time; the resume plans ``--max-in-flight 2`` with the
+    default backlog: it admits up to twice that, within the budget it now holds."""
+    with TemporaryDirectory() as directory, pytest.MonkeyPatch.context() as environment:
+        environment.setenv("VIBESYS_STATE_HOME", str(Path(directory) / "state"))
+        world = WidenedWorld(Path(directory) / "project", extra=extra, fault=Fault.CRASH, at=at)
+        before, after = _resumed_after_a_crash(world)
+        assert before.run.limits.max_parallel == 1
+        assert after.run.limits.max_parallel == min(2 * 2, (1 + extra) * 2)
+        assert after.run.limits.max_attempts == (1 + extra) * 2
