@@ -19,10 +19,13 @@ from vibesys.orchestration.dynamic import REGISTRATION
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.run.project import exact_resume_descriptor, resume_orchestration_decision
 from vs_core.api import (
+    CancelTurn,
     ControlId,
     ControlInput,
     DiscardWorkspace,
+    DispatchTurn,
     EnsureWorkspace,
+    ResumeSessionTurn,
     RetainRevision,
     RevisionRef,
     RunControlEvent,
@@ -30,7 +33,7 @@ from vs_core.api import (
     StopMode,
     SubmitMeasurement,
 )
-from vs_core.api.testing import Failed, Succeeded
+from vs_core.api.testing import Failed, Succeeded, Unknown
 from vs_dst.api import Effects, RecoverableExecutors
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostFault
 from vs_project.api import (
@@ -40,7 +43,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
 )
 from vs_project.api.testing import FakeGitRepositories, run_execution_record
-from vs_runtime.api import EvaluationRetries, member_workspace_id
+from vs_runtime.api import EvaluationRetries, OrchestrationResumeDecision, member_workspace_id
 from vs_runtime.api.infrastructure import (
     ProjectRunEffects,
     ProjectRunRequest,
@@ -66,7 +69,6 @@ if TYPE_CHECKING:
     from vs_core.api import CoreState, OperationRegistry, Request, SchemaRef
     from vs_core.api.testing import Answer, Journal
     from vs_project.api import CommitOutcome, OrchestrationRunManifest, StoredEnvelope, StoreFence
-    from vs_runtime.api import OrchestrationResumeDecision
     from vs_runtime.api.core import CoreRuntime, ExecutionContext, ExecutionResult
     from vs_runtime.api.testing import Script, ScriptedHost
     from vs_sim.api.testing import VirtualClock
@@ -78,6 +80,12 @@ class Fault(StrEnum):
     STALL = "stall"
     ROLLBACK = "rollback"
     INFRASTRUCTURE = "infrastructure"
+    PROVIDER = "provider"
+    """The agent provider errors: the next turns never answer and the first cancel of one hangs."""
+
+
+PROVIDER_OUTAGE = 2
+"""Agent turns a provider outage swallows: within every role's asks again (`lost_turns`)."""
 
 
 class Point(StrEnum):
@@ -99,6 +107,8 @@ class DurableStore(FakeStateStore):
         self.signals = FakeSignalSource()
         self.stopping = False
         self.refusing = False
+        self.outage = 0
+        self.hung_cancels = 0
         self.gate = FaultGate(
             FaultPlan(
                 seed=at,
@@ -143,6 +153,8 @@ class DurableStore(FakeStateStore):
             self.stopping = True
         elif self.fault is Fault.INFRASTRUCTURE:
             self.refusing = True
+        elif self.fault is Fault.PROVIDER:
+            self.outage, self.hung_cancels = PROVIDER_OUTAGE, 1
 
     def attach(self, shell: CoreRuntime, clock: VirtualClock) -> None:
         self.clock = clock
@@ -172,7 +184,15 @@ class ResumeWorld:
         fault: Fault,
         at: int,
         boundary: Point = Point.COMMIT,
+        width: int = 1,
+        resume_width: int | None = None,
     ) -> None:
+        """``resume_width`` is the width the resume plans, when it is not the run's own.
+
+        The CLI keeps ``--max-in-flight`` exact on a resume, so a narrower plan over a run that
+        admitted ``width`` attempts is the state a run stored under a wrong admission limit
+        leaves; the world resolves that resume with a policy that accepts it.
+        """
         root.mkdir()
         (root / "candidate.py").write_text("VALUE = 1\n")
         self.git = FakeGitRepositories()
@@ -180,8 +200,11 @@ class ResumeWorld:
         self.effects = Effects()
         self.delivery = FakePublicationDelivery()
         self.rounds = 1
+        self.width = width
+        self.resume_width = width if resume_width is None else resume_width
         self.extra = extra
         self.refusals = 0
+        self.outages = 0
         self.request = ProjectRunRequest(
             project_root=root,
             run_id="crash-resume",
@@ -191,28 +214,37 @@ class ResumeWorld:
             framework_version="test",
             run_environment=RunEnvironmentRecord(name="docker"),
             execution=run_execution_record(),
-            orchestration=self.descriptor(self.rounds),
+            orchestration=self.descriptor(self.rounds, self.width),
         )
         self.resources: ProjectRunResources | None = None
         self.script = Executors(
-            planner=deque(plan_reply(implement(f"h{n}")) for n in range(self.rounds + extra)),
-            implementer=deque(implemented() for _ in range(self.rounds + extra)),
-            judge=deque(reviewed() for _ in range(self.rounds + extra)),
+            planner=deque(
+                plan_reply(*(implement(f"h{n}-{m}") for m in range(width)))
+                for n in range(self.rounds + extra)
+            ),
+            implementer=deque(implemented() for _ in range((self.rounds + extra) * width)),
+            judge=deque(reviewed() for _ in range((self.rounds + extra) * width)),
             exhausted="not json",
         )
         self.workspaces: dict[str, str] = {}
 
     @staticmethod
-    def descriptor(rounds: int) -> OrchestrationDescriptor:
+    def descriptor(rounds: int, width: int = 1) -> OrchestrationDescriptor:
         return OrchestrationDescriptor(
             id="dynamic",
             config_version=1,
-            options={"interface": "inprocess", "max_rounds": rounds, "max_in_flight": 1},
+            options={"interface": "inprocess", "max_rounds": rounds, "max_in_flight": width},
         )
 
     def open(self, *, resume: bool) -> ProjectRunResources:
-        requested = self.descriptor(self.rounds + self.extra if resume else self.rounds)
+        requested = (
+            self.descriptor(self.rounds + self.extra, self.resume_width)
+            if resume
+            else self.descriptor(self.rounds, self.width)
+        )
         policy = REGISTRATION.resume_policy or exact_resume_descriptor
+        if self.resume_width != self.width:
+            policy = _any_width
 
         def resolve(recorded: OrchestrationRunManifest) -> OrchestrationResumeDecision:
             return resume_orchestration_decision(
@@ -241,7 +273,11 @@ class ResumeWorld:
     def host(self, *, resume: bool, now: float) -> ScriptedHost:
         resources = self.resources
         assert resources is not None
-        selected = config(max_rounds=self.rounds + self.extra if resume else self.rounds)
+        selected = (
+            config(max_rounds=self.rounds + self.extra, max_in_flight=self.resume_width)
+            if resume
+            else config(max_rounds=self.rounds, max_in_flight=self.width)
+        )
         baseline = resources.git.trusted_input_baseline
         assert baseline is not None
         facts = FACTS.model_copy(update={"baseline": RevisionRef.of_git_commit(baseline)})
@@ -295,6 +331,17 @@ class ResumeWorld:
             # The backend owns retries; only its final try reaches core. The
             # scripted far side heals on try two, as the production wrapper does.
             return self.script(request, core)
+        if isinstance(request, DispatchTurn | ResumeSessionTurn) and self.store.outage:
+            # The CLI hangs or exits mid-turn: no reply ever arrives, and core ends the turn at
+            # its limit, cancels it and asks again as the role says.
+            self.store.outage -= 1
+            self.outages += 1
+            return Unknown()
+        if isinstance(request, CancelTurn) and self.store.hung_cancels:
+            if not request.request_id.root.endswith("close"):
+                # The same outage hangs the cancellation of the lost turn.
+                self.store.hung_cancels -= 1
+                return Unknown()
         if isinstance(request, EnsureWorkspace):
             key = member_workspace_id(request.scope.owner.root)
             base = request.plan.base.git_commit
@@ -325,6 +372,14 @@ class ResumeWorld:
             resources.remove_leftover(member_workspace_id(request.scope.owner.root))
             self.workspaces.pop(member_workspace_id(request.scope.owner.root), None)
         return self.script(request, core)
+
+
+def _any_width(
+    recorded: OrchestrationDescriptor, requested: OrchestrationDescriptor
+) -> OrchestrationResumeDecision:
+    """Accept the requested descriptor, whatever width it plans."""
+    del recorded
+    return OrchestrationResumeDecision(descriptor=requested)
 
 
 def _emit(text: str, writer: TextIO) -> None:
