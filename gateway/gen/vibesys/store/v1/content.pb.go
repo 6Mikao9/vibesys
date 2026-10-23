@@ -126,6 +126,61 @@ func (StreamState) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_content_proto_rawDescGZIP(), []int{1}
 }
 
+type LogGate int32
+
+const (
+	LogGate_LOG_GATE_UNSPECIFIED LogGate = 0
+	LogGate_LOG_GATE_BUILD       LogGate = 1
+	LogGate_LOG_GATE_ACCURACY    LogGate = 2
+	LogGate_LOG_GATE_BENCHMARK   LogGate = 3
+	LogGate_LOG_GATE_VALIDATION  LogGate = 4
+)
+
+// Enum value maps for LogGate.
+var (
+	LogGate_name = map[int32]string{
+		0: "LOG_GATE_UNSPECIFIED",
+		1: "LOG_GATE_BUILD",
+		2: "LOG_GATE_ACCURACY",
+		3: "LOG_GATE_BENCHMARK",
+		4: "LOG_GATE_VALIDATION",
+	}
+	LogGate_value = map[string]int32{
+		"LOG_GATE_UNSPECIFIED": 0,
+		"LOG_GATE_BUILD":       1,
+		"LOG_GATE_ACCURACY":    2,
+		"LOG_GATE_BENCHMARK":   3,
+		"LOG_GATE_VALIDATION":  4,
+	}
+)
+
+func (x LogGate) Enum() *LogGate {
+	p := new(LogGate)
+	*p = x
+	return p
+}
+
+func (x LogGate) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (LogGate) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_content_proto_enumTypes[2].Descriptor()
+}
+
+func (LogGate) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_content_proto_enumTypes[2]
+}
+
+func (x LogGate) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use LogGate.Descriptor instead.
+func (LogGate) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_content_proto_rawDescGZIP(), []int{2}
+}
+
 // Value is a finite, possibly signed measurement. clock is run-clock seconds.
 type MetricPoint struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -198,13 +253,15 @@ func (x *MetricPoint) GetClock() float64 {
 // Streams are append-only. Only a closed LOG carries length here; a TRANSCRIPT
 // belongs to a turn whose final AgentTurnAttrs.transcript_length seals its view.
 type StreamRef struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Kind          StreamKind             `protobuf:"varint,2,opt,name=kind,proto3,enum=vibesys.store.v1.StreamKind" json:"kind,omitempty"`
-	Span          *string                `protobuf:"bytes,3,opt,name=span,proto3,oneof" json:"span,omitempty"`
-	Title         string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
-	State         StreamState            `protobuf:"varint,5,opt,name=state,proto3,enum=vibesys.store.v1.StreamState" json:"state,omitempty"`
-	Length        *uint64                `protobuf:"varint,6,opt,name=length,proto3,oneof" json:"length,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Id     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Kind   StreamKind             `protobuf:"varint,2,opt,name=kind,proto3,enum=vibesys.store.v1.StreamKind" json:"kind,omitempty"`
+	Span   *string                `protobuf:"bytes,3,opt,name=span,proto3,oneof" json:"span,omitempty"`
+	Title  string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	State  StreamState            `protobuf:"varint,5,opt,name=state,proto3,enum=vibesys.store.v1.StreamState" json:"state,omitempty"`
+	Length *uint64                `protobuf:"varint,6,opt,name=length,proto3,oneof" json:"length,omitempty"`
+	// Additive: absent on historical log references. A transcript cannot carry it.
+	Owner         *StreamOwner `protobuf:"bytes,7,opt,name=owner,proto3,oneof" json:"owner,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -279,6 +336,13 @@ func (x *StreamRef) GetLength() uint64 {
 		return *x.Length
 	}
 	return 0
+}
+
+func (x *StreamRef) GetOwner() *StreamOwner {
+	if x != nil {
+		return x.Owner
+	}
+	return nil
 }
 
 // Immutable content addressed by the lowercase hexadecimal SHA-256 of its bytes.
@@ -404,17 +468,193 @@ func (x *BlobAttached) GetBlob() *BlobRef {
 	return nil
 }
 
+// Semantic log ownership is independent of a stream's display title. Older logs
+// have no owner and remain unattributed; transcript ownership uses StreamRef.span.
+type StreamOwner struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*StreamOwner_Startup
+	//	*StreamOwner_Gate
+	//	*StreamOwner_ToolBuild
+	//	*StreamOwner_Narration
+	Kind          isStreamOwner_Kind `protobuf_oneof:"kind"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StreamOwner) Reset() {
+	*x = StreamOwner{}
+	mi := &file_vibesys_store_v1_content_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StreamOwner) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StreamOwner) ProtoMessage() {}
+
+func (x *StreamOwner) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_content_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StreamOwner.ProtoReflect.Descriptor instead.
+func (*StreamOwner) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_content_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *StreamOwner) GetKind() isStreamOwner_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *StreamOwner) GetStartup() StartupStage {
+	if x != nil {
+		if x, ok := x.Kind.(*StreamOwner_Startup); ok {
+			return x.Startup
+		}
+	}
+	return StartupStage_STARTUP_STAGE_UNSPECIFIED
+}
+
+func (x *StreamOwner) GetGate() *GateStreamOwner {
+	if x != nil {
+		if x, ok := x.Kind.(*StreamOwner_Gate); ok {
+			return x.Gate
+		}
+	}
+	return nil
+}
+
+func (x *StreamOwner) GetToolBuild() string {
+	if x != nil {
+		if x, ok := x.Kind.(*StreamOwner_ToolBuild); ok {
+			return x.ToolBuild
+		}
+	}
+	return ""
+}
+
+func (x *StreamOwner) GetNarration() bool {
+	if x != nil {
+		if x, ok := x.Kind.(*StreamOwner_Narration); ok {
+			return x.Narration
+		}
+	}
+	return false
+}
+
+type isStreamOwner_Kind interface {
+	isStreamOwner_Kind()
+}
+
+type StreamOwner_Startup struct {
+	Startup StartupStage `protobuf:"varint,1,opt,name=startup,proto3,enum=vibesys.store.v1.StartupStage,oneof"`
+}
+
+type StreamOwner_Gate struct {
+	Gate *GateStreamOwner `protobuf:"bytes,2,opt,name=gate,proto3,oneof"`
+}
+
+type StreamOwner_ToolBuild struct {
+	ToolBuild string `protobuf:"bytes,3,opt,name=tool_build,json=toolBuild,proto3,oneof"`
+}
+
+type StreamOwner_Narration struct {
+	Narration bool `protobuf:"varint,4,opt,name=narration,proto3,oneof"`
+}
+
+func (*StreamOwner_Startup) isStreamOwner_Kind() {}
+
+func (*StreamOwner_Gate) isStreamOwner_Kind() {}
+
+func (*StreamOwner_ToolBuild) isStreamOwner_Kind() {}
+
+func (*StreamOwner_Narration) isStreamOwner_Kind() {}
+
+type GateStreamOwner struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Execution     string                 `protobuf:"bytes,1,opt,name=execution,proto3" json:"execution,omitempty"`
+	Gate          LogGate                `protobuf:"varint,2,opt,name=gate,proto3,enum=vibesys.store.v1.LogGate" json:"gate,omitempty"`
+	Attempt       uint32                 `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GateStreamOwner) Reset() {
+	*x = GateStreamOwner{}
+	mi := &file_vibesys_store_v1_content_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GateStreamOwner) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GateStreamOwner) ProtoMessage() {}
+
+func (x *GateStreamOwner) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_content_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GateStreamOwner.ProtoReflect.Descriptor instead.
+func (*GateStreamOwner) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_content_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GateStreamOwner) GetExecution() string {
+	if x != nil {
+		return x.Execution
+	}
+	return ""
+}
+
+func (x *GateStreamOwner) GetGate() LogGate {
+	if x != nil {
+		return x.Gate
+	}
+	return LogGate_LOG_GATE_UNSPECIFIED
+}
+
+func (x *GateStreamOwner) GetAttempt() uint32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
 var File_vibesys_store_v1_content_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_content_proto_rawDesc = "" +
 	"\n" +
-	"\x1evibesys/store/v1/content.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\"\xa8\x01\n" +
+	"\x1evibesys/store/v1/content.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a vibesys/store/v1/lifecycle.proto\"\xa8\x01\n" +
 	"\vMetricPoint\x12#\n" +
 	"\x06series\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x06series\x12$\n" +
 	"\x04span\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x04span\x88\x01\x01\x12\x1d\n" +
 	"\x05value\x18\x03 \x01(\x01B\a\xbaH\x04\x12\x02@\x01R\x05value\x12&\n" +
 	"\x05clock\x18\x04 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x05clockB\a\n" +
-	"\x05_span\"\x97\x04\n" +
+	"\x05_span\"\xb5\x05\n" +
 	"\tStreamRef\x12\x1b\n" +
 	"\x02id\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x02id\x12<\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1c.vibesys.store.v1.StreamKindB\n" +
@@ -423,11 +663,14 @@ const file_vibesys_store_v1_content_proto_rawDesc = "" +
 	"\x05title\x18\x04 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x05title\x12?\n" +
 	"\x05state\x18\x05 \x01(\x0e2\x1d.vibesys.store.v1.StreamStateB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05state\x12\x1b\n" +
-	"\x06length\x18\x06 \x01(\x04H\x01R\x06length\x88\x01\x01:\xf5\x01\xbaH\xf1\x01\x1a\x9a\x01\n" +
+	"\x06length\x18\x06 \x01(\x04H\x01R\x06length\x88\x01\x01\x128\n" +
+	"\x05owner\x18\a \x01(\v2\x1d.vibesys.store.v1.StreamOwnerH\x02R\x05owner\x88\x01\x01:\xcf\x02\xbaH\xcb\x02\x1aX\n" +
+	"\fstream.owner\x12$semantic owner belongs only to a log\x1a\"!has(this.owner) || this.kind == 1\x1a\x9a\x01\n" +
 	"\rstream.length\x12Plength is absent for transcripts and opened logs, and required when a log closes\x1a7has(this.length) == (this.kind == 1 && this.state != 1)\x1aR\n" +
 	"\vstream.span\x12!span is required for a transcript\x1a this.kind != 2 || has(this.span)B\a\n" +
 	"\x05_spanB\t\n" +
-	"\a_length\"x\n" +
+	"\a_lengthB\b\n" +
+	"\x06_owner\"x\n" +
 	"\aBlobRef\x12-\n" +
 	"\x06sha256\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\x06sha256\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x04R\x04size\x12*\n" +
@@ -436,7 +679,20 @@ const file_vibesys_store_v1_content_proto_rawDesc = "" +
 	"\fBlobAttached\x12\x1f\n" +
 	"\x04span\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04span\x12\x1f\n" +
 	"\x04role\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04role\x125\n" +
-	"\x04blob\x18\x03 \x01(\v2\x19.vibesys.store.v1.BlobRefB\x06\xbaH\x03\xc8\x01\x01R\x04blob*Z\n" +
+	"\x04blob\x18\x03 \x01(\v2\x19.vibesys.store.v1.BlobRefB\x06\xbaH\x03\xc8\x01\x01R\x04blob\"\xf4\x01\n" +
+	"\vStreamOwner\x12F\n" +
+	"\astartup\x18\x01 \x01(\x0e2\x1e.vibesys.store.v1.StartupStageB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x00R\astartup\x127\n" +
+	"\x04gate\x18\x02 \x01(\v2!.vibesys.store.v1.GateStreamOwnerH\x00R\x04gate\x12,\n" +
+	"\n" +
+	"tool_build\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\ttoolBuild\x12'\n" +
+	"\tnarration\x18\x04 \x01(\bB\a\xbaH\x04j\x02\b\x01H\x00R\tnarrationB\r\n" +
+	"\x04kind\x12\x05\xbaH\x02\b\x01\"\x91\x01\n" +
+	"\x0fGateStreamOwner\x12)\n" +
+	"\texecution\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\texecution\x129\n" +
+	"\x04gate\x18\x02 \x01(\x0e2\x19.vibesys.store.v1.LogGateB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04gate\x12\x18\n" +
+	"\aattempt\x18\x03 \x01(\rR\aattempt*Z\n" +
 	"\n" +
 	"StreamKind\x12\x1b\n" +
 	"\x17STREAM_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
@@ -447,7 +703,13 @@ const file_vibesys_store_v1_content_proto_rawDesc = "" +
 	"\x13STREAM_STATE_OPENED\x10\x01\x12\x16\n" +
 	"\x12STREAM_STATE_ENDED\x10\x02\x12\x17\n" +
 	"\x13STREAM_STATE_FAILED\x10\x03\x12\x19\n" +
-	"\x15STREAM_STATE_DEGRADED\x10\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
+	"\x15STREAM_STATE_DEGRADED\x10\x04*\x7f\n" +
+	"\aLogGate\x12\x18\n" +
+	"\x14LOG_GATE_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0eLOG_GATE_BUILD\x10\x01\x12\x15\n" +
+	"\x11LOG_GATE_ACCURACY\x10\x02\x12\x16\n" +
+	"\x12LOG_GATE_BENCHMARK\x10\x03\x12\x17\n" +
+	"\x13LOG_GATE_VALIDATION\x10\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_content_proto_rawDescOnce sync.Once
@@ -461,25 +723,33 @@ func file_vibesys_store_v1_content_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_content_proto_rawDescData
 }
 
-var file_vibesys_store_v1_content_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_store_v1_content_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_vibesys_store_v1_content_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_vibesys_store_v1_content_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_vibesys_store_v1_content_proto_goTypes = []any{
-	(StreamKind)(0),      // 0: vibesys.store.v1.StreamKind
-	(StreamState)(0),     // 1: vibesys.store.v1.StreamState
-	(*MetricPoint)(nil),  // 2: vibesys.store.v1.MetricPoint
-	(*StreamRef)(nil),    // 3: vibesys.store.v1.StreamRef
-	(*BlobRef)(nil),      // 4: vibesys.store.v1.BlobRef
-	(*BlobAttached)(nil), // 5: vibesys.store.v1.BlobAttached
+	(StreamKind)(0),         // 0: vibesys.store.v1.StreamKind
+	(StreamState)(0),        // 1: vibesys.store.v1.StreamState
+	(LogGate)(0),            // 2: vibesys.store.v1.LogGate
+	(*MetricPoint)(nil),     // 3: vibesys.store.v1.MetricPoint
+	(*StreamRef)(nil),       // 4: vibesys.store.v1.StreamRef
+	(*BlobRef)(nil),         // 5: vibesys.store.v1.BlobRef
+	(*BlobAttached)(nil),    // 6: vibesys.store.v1.BlobAttached
+	(*StreamOwner)(nil),     // 7: vibesys.store.v1.StreamOwner
+	(*GateStreamOwner)(nil), // 8: vibesys.store.v1.GateStreamOwner
+	(StartupStage)(0),       // 9: vibesys.store.v1.StartupStage
 }
 var file_vibesys_store_v1_content_proto_depIdxs = []int32{
 	0, // 0: vibesys.store.v1.StreamRef.kind:type_name -> vibesys.store.v1.StreamKind
 	1, // 1: vibesys.store.v1.StreamRef.state:type_name -> vibesys.store.v1.StreamState
-	4, // 2: vibesys.store.v1.BlobAttached.blob:type_name -> vibesys.store.v1.BlobRef
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	7, // 2: vibesys.store.v1.StreamRef.owner:type_name -> vibesys.store.v1.StreamOwner
+	5, // 3: vibesys.store.v1.BlobAttached.blob:type_name -> vibesys.store.v1.BlobRef
+	9, // 4: vibesys.store.v1.StreamOwner.startup:type_name -> vibesys.store.v1.StartupStage
+	8, // 5: vibesys.store.v1.StreamOwner.gate:type_name -> vibesys.store.v1.GateStreamOwner
+	2, // 6: vibesys.store.v1.GateStreamOwner.gate:type_name -> vibesys.store.v1.LogGate
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_content_proto_init() }
@@ -487,15 +757,22 @@ func file_vibesys_store_v1_content_proto_init() {
 	if File_vibesys_store_v1_content_proto != nil {
 		return
 	}
+	file_vibesys_store_v1_lifecycle_proto_init()
 	file_vibesys_store_v1_content_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_store_v1_content_proto_msgTypes[1].OneofWrappers = []any{}
+	file_vibesys_store_v1_content_proto_msgTypes[4].OneofWrappers = []any{
+		(*StreamOwner_Startup)(nil),
+		(*StreamOwner_Gate)(nil),
+		(*StreamOwner_ToolBuild)(nil),
+		(*StreamOwner_Narration)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_content_proto_rawDesc), len(file_vibesys_store_v1_content_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   4,
+			NumEnums:      3,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

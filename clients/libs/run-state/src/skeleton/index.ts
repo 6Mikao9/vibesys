@@ -13,6 +13,7 @@ import {
 import type {CoreState} from '../state.js';
 import {skeletonCore} from './core.js';
 import {baselineFacts, capacityIntervals, comparisonFacts, inputFailures} from './facts.js';
+import {streamOwner} from './logs.js';
 import {measuredSpans} from './readings.js';
 import {screenSpans} from './spans.js';
 import {type StartupStep, startupSteps} from './startup.js';
@@ -177,7 +178,7 @@ export function readSkeleton(
       .filter(stream => stream.kind === StreamKind.LOG)
       .map(stream => ({
         id: stream.id,
-        owner: {kind: 'run', span_id: stream.span ?? null},
+        owner: streamOwner(stream),
         command: stream.title,
         retained_start: 0,
         size: screenSequence(stream.length ?? 0n),

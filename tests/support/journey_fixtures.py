@@ -15,7 +15,15 @@ from tests.support.lineage_fixture import lineage_fixture
 from tests.support.retained_events import replay_of
 from tests.support.shared_scenarios import regenerate
 
-from vs_proto.api import ClientReplay, ClientReplayBatch, Lifecycle, Oneof, Record, validate
+from vs_proto.api import (
+    ClientReplay,
+    ClientReplayBatch,
+    Lifecycle,
+    Oneof,
+    Record,
+    StreamRef,
+    validate,
+)
 from vs_runlog.api import fold_skeleton
 
 ROOT = Path(__file__).resolve().parents[2] / "clients/apps/desktop-shell/e2e/scenarios"
@@ -25,23 +33,58 @@ def project_scenario(name: str) -> ClientReplay:
     """Project a named declaration, refusing unknown fields through the real core contracts."""
     declaration = json.loads((ROOT / f"{name}.json").read_text())
     replay = replay_of(lineage_fixture(declaration) if "lineage" in declaration else declaration)
-    rows = [Record.from_binary(wire) for batch in replay.batches for wire in batch.records]
-    for index, native in enumerate(
-        declaration.get("nativeLifecycles", []), len(declaration["events"]) + 1
-    ):
-        previous = rows[-1]
-        row = Record(
-            seq=previous.seq + 1,
-            epoch=previous.epoch,
-            at=previous.at,
-            clock=previous.clock,
-            body=Oneof("lifecycle", Lifecycle.from_json(json.dumps(native))),
-        )
-        validate(row)
-        rows.append(row)
-        replay.batches.append(ClientReplayBatch(source_sequence=index, records=[row.to_binary()]))
-    fold_skeleton(rows, log_offset=0)
+    for item in declaration.get("nativeStreams", []):
+        reference = StreamRef.from_json(json.dumps(item["reference"]))
+        validate(reference)
+        if reference.id in replay.streams:
+            message = f"duplicate native stream id: {reference.id}"
+            raise ValueError(message)
+        content = item["text"].encode()
+        if reference.has_field("length") and reference.length != len(content):
+            message = f"stream {reference.id}: length differs from its content"
+            raise ValueError(message)
+        _append(replay, reference)
+        replay.streams[reference.id] = content
+    for native in declaration.get("nativeLifecycles", []):
+        _append(replay, Lifecycle.from_json(json.dumps(native)))
+    fold_skeleton(_records(replay), log_offset=0)
     return replay
+
+
+def _records(replay: ClientReplay) -> list[Record]:
+    return [Record.from_binary(wire) for batch in replay.batches for wire in batch.records]
+
+
+def _append(replay: ClientReplay, value: Lifecycle | StreamRef) -> None:
+    previous = _records(replay)[-1]
+    row = Record(
+        seq=previous.seq + 1,
+        epoch=previous.epoch,
+        at=previous.at,
+        clock=previous.clock,
+        body=Oneof("lifecycle", value) if isinstance(value, Lifecycle) else Oneof("stream", value),
+    )
+    validate(row)
+    replay.batches.append(
+        ClientReplayBatch(
+            source_sequence=replay.batches[-1].source_sequence + 1,
+            records=[row.to_binary()],
+        )
+    )
+
+
+def scenario_variants(name: str) -> dict[str, ClientReplay]:
+    """Cumulative native lifecycle prefixes, all derived from one canonical declaration."""
+    declaration = json.loads((ROOT / f"{name}.json").read_text())
+    if not declaration.get("nativeTransitions"):
+        return {}
+    current = project_scenario(name)
+    variants = {}
+    for transition in declaration.get("nativeTransitions", []):
+        _append(current, Lifecycle.from_json(json.dumps(transition["lifecycle"])))
+        fold_skeleton(_records(current), log_offset=0)
+        variants[transition["name"]] = ClientReplay.from_binary(current.to_binary())
+    return variants
 
 
 def live_artifacts() -> dict[str, bytes]:
@@ -90,6 +133,9 @@ if __name__ == "__main__":
         target.write_bytes(project_scenario(path.stem).to_binary())
         sys.stdout.write(f"wrote {target.name}\n")
         sys.stdout.flush()
+    for path in sorted(ROOT.glob("*.json")):
+        for name, replay in scenario_variants(path.stem).items():
+            (ROOT / f"{name}.pb").write_bytes(replay.to_binary())
     (ROOT / "source.sha256").write_text(fingerprint() + "\n")
     for name, payload in live_artifacts().items():
         (ROOT / name).write_bytes(payload)

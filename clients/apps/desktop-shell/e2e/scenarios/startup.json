@@ -55,17 +55,90 @@
         "stage": "starting_container",
         "state": "running"
       }
+    }
+  ],
+  "nativeStreams": [
+    {
+      "reference": {
+        "id": "startup-container",
+        "kind": "STREAM_KIND_LOG",
+        "title": "container output",
+        "state": "STREAM_STATE_OPENED",
+        "owner": {
+          "startup": "STARTUP_STAGE_STARTING_CONTAINER"
+        }
+      },
+      "text": "[docker] starting container\n[readiness] claude: binary ok\n"
     },
     {
-      "sequence": 4,
-      "type": "subprocess_output",
-      "timestamp": "2026-10-15T16:36:21Z",
-      "data": {
-        "kind": "subprocess_output",
-        "process_id": "startup-container",
-        "process_kind": "starting_container",
-        "stream": "stdout",
-        "content": "[docker] starting container\n[readiness] claude: binary ok\n"
+      "reference": {
+        "id": "candidate-build",
+        "kind": "STREAM_KIND_LOG",
+        "title": "cargo build",
+        "state": "STREAM_STATE_ENDED",
+        "length": "25",
+        "owner": {
+          "gate": {
+            "execution": "input-measurement",
+            "gate": "LOG_GATE_BUILD",
+            "attempt": 1
+          }
+        }
+      },
+      "text": "Finished release profile\n"
+    },
+    {
+      "reference": {
+        "id": "tool-build",
+        "kind": "STREAM_KIND_LOG",
+        "title": "tool output",
+        "state": "STREAM_STATE_ENDED",
+        "length": "11",
+        "owner": {
+          "toolBuild": "perf"
+        }
+      },
+      "text": "perf ready\n"
+    },
+    {
+      "reference": {
+        "id": "narration",
+        "kind": "STREAM_KIND_LOG",
+        "title": "run output",
+        "state": "STREAM_STATE_OPENED",
+        "owner": {
+          "narration": true
+        }
+      },
+      "text": "16:36:20 INFO container ready\n"
+    }
+  ],
+  "nativeTransitions": [
+    {
+      "name": "startup-running",
+      "lifecycle": {
+        "running": {}
+      }
+    },
+    {
+      "name": "startup-draining",
+      "lifecycle": {
+        "draining": {
+          "goal": "DRAIN_GOAL_PARK"
+        }
+      }
+    },
+    {
+      "name": "startup-ended",
+      "lifecycle": {
+        "ended": {
+          "outcome": "OUTCOME_FAILED",
+          "resumable": true,
+          "failure": {
+            "kind": "RUN_FAILURE_KIND_DEADLINE",
+            "reason": "W6’s benchmark timed out after 300 s."
+          }
+        }
       }
     }
   ]

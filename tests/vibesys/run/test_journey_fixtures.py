@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
-from tests.support.journey_fixtures import ROOT, fingerprint, project_scenario
+from tests.support.journey_fixtures import ROOT, fingerprint, project_scenario, scenario_variants
 
 from vs_proto.api import ClientReplay, Record, validate
 
@@ -47,3 +47,20 @@ def test_recorded_world_uses_the_native_trace_source() -> None:
     )
     assert queue["events"] == source["events"], "Regenerate the native journey fixtures"
     assert queue["objective"] == source["objective"]
+
+
+@pytest.mark.parametrize("name", ["startup"])
+def test_native_transitions_are_cumulative_golden_prefixes(name: str) -> None:
+    previous = project_scenario(name)
+    for variant, expected in scenario_variants(name).items():
+        actual = ClientReplay.from_binary((ROOT / f"{variant}.pb").read_bytes())
+        assert actual == expected, "Regenerate the native journey fixtures"
+        assert list(actual.batches[: len(previous.batches)]) == list(previous.batches)
+        assert len(actual.batches) == len(previous.batches) + 1
+        assert dict(actual.streams) == dict(previous.streams)
+        assert dict(actual.blobs) == dict(previous.blobs)
+        row = Record.from_binary(actual.batches[-1].records[-1])
+        assert row.body is not None
+        assert row.body.field == "lifecycle"
+        validate(row)
+        previous = actual

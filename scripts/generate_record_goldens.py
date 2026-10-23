@@ -282,39 +282,77 @@ def record_examples() -> dict[str, p.Record]:
         ],
     )
     bodies = {
-        "epoch_started": epoch,
-        "declaration_amended": p.EpochStarted.from_binary(epoch.to_binary()),
-        "legacy_event": p.LegacyEvent(json='{"type":"run_finished"}'),
-        "lifecycle": p.Lifecycle(state=p.Oneof("running", p.Running())),
-        "span": span_example("agent_turn", attrs["agent_turn"]),
-        "metric": p.MetricPoint(series="throughput", span="op:gate", value=125, clock=2),
-        "stream": p.StreamRef(
-            id="log-a",
-            kind=p.StreamKind.LOG,
-            span="op:gate",
-            title="Build",
-            state=p.StreamState.ENDED,
-            length=100,
+        "epoch_started": p.Record(body=p.Oneof("epoch_started", epoch)),
+        "declaration_amended": p.Record(
+            body=p.Oneof("declaration_amended", p.EpochStarted.from_binary(epoch.to_binary()))
         ),
-        "blob": p.BlobAttached(span="op:turn", role="raw_result", blob=blob),
-        "intent": p.IntentState(
-            control_id="request-a",
-            action=p.IntentAction.STEER,
-            step=p.IntentStep.APPLIED,
-            target=p.SteerTarget(kind=p.SteerTargetKind.ROLE, id="implementer"),
-            mode=p.SteerMode.NEXT_TURN,
+        "legacy_event": p.Record(
+            body=p.Oneof("legacy_event", p.LegacyEvent(json='{"type":"run_finished"}'))
         ),
-        "notice": p.Notice(
-            severity=p.Severity.WARNING,
-            code=p.NoticeCode.FRAMEWORK_WARNING,
-            message="An optional check failed",
-            span="op:gate",
+        "lifecycle": p.Record(
+            body=p.Oneof("lifecycle", p.Lifecycle(state=p.Oneof("running", p.Running())))
+        ),
+        "span": p.Record(body=p.Oneof("span", span_example("agent_turn", attrs["agent_turn"]))),
+        "metric": p.Record(
+            body=p.Oneof(
+                "metric", p.MetricPoint(series="throughput", span="op:gate", value=125, clock=2)
+            )
+        ),
+        "stream": p.Record(
+            body=p.Oneof(
+                "stream",
+                p.StreamRef(
+                    id="log-a",
+                    kind=p.StreamKind.LOG,
+                    span="op:gate",
+                    title="Build",
+                    owner=p.StreamOwner(
+                        kind=p.Oneof(
+                            "gate",
+                            p.GateStreamOwner(
+                                execution="evaluation-a",
+                                gate=p.LogGate.BUILD,
+                                attempt=1,
+                            ),
+                        )
+                    ),
+                    state=p.StreamState.ENDED,
+                    length=100,
+                ),
+            )
+        ),
+        "blob": p.Record(
+            body=p.Oneof("blob", p.BlobAttached(span="op:turn", role="raw_result", blob=blob))
+        ),
+        "intent": p.Record(
+            body=p.Oneof(
+                "intent",
+                p.IntentState(
+                    control_id="request-a",
+                    action=p.IntentAction.STEER,
+                    step=p.IntentStep.APPLIED,
+                    target=p.SteerTarget(kind=p.SteerTargetKind.ROLE, id="implementer"),
+                    mode=p.SteerMode.NEXT_TURN,
+                ),
+            )
+        ),
+        "notice": p.Record(
+            body=p.Oneof(
+                "notice",
+                p.Notice(
+                    severity=p.Severity.WARNING,
+                    code=p.NoticeCode.FRAMEWORK_WARNING,
+                    message="An optional check failed",
+                    span="op:gate",
+                ),
+            )
         ),
     }
-    result = {
-        name: p.Record(seq=1, at=p.Timestamp(seconds=123), epoch=1, body=p.Oneof(name, body))
-        for name, body in bodies.items()
-    }
+    result = bodies
+    for record in result.values():
+        record.seq = 1
+        record.at = p.Timestamp(seconds=123)
+        record.epoch = 1
     for kind, value in attrs.items():
         result["span_" + kind] = p.Record(
             seq=1,
@@ -323,19 +361,36 @@ def record_examples() -> dict[str, p.Record]:
             body=p.Oneof("span", span_example(kind, value)),
         )
     chats = {
-        "created": p.ChatSessionCreated(
-            id="default", title="Questions", provider="test", model="test"
+        "created": p.ChatRecord(
+            event=p.Oneof(
+                "created",
+                p.ChatSessionCreated(
+                    id="default", title="Questions", provider="test", model="test"
+                ),
+            )
         ),
-        "message": p.ChatMessage(
-            request_id="q-1", role=p.ChatRole.USER, content=p.Oneof("text", "Why?")
+        "message": p.ChatRecord(
+            event=p.Oneof(
+                "message",
+                p.ChatMessage(
+                    request_id="q-1", role=p.ChatRole.USER, content=p.Oneof("text", "Why?")
+                ),
+            )
         ),
-        "token": p.ChatToken(request_id="q-1", text="Because"),
-        "proposed_steer": p.ChatSteerProposed(
-            id="proposal-a",
-            request_id="q-1",
-            text="Compare allocations",
-            target=p.SteerTarget(kind=p.SteerTargetKind.RUN),
-            mode=p.SteerMode.NEXT_TURN,
+        "token": p.ChatRecord(
+            event=p.Oneof("token", p.ChatToken(request_id="q-1", text="Because"))
+        ),
+        "proposed_steer": p.ChatRecord(
+            event=p.Oneof(
+                "proposed_steer",
+                p.ChatSteerProposed(
+                    id="proposal-a",
+                    request_id="q-1",
+                    text="Compare allocations",
+                    target=p.SteerTarget(kind=p.SteerTargetKind.RUN),
+                    mode=p.SteerMode.NEXT_TURN,
+                ),
+            )
         ),
     }
     for name, value in chats.items():
@@ -343,36 +398,49 @@ def record_examples() -> dict[str, p.Record]:
             seq=1,
             at=p.Timestamp(seconds=123),
             epoch=1,
-            body=p.Oneof("chat", p.ChatRecord(event=p.Oneof(name, value))),
+            body=p.Oneof("chat", value),
         )
     states = {
-        "starting": p.Starting(
-            stage=p.StartupStage.BUILDING_IMAGE,
-            state=p.StageState.RUNNING,
-            progress=p.Progress(done=1, total=2, label="Build"),
+        "starting": p.Lifecycle(
+            state=p.Oneof(
+                "starting",
+                p.Starting(
+                    stage=p.StartupStage.BUILDING_IMAGE,
+                    state=p.StageState.RUNNING,
+                    progress=p.Progress(done=1, total=2, label="Build"),
+                ),
+            )
         ),
-        "running_hold": p.Running(hold=p.Hold(reason=p.Oneof("operator", p.OperatorHold()))),
-        "draining": p.Draining(goal=p.DrainGoal.PARK),
-        "parked": p.Parked(),
-        "ended": p.Ended(
-            outcome=p.Outcome.FAILED,
-            detail=packed(details["ended"]),
-            summary="No candidate",
-            resumable=True,
-            failure=p.RunFailure(
-                kind=p.RunFailureKind.BUDGET_EXHAUSTED,
-                reason="Budget exhausted",
-                detail=packed(details["run_failure"]),
-            ),
+        "running_hold": p.Lifecycle(
+            state=p.Oneof(
+                "running", p.Running(hold=p.Hold(reason=p.Oneof("operator", p.OperatorHold())))
+            )
+        ),
+        "draining": p.Lifecycle(state=p.Oneof("draining", p.Draining(goal=p.DrainGoal.PARK))),
+        "parked": p.Lifecycle(state=p.Oneof("parked", p.Parked())),
+        "ended": p.Lifecycle(
+            state=p.Oneof(
+                "ended",
+                p.Ended(
+                    outcome=p.Outcome.FAILED,
+                    detail=packed(details["ended"]),
+                    summary="No candidate",
+                    resumable=True,
+                    failure=p.RunFailure(
+                        kind=p.RunFailureKind.BUDGET_EXHAUSTED,
+                        reason="Budget exhausted",
+                        detail=packed(details["run_failure"]),
+                    ),
+                ),
+            )
         ),
     }
     for name, value in states.items():
-        state = "running" if name == "running_hold" else name
         result["lifecycle_" + name] = p.Record(
             seq=1,
             at=p.Timestamp(seconds=123),
             epoch=1,
-            body=p.Oneof("lifecycle", p.Lifecycle(state=p.Oneof(state, value))),
+            body=p.Oneof("lifecycle", value),
         )
     return result
 

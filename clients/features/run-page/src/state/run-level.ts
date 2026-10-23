@@ -33,10 +33,11 @@ import {
 } from './performance.js';
 import {workedWords} from './quota-pauses.js';
 import type {Direction, RunModel} from './run-model.js';
-import type {RunPageState} from './run-page.js';
+import {type RunPageState, runPhase} from './run-page.js';
 import {type LogScope, streamToFollow} from './scoped-logs.js';
 import {duration, formatValue, ratio} from './span-reading.js';
 import {openWaits} from './span-words.js';
+import {timelineView} from './views.js';
 import {type Route, routeLevel} from './zoom.js';
 
 /** What a tile's small trend line draws: the best so far over the run, from the input's value. */
@@ -786,6 +787,12 @@ export function logStreamToFollow(
   model: RunModel,
   route: Route,
 ): string | null {
+  if (runPhase(state).kind === 'starting') {
+    const active = timelineView(state).find(
+      stage => stage.state === 'active' && stage.streamId !== null,
+    )?.streamId;
+    return active && active !== state.selected ? active : null;
+  }
   const scope = shownLogScope(route, resolveZoom(model, route));
   return scope === null ? null : streamToFollow(state, scope);
 }
