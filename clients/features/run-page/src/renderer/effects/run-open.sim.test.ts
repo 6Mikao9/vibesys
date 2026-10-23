@@ -11,7 +11,13 @@ import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import {RecordSchema, SkeletonResponseSchema, TailRequestSchema} from '@vibesys/proto';
+import {
+  NoticeCode,
+  RecordSchema,
+  Severity,
+  SkeletonResponseSchema,
+  TailRequestSchema,
+} from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {MAX_ATTEMPTS, RECORD_WINDOW, RETRY_CAP_MS} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
@@ -25,7 +31,12 @@ import {
 } from '@vibesys/run-skeleton/testing';
 import {Seeded} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
-import {loadView, paintedSkeleton} from '../../state/index.js';
+import {
+  loadView,
+  paintedSkeleton,
+  projectSkeleton,
+  skeletonScreenState,
+} from '../../state/index.js';
 import {startGatewayRun} from '../index.js';
 
 const SEED = {
@@ -347,5 +358,43 @@ test('every load ends in content or a final state, whatever the replies are', as
     expect(['ready', 'failed'], label).toContain(view.kind);
     if (view.kind === 'ready') expect(painted, label).toBe(true);
     actor.stop();
+  }
+});
+
+/** A short run with an error notice early, then `trailing` ordinary records. */
+function withEarlyFailure(trailing: number): SimRun['records'] {
+  const base = storeRunFixture('short', 2, 1).records;
+  const notice = (message: string, severity: Severity) =>
+    create(RecordSchema, {
+      epoch: 1,
+      body: {case: 'notice', value: {severity, code: NoticeCode.INPUT_MEASUREMENT_FAILED, message}},
+    });
+  const all = [
+    ...base.slice(0, 4),
+    notice('Measurement unavailable', Severity.ERROR),
+    ...base.slice(4),
+    ...Array.from({length: trailing}, (_, index) => notice(`filler ${index}`, Severity.WARNING)),
+  ];
+  return all.map((record, index) => create(RecordSchema, {...record, seq: BigInt(index + 1)}));
+}
+
+test('a finished run’s failure diagnostic does not depend on how many records follow it', async () => {
+  for (const trailing of [0, 256, 257, 700]) {
+    const records = withEarlyFailure(trailing);
+    for (const keyframes of [[], [records.length], [Math.floor(records.length / 2)]]) {
+      const {clock, gateway, actor} = open({records, keyframes}, {rttMs: 20, bytesPerMs: 1400});
+      await until(clock, () => (actor.getSnapshot().context.ui.recordLog?.length ?? 0) >= 1);
+      await until(clock, () => false, MINUTE);
+      const {load, ui} = actor.getSnapshot().context;
+      if (!load) throw new Error('loaded history required');
+      const whole = projectSkeleton(load.skeleton, load.skeleton.throughSeq ?? 0n);
+      const label = `${trailing} records after the notice, checkpoint ${keyframes[0] ?? 'none'}`;
+      expect(
+        skeletonScreenState(SEED, load.skeleton, whole, ui).recordDiagnostic?.message,
+        label,
+      ).toBe('Measurement unavailable');
+      expect(gateway.callsTo('Tail').length, label).toBeLessThanOrEqual(1);
+      actor.stop();
+    }
   }
 });

@@ -9,6 +9,7 @@ import {
   RecordSchema,
   RunLiveness,
   RuntimeType,
+  Severity,
   SkeletonResponseSchema,
   SpanStatus,
   type Record as StoreRecord,
@@ -319,3 +320,29 @@ for (const kind of ['running', 'draining', 'parked', 'ended'] as const)
       }
     }
   });
+
+test('the fold keeps the latest error notice of each epoch, wherever the notices sit', () => {
+  let state = 7;
+  const next = (bound: number) => {
+    state = (state * 1103515245 + 12345) % 2 ** 31;
+    return state % bound;
+  };
+  for (let round = 0; round < 60; round += 1) {
+    const records = Array.from({length: next(300)}, (_, index) =>
+      create(RecordSchema, {
+        seq: BigInt(index + 1),
+        epoch: 1 + Math.floor((index * 3) / 300),
+        body: {
+          case: 'notice',
+          value: {severity: [Severity.WARNING, Severity.ERROR, Severity.FATAL][next(3)] ?? 1},
+        },
+      }),
+    );
+    const folded = foldSkeleton(seedSkeleton(), records);
+    const latest = new Map<number, bigint>();
+    for (const record of records)
+      if (record.body.case === 'notice' && record.body.value.severity >= Severity.ERROR)
+        latest.set(record.epoch, record.seq);
+    expect(new Map(folded.failures.map(record => [record.epoch, record.seq]))).toEqual(latest);
+  }
+});

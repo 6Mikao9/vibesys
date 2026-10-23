@@ -7,6 +7,7 @@ import {
   MetricHistorySchema,
   MetricVersionSchema,
   RecordSchema,
+  Severity,
   SpanHistorySchema,
   SpanVersionSchema,
   type Record as StoreRecord,
@@ -14,7 +15,10 @@ import {
 import {validateKeyframe} from './keyframe.js';
 
 /** Writer-only byte offsets do not belong to the client's data model. */
-export type Skeleton = Pick<Keyframe, 'spans' | 'metrics' | 'streams' | 'epochs' | 'lifecycles'> & {
+export type Skeleton = Pick<
+  Keyframe,
+  'spans' | 'metrics' | 'streams' | 'epochs' | 'lifecycles' | 'failures'
+> & {
   readonly throughSeq: bigint | undefined;
 };
 
@@ -27,8 +31,11 @@ export function seedSkeleton(keyframe?: Keyframe): Skeleton {
 }
 
 function copySkeleton(keyframe: Keyframe): Skeleton {
-  const {throughSeq, spans, metrics, streams, epochs, lifecycles} = clone(KeyframeSchema, keyframe);
-  return {throughSeq, spans, metrics, streams, epochs, lifecycles};
+  const {throughSeq, spans, metrics, streams, epochs, lifecycles, failures} = clone(
+    KeyframeSchema,
+    keyframe,
+  );
+  return {throughSeq, spans, metrics, streams, epochs, lifecycles, failures};
 }
 
 /**
@@ -76,6 +83,11 @@ function foldBody(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): voi
       break;
     case 'lifecycle':
       state.lifecycles.push(create(LifecycleVersionSchema, {seq, lifecycle: body.value}));
+      break;
+    case 'notice':
+      // The latest error notice of each epoch stands for all of them, as the writer's keyframe has it.
+      if (body.value.severity >= Severity.ERROR)
+        state.failures = [...state.failures.filter(kept => kept.epoch !== record.epoch), record];
       break;
     case 'stream': {
       const index = state.streams.findIndex(stream => stream.id === body.value.id);

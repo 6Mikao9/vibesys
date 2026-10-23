@@ -278,14 +278,18 @@ func (x *RunProcess) GetStartedAt() *timestamppb.Timestamp {
 // seek without parsing old records. The gateway reads only these two headers;
 // it passes the entire encoded keyframe through without interpreting its body.
 type Keyframe struct {
-	state         protoimpl.MessageState  `protogen:"open.v1"`
-	ThroughSeq    uint64                  `protobuf:"varint,1,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"`
-	LogOffset     uint64                  `protobuf:"varint,2,opt,name=log_offset,json=logOffset,proto3" json:"log_offset,omitempty"`
-	Spans         map[string]*SpanHistory `protobuf:"bytes,3,rep,name=spans,proto3" json:"spans,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Metrics       []*MetricHistory        `protobuf:"bytes,4,rep,name=metrics,proto3" json:"metrics,omitempty"`
-	Streams       []*StreamRef            `protobuf:"bytes,5,rep,name=streams,proto3" json:"streams,omitempty"`
-	Epochs        []*EpochVersion         `protobuf:"bytes,6,rep,name=epochs,proto3" json:"epochs,omitempty"`
-	Lifecycles    []*LifecycleVersion     `protobuf:"bytes,7,rep,name=lifecycles,proto3" json:"lifecycles,omitempty"`
+	state      protoimpl.MessageState  `protogen:"open.v1"`
+	ThroughSeq uint64                  `protobuf:"varint,1,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"`
+	LogOffset  uint64                  `protobuf:"varint,2,opt,name=log_offset,json=logOffset,proto3" json:"log_offset,omitempty"`
+	Spans      map[string]*SpanHistory `protobuf:"bytes,3,rep,name=spans,proto3" json:"spans,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Metrics    []*MetricHistory        `protobuf:"bytes,4,rep,name=metrics,proto3" json:"metrics,omitempty"`
+	Streams    []*StreamRef            `protobuf:"bytes,5,rep,name=streams,proto3" json:"streams,omitempty"`
+	Epochs     []*EpochVersion         `protobuf:"bytes,6,rep,name=epochs,proto3" json:"epochs,omitempty"`
+	Lifecycles []*LifecycleVersion     `protobuf:"bytes,7,rep,name=lifecycles,proto3" json:"lifecycles,omitempty"`
+	// The latest error notice of each epoch, whole, so a reader can show a run's diagnostic
+	// without reading the records the keyframe summarises. Keyframes written before this field
+	// carry none: such a reader sees only the notices after its keyframe.
+	Failures      []*Record `protobuf:"bytes,8,rep,name=failures,proto3" json:"failures,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -365,6 +369,13 @@ func (x *Keyframe) GetEpochs() []*EpochVersion {
 func (x *Keyframe) GetLifecycles() []*LifecycleVersion {
 	if x != nil {
 		return x.Lifecycles
+	}
+	return nil
+}
+
+func (x *Keyframe) GetFailures() []*Record {
+	if x != nil {
+		return x.Failures
 	}
 	return nil
 }
@@ -726,7 +737,7 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\x03pid\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\x03pid\x12\x1d\n" +
 	"\x05epoch\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x05epoch\x12A\n" +
 	"\n" +
-	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\"\xea\x03\n" +
+	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\"\xa0\x04\n" +
 	"\bKeyframe\x12(\n" +
 	"\vthrough_seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\n" +
 	"throughSeq\x120\n" +
@@ -738,7 +749,8 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\x06epochs\x18\x06 \x03(\v2\x1e.vibesys.store.v1.EpochVersionR\x06epochs\x12B\n" +
 	"\n" +
 	"lifecycles\x18\a \x03(\v2\".vibesys.store.v1.LifecycleVersionR\n" +
-	"lifecycles\x1aW\n" +
+	"lifecycles\x124\n" +
+	"\bfailures\x18\b \x03(\v2\x18.vibesys.store.v1.RecordR\bfailures\x1aW\n" +
 	"\n" +
 	"SpansEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
@@ -795,8 +807,9 @@ var file_vibesys_store_v1_skeleton_proto_goTypes = []any{
 	(*MetricSeriesDecl)(nil),      // 15: vibesys.store.v1.MetricSeriesDecl
 	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
 	(*StreamRef)(nil),             // 17: vibesys.store.v1.StreamRef
-	(*Span)(nil),                  // 18: vibesys.store.v1.Span
-	(*EpochStarted)(nil),          // 19: vibesys.store.v1.EpochStarted
+	(*Record)(nil),                // 18: vibesys.store.v1.Record
+	(*Span)(nil),                  // 19: vibesys.store.v1.Span
+	(*EpochStarted)(nil),          // 20: vibesys.store.v1.EpochStarted
 }
 var file_vibesys_store_v1_skeleton_proto_depIdxs = []int32{
 	12, // 0: vibesys.store.v1.RunHead.lifecycle:type_name -> vibesys.store.v1.Lifecycle
@@ -812,18 +825,19 @@ var file_vibesys_store_v1_skeleton_proto_depIdxs = []int32{
 	17, // 10: vibesys.store.v1.Keyframe.streams:type_name -> vibesys.store.v1.StreamRef
 	8,  // 11: vibesys.store.v1.Keyframe.epochs:type_name -> vibesys.store.v1.EpochVersion
 	9,  // 12: vibesys.store.v1.Keyframe.lifecycles:type_name -> vibesys.store.v1.LifecycleVersion
-	5,  // 13: vibesys.store.v1.SpanHistory.versions:type_name -> vibesys.store.v1.SpanVersion
-	18, // 14: vibesys.store.v1.SpanVersion.span:type_name -> vibesys.store.v1.Span
-	7,  // 15: vibesys.store.v1.MetricHistory.points:type_name -> vibesys.store.v1.MetricVersion
-	14, // 16: vibesys.store.v1.MetricVersion.point:type_name -> vibesys.store.v1.MetricPoint
-	19, // 17: vibesys.store.v1.EpochVersion.epoch:type_name -> vibesys.store.v1.EpochStarted
-	12, // 18: vibesys.store.v1.LifecycleVersion.lifecycle:type_name -> vibesys.store.v1.Lifecycle
-	4,  // 19: vibesys.store.v1.Keyframe.SpansEntry.value:type_name -> vibesys.store.v1.SpanHistory
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	18, // 13: vibesys.store.v1.Keyframe.failures:type_name -> vibesys.store.v1.Record
+	5,  // 14: vibesys.store.v1.SpanHistory.versions:type_name -> vibesys.store.v1.SpanVersion
+	19, // 15: vibesys.store.v1.SpanVersion.span:type_name -> vibesys.store.v1.Span
+	7,  // 16: vibesys.store.v1.MetricHistory.points:type_name -> vibesys.store.v1.MetricVersion
+	14, // 17: vibesys.store.v1.MetricVersion.point:type_name -> vibesys.store.v1.MetricPoint
+	20, // 18: vibesys.store.v1.EpochVersion.epoch:type_name -> vibesys.store.v1.EpochStarted
+	12, // 19: vibesys.store.v1.LifecycleVersion.lifecycle:type_name -> vibesys.store.v1.Lifecycle
+	4,  // 20: vibesys.store.v1.Keyframe.SpansEntry.value:type_name -> vibesys.store.v1.SpanHistory
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_skeleton_proto_init() }

@@ -1,8 +1,11 @@
 /** Skeleton readings are projected into the existing Run screen props; seeking is local. */
+import {toBinary} from '@bufbuild/protobuf';
 import {type HostRun, recordedProjectRoot} from '@vibesys/hosts';
+import {RecordSchema} from '@vibesys/proto';
 import {observeRun, type RunLivenessHint, type Skeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
+import {decodeRecordRows, type RecordRow} from '@vibesys/run-state/records';
 import {
   lifecycleState,
   readHeadline,
@@ -60,6 +63,23 @@ export function projectSkeleton(
     changed: new Set(),
   };
 }
+/**
+ * The current epoch's latest failure: the keyframe's own error notices and the lifecycle failures
+ * and notices of the record log, whichever is later. The keyframe keeps the notices a log window
+ * no longer reaches.
+ */
+function latestFailure(
+  skeleton: Skeleton,
+  recordLog: readonly RecordRow[] | undefined,
+): RecordRow | undefined {
+  const epoch = observeRun(skeleton).epoch;
+  const kept = decodeRecordRows(skeleton.failures.map(record => toBinary(RecordSchema, record)));
+  return [...kept, ...(recordLog ?? [])]
+    .filter(row => row.failure && row.epoch === epoch)
+    .sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : 1))
+    .at(-1);
+}
+
 export function skeletonScreenState(
   seed: RunPageSeed,
   skeleton: Skeleton,
@@ -106,9 +126,7 @@ export function skeletonScreenState(
   };
   return {
     ...ui,
-    recordDiagnostic: ui.recordLog
-      ?.filter(row => row.failure && row.epoch === observeRun(skeleton).epoch)
-      .at(-1),
+    recordDiagnostic: latestFailure(skeleton, ui.recordLog),
     lifecycleWord: lifecycle.word,
     positionWord: reading.latest === null ? 'Start' : duration(reading.latest),
     startupStages: reading.startup.map(step => ({

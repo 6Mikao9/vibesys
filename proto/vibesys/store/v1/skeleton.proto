@@ -76,6 +76,10 @@ message Keyframe {
   repeated StreamRef streams = 5;
   repeated EpochVersion epochs = 6;
   repeated LifecycleVersion lifecycles = 7;
+  // The latest error notice of each epoch, whole, so a reader can show a run's diagnostic
+  // without reading the records the keyframe summarises. Keyframes written before this field
+  // carry none: such a reader sees only the notices after its keyframe.
+  repeated Record failures = 8;
 }
 
 message SpanHistory {
