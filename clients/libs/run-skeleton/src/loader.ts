@@ -31,25 +31,23 @@ export function skeletonLoaderMachineFor(
 ): typeof skeletonLoaderMachine {
   return skeletonLoaderMachine.provide({
     actors: {
-      skeleton: fromPromise(({input, signal}) =>
-        transport
+      skeleton: fromPromise(({input, signal}) => {
+        const lease = descriptors.lease();
+        return transport
           .unary(
             `${SERVICE}${HostService.method.skeleton.name}`,
             toBinary(
               SkeletonRequestSchema,
-              create(SkeletonRequestSchema, {
-                runId: input,
-                knownDescriptorsSha256: descriptors.known(),
-              }),
+              create(SkeletonRequestSchema, {runId: input, knownDescriptorsSha256: lease.known}),
             ),
             signal,
           )
           .then(bytes => {
-            const response = descriptors.restore(fromBinary(SkeletonResponseSchema, bytes));
+            const response = lease.restore(fromBinary(SkeletonResponseSchema, bytes));
             records(response.records);
             return response;
-          }),
-      ),
+          });
+      }),
       tail: fromPromise<void, TailInput>(async ({input, signal}) => {
         const request = toBinary(
           TailRequestSchema,

@@ -1,7 +1,7 @@
 /** Additive store.v1 read path. No desktop or legacy run-session coupling. */
 
 export type {SkeletonCache} from './cache-role.js';
-export {DescriptorCache, DescriptorsUnknown} from './descriptors.js';
+export {DescriptorCache, type DescriptorLease, DescriptorsUnknown} from './descriptors.js';
 export {type RecordsFanout, recordsFanout} from './fanout.js';
 export {
   type RecordsListener,
