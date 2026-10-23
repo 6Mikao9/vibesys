@@ -1,12 +1,14 @@
 """One-shot migration of pre-schema runs to the typed run log.
 
 TEMPORARY: this module, ``vibesys host convert-run(s)`` and their tests are deleted after the
-transport flip (tracking issue: TBD-MIGRATION, to be filed). The product never converts on read;
-a run that has not been migrated is listed as "old format". Run it once per project, offline::
+transport flip (tracking issue: #3441). The product never converts on read; a run that has not
+been migrated is listed as "old format". Run it once per project, offline::
 
     vibesys host convert-runs --project <project directory>
 
-Only the run histories that exist need to migrate; it is not a general converter.
+Each converted run also brings its chat conversations along (``import_legacy_chat``), so a
+thread of the preceding app is still there after the migration. Only the run histories that
+exist need to migrate; it is not a general converter.
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
+from vibesys.chat._legacy import import_legacy_chat
+from vibesys.chat._session import ChatRuntime
 from vibesys.events import CoreEvent, CoreEventType
 from vibesys.run.runlog_tee import JOURNAL_EVENT_MAX_BYTES, RunLogTee
 from vs_decode.api import Unreadable, decode_json
@@ -133,6 +137,11 @@ def convert_run(
         return ConversionResult(ConversionStatus.SKIPPED, str(exc))
     if result.status in {ConversionStatus.CONVERTED, ConversionStatus.EXISTS}:
         project.publish_run_for(project.root, run_id)
+        imported = import_legacy_chat(str(project.root), run_id, ChatRuntime(clock, threads))
+        if imported:
+            result = ConversionResult(
+                result.status, f"{result.reason}; imported {len(imported)} chat threads"
+            )
     if project.state.state_store_namespace(run_id).read_bytes("store.json") is not None:
         result = ConversionResult(
             result.status, result.reason + "; store.json retained, state.pb conversion is phase 3"

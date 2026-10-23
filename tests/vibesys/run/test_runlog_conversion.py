@@ -93,6 +93,59 @@ def test_conversion_cannot_replace_a_live_writers_destination(
     assert not (destination.parent / "streams").exists()
 
 
+def test_conversion_brings_the_runs_chat_conversations_and_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    journal.emit(
+        CoreEventType.RUN_STARTED,
+        "start",
+        data=RunStartedData(outer_loop="single-agent", input="input"),
+    )
+    record_trace(journal)
+    journal.emit(CoreEventType.RUN_FINISHED, "finish")
+    directory = Project.log_directory_for(project.root, "run-1")
+    chat = {"timestamp": "2026-01-01T00:00:01+00:00", "type": "chat", "data": {"kind": "chat"}}
+    lines = [
+        {
+            "sequence": 1,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "type": "chat_thread_created",
+            "chat_thread_id": "a1",
+            "data": {
+                "kind": "chat_thread_created",
+                "thread_id": "a1",
+                "title": "Why",
+                "provider": "claude",
+                "model": "opus",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+        },
+        {
+            **chat,
+            "sequence": 2,
+            "text": "why?",
+            "chat_thread_id": "a1",
+            "data": {"kind": "chat", "answer": "because"},
+        },
+        {**chat, "sequence": 3, "text": "and?", "data": {"kind": "chat", "answer": "nothing"}},
+    ]
+    (directory / "run-events.jsonl").write_text(
+        "\n".join(json.dumps(line) for line in lines) + "\n"
+    )
+
+    first = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    assert first.status is ConversionStatus.CONVERTED
+    assert "imported 2 chat threads" in first.reason
+    for thread, messages in (("a1", 2), ("default", 2)):
+        log = Project.chat_session_directory_for(project.root, "run-1", thread) / "session.log"
+        with log.open("rb") as stream:
+            assert len(list(RunLogReader(stream))) == 1 + messages
+    again = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    assert again.status is ConversionStatus.EXISTS
+    assert "imported" not in again.reason
+
+
 @pytest.mark.parametrize("clock_start", [-0.5, 0.0, 100.25])
 def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock_start: float
