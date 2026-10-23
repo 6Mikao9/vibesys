@@ -36,16 +36,19 @@ function readingsBySpan(view: StoreView): ReadonlyMap<string, readonly Reading[]
 
 export function measuredSpans(spans: readonly Span[], view: StoreView): Span[] {
   const bySpan = readingsBySpan(view);
-  const input = spans
-    .filter(
-      span =>
-        span.label?.kind === 'gate' &&
-        (JSON.parse(span.label.attrs_json ?? '{}') as Record<string, unknown>)['subject'] ===
-          'GATE_SUBJECT_INPUT',
-    )
-    .at(-1);
-  const inputReadings = input ? (bySpan.get(input.id) ?? []) : [];
   const metric = view.epochs.at(-1)?.epoch?.run?.objectives[0]?.series;
+  const inputs = spans.filter(
+    span =>
+      span.label?.kind === 'gate' &&
+      (JSON.parse(span.label.attrs_json ?? '{}') as Record<string, unknown>)['subject'] ===
+        'GATE_SUBJECT_INPUT',
+  );
+  // An input has several gates (build, validation, benchmark), in any order: its value is the one
+  // that measured the objective, never whichever gate came last.
+  const input =
+    inputs.filter(span => bySpan.get(span.id)?.some(item => item.name === metric)).at(-1) ??
+    inputs.at(-1);
+  const inputReadings = input ? (bySpan.get(input.id) ?? []) : [];
   const inputValue = inputReadings.find(item => item.name === metric)?.value;
   return spans.map(span => {
     if (span.label?.kind !== 'gate') return span;

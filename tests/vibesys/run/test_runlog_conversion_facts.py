@@ -174,6 +174,8 @@ def _write(journal: EventJournal, clock: ManualClock, legacy: Legacy) -> None:
         started = clock.now()
         name = f"{legacy.gate_span_prefix}:{index}"
         if legacy.gate_events and legacy.metric is not None:
+            # Each round's benchmark is reported twice: with no execution, then with its own.
+            _gate_event(journal, legacy.metric, reading.value, execution=None)
             _gate_event(journal, legacy.metric, reading.value, execution=f"vs-{index}")
         rows = (
             []
@@ -301,6 +303,15 @@ def _check_input(head: p.RunHead, state: p.Keyframe, legacy: Legacy) -> None:
     assert subjects.count(p.GateSubject.CANDIDATE) == len(legacy.readings)
     assert head.objective is not None
     assert head.objective.input_value == pytest.approx(legacy.input_reading)
+    # A reader takes the latest version of each point: the input's must still be the input's.
+    latest = [
+        version.point.value
+        for history in state.metrics
+        if history.series == legacy.metric
+        for version in history.points
+        if version.point is not None and version.point.span == "gate:input:benchmark:default"
+    ][-1]
+    assert latest == pytest.approx(legacy.input_reading)
 
 
 def _check_row_reads_the_log(root: Path, head: p.RunHead) -> None:

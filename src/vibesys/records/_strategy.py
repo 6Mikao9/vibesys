@@ -208,7 +208,10 @@ def gate(projection: Projection) -> None:
         projection.span(span)
         return
     attrs.reused = data.reused
-    if data.value is not None and data.metric is not None:
+    # An older journal repeats the input's identity for each round's executionless benchmark event
+    # (the same reading its execution's event then carries): the first reading is the input's.
+    repeated = not known and (data.metric, span.id) in projection.metric_values
+    if data.value is not None and data.metric is not None and not repeated:
         if known and not span.has_field("ended_at") and not projection.final:
             projection.pending.append(projection.event.model_dump_json().encode())
         else:
