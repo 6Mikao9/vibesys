@@ -198,7 +198,8 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w1-turn"
         }
       }
     },
@@ -222,7 +223,8 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w1-turn"
         }
       }
     },
@@ -245,7 +247,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":352.1}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":352.1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":352.1,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           }
         }
@@ -270,7 +272,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":352.1}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":352.1,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":352.1,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           }
         }
@@ -372,7 +374,8 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w2-turn"
         }
       }
     },
@@ -396,7 +399,8 @@
             "kind": "agent_turn",
             "title": "implementer",
             "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
-          }
+          },
+          "invocation": "inv-op:w2-turn"
         }
       }
     },
@@ -419,7 +423,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":395.4}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":395.4,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":395.4,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           }
         }
@@ -444,7 +448,7 @@
           "label": {
             "kind": "gate",
             "title": "correctness + benchmark",
-            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":395.4}",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":395.4,\"metrics\":[{\"name\":\"total_ops_per_sec\",\"value\":395.4,\"unit\":\"ops/s\",\"direction\":\"max\"}]}",
             "verdict": "passed"
           }
         }

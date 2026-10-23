@@ -13,6 +13,7 @@ from pathlib import Path
 
 from tests.support.lineage_fixture import lineage_fixture
 from tests.support.retained_events import replay_of
+from tests.support.shared_scenarios import regenerate
 
 from vs_proto.api import ClientReplay, ClientReplayBatch, Lifecycle, Oneof, Record, validate
 from vs_runlog.api import fold_skeleton
@@ -106,3 +107,5 @@ if __name__ == "__main__":
     (ROOT.parents[3] / "libs/run-fixtures/src/data/queue-rs-live.json").write_text(
         json.dumps(trace, indent=2, ensure_ascii=False) + "\n"
     )
+
+    regenerate()

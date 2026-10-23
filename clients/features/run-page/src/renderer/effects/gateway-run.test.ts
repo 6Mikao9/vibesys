@@ -703,6 +703,8 @@ test('regression: native turn content crosses the real reader for every stream s
         undefined,
         {transcripts: context.transcripts},
       );
+      expect(earlier.run.core?.usageRecords).toEqual(screen.run.core?.usageRecords);
+      expect(headerView(earlier).agents).toEqual(headerView(screen).agents);
       expect(
         earlier.run.core?.transcript.some(entry => entry.content.includes('Thinking 🦊')),
       ).toBe(false);

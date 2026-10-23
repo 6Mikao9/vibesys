@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from vibesys.events import CoreEvent, CoreEventType
 from vibesys.records.api import MappedEvent, MappingState, map_event
-from vs_proto.api import ClientReplay, ClientReplayBatch
+from vs_proto.api import ClientReplay, ClientReplayBatch, EpochStarted
 
 CORE_TYPES = frozenset(kind.value for kind in CoreEventType)
 
@@ -39,7 +40,8 @@ def core_event(original: dict[str, Any]) -> dict[str, Any] | None:
         return None
     event = {key: value for key, value in original.items() if key not in DECORATIONS}
     if "invocation_id" in event:
-        event["execution_id"] = event.pop("invocation_id")
+        invocation = event.pop("invocation_id")
+        event.setdefault("execution_id", invocation)
     if kind == "output":
         data = event.pop("data")
         event["type"] = "subprocess_output"
@@ -73,9 +75,29 @@ def _project(state: MappingState, event: dict[str, Any], original: dict[str, Any
         raise FixtureRefusedError(message) from error
 
 
+def _units(fixture: dict[str, Any]) -> dict[str, str]:
+    """Native fixture headers declare units from the canonical scenario, before any readings."""
+    objective = fixture["objective"]
+    units = {objective["metric"]: objective["unit"]}
+    for event in fixture["events"]:
+        span = (event.get("data") or {}).get("span") or {}
+        label = span.get("label") or {}
+        if label.get("kind") != "gate":
+            continue
+        attrs = json.loads(label.get("attrs_json") or "{}")
+        for row in attrs.get("metrics", []):
+            unit = row.get("unit") or ""
+            previous = units.setdefault(row["name"], unit)
+            if previous != unit:
+                message = f"conflicting metric unit for {row['name']}"
+                raise ValueError(message)
+    return units
+
+
 def replay_of(fixture: dict[str, Any]) -> ClientReplay:
     """The records, blobs and streams the shipping projection makes of a fixture's events."""
     replay = ClientReplay()
+    units = _units(fixture)
     streams: dict[str, bytearray] = {}
     state = MappingState(str(fixture["runId"]), native_intents=True, project_root="/work/queue-rs")
     for original in fixture["events"]:
@@ -84,6 +106,11 @@ def replay_of(fixture: dict[str, Any]) -> ClientReplay:
             continue
         projected = _project(state, event, original)
         state = projected.state
+        for record in projected.records:
+            value = None if record.body is None else record.body.value
+            if isinstance(value, EpochStarted):
+                for series in value.series:
+                    series.unit = units.get(series.name, series.unit)
         replay.batches.append(
             ClientReplayBatch(
                 source_sequence=original["sequence"],

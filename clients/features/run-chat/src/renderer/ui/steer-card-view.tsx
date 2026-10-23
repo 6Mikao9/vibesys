@@ -58,7 +58,7 @@ function Draft(props: CardProps): JSX.Element {
           {view.error}
         </Text>
       )}
-      <Row gap="space-3">
+      <Row gap="space-3" align="start">
         <Button
           variant="primary"
           size="sm"

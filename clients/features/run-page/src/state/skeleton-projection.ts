@@ -18,6 +18,7 @@ import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
 import {settleIdeas} from './settled-ideas.js';
 import {duration} from './span-reading.js';
+import {STARTUP_LABELS} from './startup-stages.js';
 
 export {skeletonPositions} from '@vibesys/run-state/skeleton';
 
@@ -102,6 +103,11 @@ export function skeletonScreenState(
     content,
     whole.headline?.inputValue,
   );
+  // Usage is a run-wide ledger; seeking changes transcript visibility, never its totals or identity.
+  const currentCore =
+    ui.view.at === 'live'
+      ? reading.core
+      : readSkeleton(skeleton, seekSkeleton(skeleton, skeleton.throughSeq ?? 0n), '', content).core;
   const lifecycle = observedLifecycle(skeleton, hint);
   const status = lifecycle.status;
   const ended = status === 'completed' || status === 'stopped' || status === 'failed';
@@ -126,6 +132,14 @@ export function skeletonScreenState(
     baseOverview: whole.overview,
     headOverview: whole.overview,
     positions: AppendLog.of(skeletonPositions(skeleton)),
+    calls: AppendLog.of(
+      Object.values(skeleton.spans)
+        .flatMap(history => {
+          const start = history.versions[0];
+          return start?.span?.label?.kind === 'planning_call' ? [Number(start.seq)] : [];
+        })
+        .sort((left, right) => left - right),
+    ),
     latest: whole.latest,
     baseLatest: whole.latest,
   };
@@ -136,14 +150,7 @@ export function skeletonScreenState(
     positionWord: reading.latest === null ? 'Start' : duration(reading.latest),
     startupStages: reading.startup.map(step => ({
       id: step.stage,
-      label: (
-        {
-          probing_workspace: 'Workspace',
-          building_image: 'Image',
-          building_tools: 'Tools',
-          starting_container: 'Container',
-        } as const
-      )[step.stage],
+      label: STARTUP_LABELS[step.stage],
       state: step.state,
       streamId: null,
     })),
@@ -152,7 +159,11 @@ export function skeletonScreenState(
       run === null ? {kind: 'historical', status: null} : {kind: ended ? 'ended' : 'live', run},
     history: {kind: 'read'},
     session: null,
-    run: {...runPageInitial(seed).run, trace, core: reading.core},
+    run: {
+      ...runPageInitial(seed).run,
+      trace,
+      core: {...currentCore, transcript: reading.core.transcript},
+    },
     logs: {
       kind: 'listed',
       instanceId: seed.identity.runId,

@@ -12,6 +12,7 @@ import {
   attemptLines,
   attemptStrip,
   FAILED_DENSE,
+  legendItems,
   stepSegments,
   type TimelineRow,
   type TimelineRows,
@@ -123,6 +124,9 @@ describe('the timeline legend', () => {
           row => !row.lane && row.segments.some(each => each.kind === 'grey'),
         );
         expect(shown.legend.pauses).toBe(paused);
+        expect(legendItems(shown.legend).some(entry => entry.label === 'Failed ideas')).toBe(
+          shown.rows.some(row => row.lane),
+        );
       }
     }
   });

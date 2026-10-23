@@ -8,6 +8,7 @@ import {
   AgentTurnAttrsSchema,
   AttemptOutcome,
   Change,
+  ClientReplaySchema,
   Direction,
   DrainGoal,
   KeyframeSchema,
@@ -21,6 +22,7 @@ import {
   RuntimeType,
   SkeletonResponseSchema,
   SpanFailureKind,
+  SpanHistorySchema,
   SpanSchema,
   SpanStatus,
   StageState,
@@ -137,33 +139,38 @@ test('comparison links, adoption, baselines and capacity spans use the existing 
 });
 
 test('startup reports only recorded stages and the gateway never offers legacy commands', () => {
-  const initial = storeRunFixture('live', 1).records.slice(0, 1);
-  const records = [
-    ...initial,
-    create(RecordSchema, {
-      seq: 2n,
-      epoch: 1,
-      at: {seconds: 1700000001n},
-      body: {
-        case: 'lifecycle',
-        value: {
-          state: {
-            case: 'starting',
-            value: {stage: StartupStage.BUILDING_TOOLS, state: StageState.RUNNING},
+  for (const [stage, id, label] of [
+    [StartupStage.PROBING_WORKSPACE, 'probing_workspace', 'Probing the workspace'],
+    [StartupStage.BUILDING_IMAGE, 'building_image', 'Building the agent image'],
+    [StartupStage.BUILDING_TOOLS, 'building_tools', 'Building the agent tools'],
+    [StartupStage.STARTING_CONTAINER, 'starting_container', 'Starting the agent container'],
+  ] as const) {
+    const initial = storeRunFixture('live', 1).records.slice(0, 1);
+    const records = [
+      ...initial,
+      create(RecordSchema, {
+        seq: 2n,
+        epoch: 1,
+        at: {seconds: 1700000001n},
+        body: {
+          case: 'lifecycle',
+          value: {
+            state: {
+              case: 'starting',
+              value: {stage, state: StageState.RUNNING},
+            },
           },
         },
-      },
-    }),
-  ];
-  const skeleton = foldSkeleton(seedSkeleton(), records);
-  const model = projectSkeleton(skeleton, 2n);
-  const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
-  expect(timelineView(state)).toEqual([
-    {id: 'building_tools', label: 'Tools', state: 'active', streamId: null},
-  ]);
-  expect(headerView(state).pauseNow.shown).toBe(false);
-  expect(headerView(state).pause.shown).toBe(false);
-  expect(headerView(state).status.label).toBe('Starting');
+      }),
+    ];
+    const skeleton = foldSkeleton(seedSkeleton(), records);
+    const model = projectSkeleton(skeleton, 2n);
+    const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
+    expect(timelineView(state)).toEqual([{id, label, state: 'active', streamId: null}]);
+    expect(headerView(state).pauseNow.shown).toBe(false);
+    expect(headerView(state).pause.shown).toBe(false);
+    expect(headerView(state).status.label).toBe('Starting');
+  }
 });
 
 test('park, drain and interruption keep their status words; past logs have no invented offsets', () => {
@@ -642,5 +649,41 @@ test('retained real usage and cache costs match the old projection through repla
     const ordered = (rows: readonly UsageRecord[]) =>
       rows.map(spend).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     expect(ordered(reading.core.usageRecords)).toEqual(ordered(source.records));
+  }
+});
+
+test('regression: native planning-call markers survive keyframes across call counts', () => {
+  const replay = fromBinary(
+    ClientReplaySchema,
+    readFileSync(
+      new URL('../../../../libs/run-fixtures/src/native/finished-run.pb', import.meta.url),
+    ),
+  );
+  const records = replay.batches.flatMap(batch =>
+    batch.records.map(bytes => fromBinary(RecordSchema, bytes)),
+  );
+  const base = foldSkeleton(seedSkeleton(), records);
+  const planning = Object.values(base.spans).find(
+    history => history.versions[0]?.span?.label?.kind === 'planning_call',
+  )?.versions[0];
+  if (!planning?.span) throw new Error('Canonical scenario requires planning calls');
+  for (const count of [0, 1, 2, 15, 24]) {
+    const spans = Object.fromEntries(
+      Object.entries(base.spans).filter(
+        ([, history]) => history.versions[0]?.span?.label?.kind !== 'planning_call',
+      ),
+    );
+    for (let index = 0; index < count; index += 1) {
+      const id = `planning-${index}`;
+      spans[id] = create(SpanHistorySchema, {
+        versions: [{...planning, seq: BigInt(index + 2), span: {...planning.span, id}}],
+      });
+    }
+    const skeleton = {...base, spans};
+    const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n);
+    const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
+    expect([...state.run.trace.calls]).toEqual(
+      Array.from({length: count}, (_, index) => index + 2),
+    );
   }
 });

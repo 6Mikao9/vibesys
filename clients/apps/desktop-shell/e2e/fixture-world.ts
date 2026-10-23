@@ -68,6 +68,7 @@ const complete: [MissingMethods] extends [never] ? true : MissingMethods = true;
 void complete;
 
 interface FixtureWindow extends Window {
+  fakeGateway: {calls(): readonly string[]};
   fakeHost: {
     listing(listing: unknown): void;
     emit(events: readonly unknown[]): void;
@@ -224,11 +225,23 @@ export async function playLive(page: Page, fixture: RunFixture): Promise<void> {
     beforeDrop,
   );
   if (fixture.dropAfter === undefined) return;
+  const subscriptions = () =>
+    page.evaluate(() => {
+      const calls = (window as unknown as FixtureWindow).fakeGateway.calls();
+      return ['Tail', 'WatchRuns'].map(
+        method => calls.filter(call => call.endsWith(`/${method}`)).length,
+      );
+    });
+  const before = await subscriptions();
   await page.evaluate(() => (window as unknown as FixtureWindow).fakeHost.drop());
   await page.evaluate(
     events => (window as unknown as FixtureWindow).fakeHost.emit(events),
     afterDrop,
   );
+  // A reconnecting fixture is ready after both real reader subscriptions resume.
+  await expect
+    .poll(async () => (await subscriptions()).every((count, index) => count > (before[index] ?? 0)))
+    .toBe(true);
 }
 
 /** Fails the test when the page asked the bridge for the same thing over and over. */
