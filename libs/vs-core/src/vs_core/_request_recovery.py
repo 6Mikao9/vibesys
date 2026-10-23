@@ -664,11 +664,15 @@ def _waiting_on(
         )
         for child in children
     ]
+    # A session settles its own state at its own pace (a turn to inspect, a close to send), and
+    # an ensure whose executor was the host instance that is gone owns nothing it could learn
+    # from that: its check settles by the instance being gone (`settlement`), never on the session.
+    waits_on_sessions = record is not None and not _instance_replaced(record, epoch)
     subjects = (
         tuple(dict.fromkeys(owned_job_subject(job) for job in jobs if job is not None))
         if children and None not in jobs
         else ()
-    ) + _owner_sessions(record, context)
+    ) + (_owner_sessions(record, context) if waits_on_sessions else ())
     return requests, subjects
 
 

@@ -52,12 +52,16 @@ INVOCATION = core.InvocationRef(
 LEASE = core.ResourceId(root="session:run:plan")
 
 
-def recover(records: list[core.RequestRecord], executor: Executor) -> core.CoreState:
+def recover(
+    records: list[core.RequestRecord], executor: Executor, *, session_waits: bool = False
+) -> core.CoreState:
     """Resume a run whose agent session holds the turn, with the executor answering as given.
 
     As `test_recovery_unanswered.recover`, over a state that also knows the session and the
-    invocation the dead host's requests belong to.
+    invocation the dead host's requests belong to. With ``session_waits`` the session is still
+    settling: it waits on the requests the stop left open, as the real one did.
     """
+    waiting = tuple(row.request_id for row in records if row.phase != core.RequestPhase.COMPLETED)
     state = recovering_state(*records)
     state = state.model_copy(
         update={
@@ -70,6 +74,7 @@ def recover(records: list[core.RequestRecord], executor: Executor) -> core.CoreS
                         phase=core.SessionPhase.CLOSING,
                         invocation=TURN.invocation_id,
                         resource_id=LEASE,
+                        wait=core.WaitOn(requests=waiting) if session_waits and waiting else None,
                     ),
                 ),
                 invocations=(
@@ -197,13 +202,15 @@ def test_a_stop_that_left_agent_sessions_in_flight_does_not_block_the_resume() -
         Left.CLOSE_ENDED_AT_CLOSE,
     ],
     executor=Executor.BEGUN,
+    session_waits=True,
 )
 @given(
     kinds=st.lists(st.sampled_from(list(Left)), min_size=1, max_size=len(Left), unique=True),
     executor=st.sampled_from(list(Executor)),
+    session_waits=st.booleans(),
 )
 def test_recovery_never_blocks_on_a_request_of_a_gone_host_instance(
-    kinds: list[Left], executor: Executor
+    kinds: list[Left], executor: Executor, *, session_waits: bool
 ) -> None:
     """Whatever the dead host's sessions left, and however the new executor answers.
 
@@ -212,7 +219,7 @@ def test_recovery_never_blocks_on_a_request_of_a_gone_host_instance(
     goes out again unless the executor sealed its result.
     """
     records = [left_by_dead_host(kind, number) for number, kind in enumerate(kinds)]
-    state = recover(records, executor)
+    state = recover(records, executor, session_waits=session_waits)
     resolutions = checks_of(state)
     assert state.records.recovery.phase == core.RecoveryPhase.READY
     assert not {"pending", "blocked"} & set(resolutions.values())
