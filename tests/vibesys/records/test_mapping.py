@@ -31,10 +31,14 @@ def test_every_event_kind_has_exactly_one_documented_disposition() -> None:
 
 
 def event(
-    kind: e.CoreEventType, data: e.CoreEventData | None = None, **fields: object
+    kind: e.CoreEventType,
+    data: e.CoreEventData | None = None,
+    *,
+    sequence: int = 1,
+    **fields: object,
 ) -> e.CoreEvent:
     return e.CoreEvent.model_validate(
-        dict(type=kind, data=data, timestamp=_AT, run_id="run-a", sequence=1, **fields)
+        dict(type=kind, data=data, timestamp=_AT, run_id="run-a", sequence=sequence, **fields)
     )
 
 
@@ -303,18 +307,26 @@ def last_span(result: MappedEvent) -> p.Span:
     return body.value.span
 
 
-@given(tokens=st.integers(min_value=0, max_value=100000), stage=_TEXT)
-def test_whole_span_updates_keep_usage_and_runtime_enrichment(tokens: int, stage: str) -> None:
+@given(
+    tokens=st.integers(min_value=0, max_value=100000),
+    stage=_TEXT,
+    first=st.integers(min_value=1, max_value=10000),
+)
+def test_whole_span_updates_keep_usage_and_runtime_enrichment(
+    tokens: int, stage: str, first: int
+) -> None:
+    # A journal sequence identifies one observation across every event kind.
     source = native_span(
         "agent_turn", {"agent": "agent-a", "role": "implementer"}, invocation="turn-a"
     )
-    state = map_event(MappingState("run-a"), source).state
+    state = map_event(MappingState("run-a"), source.model_copy(update={"sequence": first})).state
     started = event(
         e.CoreEventType.AGENT_EXECUTION_STARTED,
         e.AgentExecutionStartedData(
             stage=stage, activity=e.AgentExecutionActivityData(mode="thinking", summary="working")
         ),
         execution_id="turn-a",
+        sequence=first + 1,
     )
     state = map_event(state, started).state
     state = map_event(
@@ -323,12 +335,13 @@ def test_whole_span_updates_keep_usage_and_runtime_enrichment(tokens: int, stage
             e.CoreEventType.TURN_USAGE_RECORDED,
             e.TurnUsageData(input_tokens=tokens),
             execution_id="turn-a",
+            sequence=first + 2,
         ),
     ).state
     ended = native_span(
         "agent_turn", {"agent": "agent-a", "role": "implementer"}, invocation="turn-a", ended=True
     )
-    result = map_event(state, ended)
+    result = map_event(state, ended.model_copy(update={"sequence": first + 3}))
     span = last_span(result)
     assert len(result.state.spans) == 1
     assert span.id == "op:work"
