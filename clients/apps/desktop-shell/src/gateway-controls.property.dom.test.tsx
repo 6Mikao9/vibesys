@@ -462,6 +462,11 @@ test('property: a successor on any independent stream exposes a stalled lifecycl
           },
           RunLiveness.ALIVE,
         );
+        // The gateway states the epoch of every head it sends.
+        const stated = fromBinary(WatchRunsResponseSchema, new Uint8Array(snapshot.watchRuns));
+        if (!stated.head) throw new Error('head required');
+        stated.head.epoch = epoch;
+        snapshot.watchRuns = [...toBinary(WatchRunsResponseSchema, stated)];
         // The host has the successor, while the already-open lifecycle follower stalls.
         peer.input.skeleton = snapshot.skeleton;
         peer.input.watchRuns = snapshot.watchRuns;
