@@ -1478,6 +1478,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         raise refusal
     check_declared_target(event.control.target, state.run.declaration)
     new_epoch = state.run.status in (RunStatus.TERMINAL, RunStatus.PARKED)
+    ended = state.run.result is not None
     state, lifting = _lifted(state, event.control)
     # A capacity wait leaves the run paused: it only records when the run resumes itself.
     waits = event.control.when == "capacity_returns"
@@ -1518,7 +1519,11 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         }
         action = actions.get(event.control.action, "resume")
         result = propagate(updated, (AdmissionControl(action=action),), dispatch)
-    lifted = (StopLiftRecorded(control=event.control, new_epoch=new_epoch),) if lifting else ()
+    lifted = (
+        (StopLiftRecorded(control=event.control, new_epoch=new_epoch, ended=ended),)
+        if lifting
+        else ()
+    )
     return result.model_copy(
         update={"events": (*result.events, ControlChanged(control=event.control), *lifted)}
     )
@@ -1879,9 +1884,8 @@ def _recover_writer(state: CoreState, event: RecoveryStarted, dispatch: Dispatch
 def _resume_epoch(state: CoreState, event: EpochResumed, dispatch: Dispatch) -> Transition:
     """Construct fresh run authority only for an explicit operator Resume."""
     previous_epoch = state.records.recovery.epoch
-    restart_search = (
-        state.run.park is not None or state.run.result is not None or stop_standing(state.run)
-    )
+    ended = state.run.result is not None
+    restart_search = state.run.park is not None or ended or stop_standing(state.run)
     successor = previous_epoch > 0 and event.epoch > previous_epoch
     control = ControlInput(
         control_id=ControlId(root=f"epoch:{event.epoch}"), action="resume", when="now"
@@ -1908,10 +1912,7 @@ def _resume_epoch(state: CoreState, event: EpochResumed, dispatch: Dispatch) -> 
             update={
                 "events": (
                     *result.events,
-                    StopLiftRecorded(
-                        control=control,
-                        new_epoch=True,
-                    ),
+                    StopLiftRecorded(control=control, new_epoch=True, ended=ended),
                 )
             }
         )

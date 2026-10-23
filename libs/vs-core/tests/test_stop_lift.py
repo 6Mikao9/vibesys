@@ -10,6 +10,7 @@ half.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -216,3 +217,80 @@ def test_new_epoch_replays_every_live_wait_instead_of_restarting_from_old_checkp
     assert ended(run).reason == f"no-winner: {sum(range(count))}"
     assert not run.state.dropped
     assert not run.state.restart_settled
+
+
+# -- a resume that reopens an ended run -------------------------------------------------------
+
+
+class Marker(core.Value):
+    """Published each time the root starts, so a test sees a restart."""
+
+    started: int
+
+
+async def waits_for_a_decision(ctx: core.Flow, config: Config) -> core.NoWinner:
+    """A root winding down: it asked for the winner to be adopted and waits for the answer."""
+    ctx.checkpoint(config)
+    ctx.publish(Marker(started=len(ctx.settlements)))
+    await ask(ctx, "adopt")
+    return core.NoWinner(reason="adopted")
+
+
+def _asked_so_far(run: FlowRun[Config]) -> int:
+    """How many decisions the flows have made, from the start of the run."""
+    return len(run.decisions)
+
+
+def test_a_resume_that_reopens_an_ended_run_asks_again_for_the_decision_core_never_took(
+    begin: Begin,
+) -> None:
+    """Regression: the root waited for ever on a decision the ended run's core never kept.
+
+    A run core ended while the root was adopting its winner is reopened by a resume. The adoption
+    the root waits for belongs to the authority that ended: nothing will ever answer it, and
+    the root, not concluded, was left idle (`run.concluded` was the only reason to restart).
+    """
+    run = begin(waits_for_a_decision)
+    before = _asked_so_far(run)
+    run.stop("recovery-blocked")
+    run.lift_stop(new_epoch=True, ended=True)
+    assert run.state.base is not None, "every flow started again from its checkpoint"
+    assert _asked_so_far(run) > before, "the root asked again"
+
+
+@pytest.mark.parametrize("new_epoch", [False, True], ids=["same-epoch", "new-epoch"])
+def test_a_resume_of_a_run_core_did_not_end_leaves_the_flows_waiting_for_their_decisions(
+    begin: Begin, *, new_epoch: bool
+) -> None:
+    """A pause, a park or a stop the search is still taking: core holds what the flows await."""
+    run = begin(waits_for_a_decision)
+    before = _asked_so_far(run)
+    run.stop("pause")
+    run.lift_stop(new_epoch=new_epoch)
+    assert run.state.base is None
+    assert _asked_so_far(run) == before
+
+
+class Resume(StrEnum):
+    """How a run was resumed: where core stood when the operator's resume came."""
+
+    LIVE = "live"
+    """Core had not ended the run: it was paused, parked or stopped, and holds the decisions."""
+    ENDED = "ended"
+    """Core had ended the run, and the resume reopened it."""
+
+
+@given(
+    stops=st.integers(0, 3), resumes=st.lists(st.sampled_from(list(Resume)), min_size=1, max_size=4)
+)
+def test_no_flow_awaits_a_decision_of_an_authority_that_ended(
+    stops: int, resumes: list[Resume]
+) -> None:
+    """Whatever stopped and resumed before: a resume of an ended run asks every wait again."""
+    run = start(waits_for_a_decision, restarting=False)
+    for index, resume in enumerate(resumes):
+        before = _asked_so_far(run)
+        if index < stops:
+            run.stop(f"stop-{index}")
+        run.lift_stop(f"resume-{index}", new_epoch=True, ended=resume is Resume.ENDED)
+        assert (_asked_so_far(run) > before) is (resume is Resume.ENDED)

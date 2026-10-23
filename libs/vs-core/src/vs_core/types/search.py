@@ -166,11 +166,17 @@ class StopLifted(Value):
 
     Work the stop already ended stays ended (a task that took ``Stopped`` has returned); a
     task that had not taken it yet no longer will, and ``ctx.stop_requested`` is false again.
+
+    ``ended`` says the resume reopened a run core had ended. Whatever the flows still wait for
+    belongs to the authority that ended: core answered some of it with the end and never took
+    the rest (a decision made after the end), so nothing will answer it. They start again from
+    their checkpoints.
     """
 
     kind: Literal["stop_lifted"] = "stop_lifted"
     control: ControlInput
     new_epoch: bool = Field(default=False, exclude_if=lambda value: not value)
+    ended: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class TimeReached(Value):

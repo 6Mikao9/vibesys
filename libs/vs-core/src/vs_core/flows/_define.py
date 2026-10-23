@@ -281,9 +281,11 @@ class FlowDriver[C]:
             raise ContractError(("event",), "an event is journaled as itself or as a record")
         # A new writer does not change the search code or discard its journal.
         # Live flows still own their pending decisions, even across a park.
-        if lifting and run.concluded:
-            # The search ended the run under the stop, so no flow is left to take the lift:
-            # every flow starts again from its latest checkpoint, with the stop taken back.
+        if lifting and (run.concluded or event.ended):
+            # The search ended the run under the stop, so no flow is left to take the lift, or
+            # core ended the run and the resume reopened it: what the flows still wait for
+            # belongs to the authority that ended. Every flow starts again from its latest
+            # checkpoint, with the stop taken back.
             state, run, restarting = self._restart(state, view, lifted=True)
             restarted.extend(restarting)
         decisions = run.feed(item, view, None)

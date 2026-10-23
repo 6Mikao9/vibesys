@@ -585,14 +585,22 @@ class FlowRun[C]:
             )
         )
 
-    def lift_stop(self, control: str = "resume") -> None:
-        """The operator resumes the run, which lifts the stop that stood."""
+    def lift_stop(
+        self, control: str = "resume", *, new_epoch: bool = False, ended: bool = False
+    ) -> None:
+        """The operator resumes the run, which lifts the stop that stood.
+
+        ``new_epoch`` says the resume opened a new epoch; ``ended`` that core had ended the run
+        before it, so the flows wait for answers nobody will give.
+        """
         self._timeline.append(control)
         self.send(
             StopLifted(
                 control=ControlInput(
                     control_id=ControlId(root=control), action="resume", when="now"
-                )
+                ),
+                new_epoch=new_epoch,
+                ended=ended,
             )
         )
 

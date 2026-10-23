@@ -259,11 +259,15 @@ class StopLiftRecorded(Value):
     Core publishes it after the ``ControlChanged`` of the same control, so a consumer sees
     the stop and then its lift. It is recorded only while the stop stands and the run has not
     committed its ending (`vs_core._run_pause.control_refusal`).
+
+    ``ended`` says the run had committed its ending when the resume came, so the resume
+    reopened a run core had ended (`vs_core._run_pause.reopened`).
     """
 
     kind: Literal["stop_lift_recorded"] = "stop_lift_recorded"
     control: ControlInput
     new_epoch: bool = Field(default=False, exclude_if=lambda value: not value)
+    ended: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class RunEnded(Value):
