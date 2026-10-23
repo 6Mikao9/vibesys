@@ -3,8 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -57,15 +55,8 @@ func (h *host) Mutate(ctx context.Context, request *apiv1.MutateRequest) (*apiv1
 		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host mutate cancelled"), nil
 	}
 	if err != nil || result.ExitCode != 0 {
-		message := fmt.Sprintf("vibesys host %s exited %d", dispatched.CLI, result.ExitCode)
-		if err != nil {
-			message += ": " + err.Error()
-		}
-		category := hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL
-		if request.GetConvertSavedRuns() != nil && conversionCommandMissing(result, err) {
-			category = hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED
-		}
-		return mutateFailure(category, message+"\n"+result.Stderr), nil
+		category, message := commandFailure(dispatched.CLI, result, err)
+		return mutateFailure(category, message), nil
 	}
 	response := &apiv1.MutateResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.Result == nil {
@@ -92,28 +83,4 @@ func mutateFailure(category hostv1.FailureCategory, message string) *apiv1.Mutat
 	return &apiv1.MutateResponse{Result: &apiv1.MutateResponse_Failure{Failure: &hostv1.OperationFailure{
 		Category: category, Message: text,
 	}}}
-}
-
-// conversionCommandMissing recognizes argparse refusing this optional command only.
-func conversionCommandMissing(result hostcommand.Result, err error) bool {
-	var exit *exec.ExitError
-	if result.ExitCode != 2 || len(result.Output) != 0 || (err != nil && !errors.As(err, &exit)) {
-		return false
-	}
-	for _, line := range strings.Split(result.Stderr, "\n") {
-		if _, evidence, ok := strings.Cut(line, "invalid choice:"); ok {
-			words := strings.Fields(evidence)
-			if len(words) > 0 && strings.Trim(words[0], "'\"") == "convert-saved-runs" {
-				return true
-			}
-		}
-		if _, evidence, ok := strings.Cut(line, "unrecognized arguments:"); ok {
-			for _, word := range strings.Fields(evidence) {
-				if strings.Trim(word, "'\"") == "convert-saved-runs" {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
