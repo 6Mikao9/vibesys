@@ -249,6 +249,25 @@ def test_a_routing_prompt_saved_before_the_base_was_shown_still_decodes() -> Non
     assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, restored, profiler_kind="neuron")
 
 
+@settings(max_examples=examples(pr=20, nightly=200))
+@given(context=_PRE_ROUND)
+def test_a_routing_prompt_saved_before_the_base_fields_keeps_its_digest(
+    context: PreRoundPrompt,
+) -> None:
+    """Regression: a stored router prompt re-encoded under this code must keep its digest.
+
+    Recovery proves each recorded request against its stored digest. Decoded under a schema
+    that added ``base_revision``, ``base_round`` and ``base_value``, a prompt written before
+    them re-encoded with those keys at their defaults, its digest no longer matched, and a
+    paused run's resume ended with "recovery blocked: outcome unknown" for a render that had
+    long succeeded. The digest is taken over ``model_dump(mode="json")``, so a prompt saved
+    without those fields must re-encode to exactly the document that was saved.
+    """
+    saved = context.model_dump(mode="json", exclude={"base_revision", "base_round", "base_value"})
+
+    assert PreRoundPrompt.model_validate(saved).model_dump(mode="json") == saved
+
+
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_PRE_ROUND)
 def test_the_routing_prompt_points_at_the_base_revision_not_the_input_in_the_workspace(

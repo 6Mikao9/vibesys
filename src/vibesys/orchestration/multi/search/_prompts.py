@@ -32,6 +32,10 @@ class PromptTemplate(StrEnum):
     JUDGE = "judge"
 
 
+def _is_none(value: object) -> bool:
+    return value is None
+
+
 class PreRoundPrompt(RolePromptContext):
     """The routing decision before a new hypothesis: is fresh profile evidence wanted?"""
 
@@ -39,14 +43,17 @@ class PreRoundPrompt(RolePromptContext):
 
     template: Literal[PromptTemplate.PRE_ROUND] = PromptTemplate.PRE_ROUND
     round_number: int = Field(gt=0)
-    base_revision: RevisionRef | None = None
+    # These three fields were added after runs had recorded router prompts. Each is left out of
+    # the JSON while None, so a prompt saved before them re-encodes to the document that was
+    # saved: recovery proves every recorded request against the digest of that document.
+    base_revision: RevisionRef | None = Field(default=None, exclude_if=_is_none)
     """The round's base: the best revision so far, the input while none beat it.
 
     None only in prompts saved before routers were shown the base; every new round sets it.
     """
-    base_round: int | None = None
+    base_round: int | None = Field(default=None, exclude_if=_is_none)
     """The round whose idea made ``base_revision``; None when it is the input."""
-    base_value: float | None = None
+    base_value: float | None = Field(default=None, exclude_if=_is_none)
     """The headline the trusted gates measured of ``base_revision``; None when they have not."""
     has_history: bool
     regression_kind: str | None = None
