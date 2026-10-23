@@ -103,7 +103,6 @@ function newRunMain(
     unary: (id, bytes, signal) => gateway.unary(hostKey(id), MUTATE_METHOD, bytes, signal),
   });
   return new NewRunMain({
-    connect: id => hosts.connection(id),
     remember: run => settings.updateRecent(recent => remember(recent, run)),
     now: () => Date.now(),
     registryStart: (host, inputs, signal) => starts.start(host, inputs, signal),

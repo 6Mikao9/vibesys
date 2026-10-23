@@ -4,7 +4,6 @@
  */
 import {
   ConnectionError,
-  type ConnectionLease,
   isHostUnsupported,
   type RegistryCatalog,
   type RegistryProjects,
@@ -29,6 +28,7 @@ import type {
   WelcomeRequest,
 } from '@vibesys/ipc';
 import type {StoredRecentRun} from '@vibesys/settings';
+import {NATIVE_FEATURES} from './native-features.js';
 
 /** The New run requests a view sends, as `@vibesys/ipc` parsed them. */
 export type NewRunMainRequest = Extract<
@@ -48,8 +48,6 @@ export type NewRunMainRequest = Extract<
 >;
 
 export interface NewRunMainDeps {
-  /** A lease on `host`'s helper connection (the hosts feature's). */
-  readonly connect: (host: HostId) => Promise<ConnectionLease>;
   /** Record a started run in Recent (the settings store). */
   readonly remember: (run: StoredRecentRun) => Promise<void>;
   readonly now: () => number;
@@ -103,7 +101,7 @@ export class NewRunMain {
       case 'start-run':
         return this.#start(request.host, request.inputs);
       case 'helper-features':
-        return this.#features(request.host);
+        return this.#features();
       case 'task-goal':
         return this.#taskGoal(request.host, request.project, request.task);
     }
@@ -139,15 +137,9 @@ export class NewRunMain {
     return catalog;
   }
 
-  /** What `host`'s helper agreed to in `hello`, once the host is ready. */
-  async #features(host: HostId): Promise<readonly HelperFeature[]> {
-    try {
-      await using lease = await this.#deps.connect(host);
-      await lease.connection.ready();
-      return [...(lease.connection.features ?? [])];
-    } catch (error) {
-      throw plain(error, `Could not reach ${hostLabel(host)}`);
-    }
+  /** What the host offers: the gateway's whole registry; an older host refuses call by call. */
+  async #features(): Promise<readonly HelperFeature[]> {
+    return NATIVE_FEATURES;
   }
 
   /**

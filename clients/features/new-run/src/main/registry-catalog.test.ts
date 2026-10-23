@@ -17,9 +17,6 @@ const INPUTS: RunInputs = {
 
 function subject(peer: FakeReadCatalog) {
   return new NewRunMain({
-    connect: async () => {
-      throw new Error('helper connection must not be acquired');
-    },
     remember: async () => {},
     now: () => 1,
     registryCatalog: registryRunCatalog(peer),
@@ -73,11 +70,8 @@ test('v2 read failures propagate without helper fallback', async () => {
   }
 });
 
-test('v2 with a missing catalog fails instead of negotiating helper features', async () => {
+test('a missing catalog fails instead of answering', async () => {
   const main = new NewRunMain({
-    connect: async () => {
-      throw new Error('helper acquired');
-    },
     remember: async () => {},
     now: () => 1,
   });
