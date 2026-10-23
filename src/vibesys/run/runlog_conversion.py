@@ -526,6 +526,37 @@ def iter_conversions(
             yield RunConversion(str(entry), result, cursor=cursor)
 
 
+@dataclass(frozen=True)
+class ConversionObservation:
+    """What a listing may say of a run's history without converting it."""
+
+    available: bool
+    detail: str = ""
+
+
+def observe_conversion(project: Project, run_id: str) -> ConversionObservation:
+    """Read one run's published head, or its final refusal; never the journal, never a write."""
+    path = project.run_log_path_for(project.root, run_id)
+    try:
+        head = path.with_name("run.head")
+        if head.is_file():
+            validate(RunHead.from_binary(head.read_bytes()))
+            if path.is_file():
+                return ConversionObservation(available=True)
+        refusal = path.with_name("run.conversion.pb")
+        if refusal.is_file():
+            value = RunConversionRefusal.from_binary(refusal.read_bytes())
+            validate(value)
+            return ConversionObservation(available=False, detail=value.reason)
+        pending = path.with_name("core-events.jsonl").is_file()
+        return ConversionObservation(
+            available=False,
+            detail="History conversion pending" if pending else "journal is missing",
+        )
+    except (OSError, ValueError) as error:
+        return ConversionObservation(available=False, detail=str(error))
+
+
 def convert_runs(
     project: Project,
     *,

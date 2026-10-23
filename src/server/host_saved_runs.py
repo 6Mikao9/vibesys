@@ -20,33 +20,14 @@ __all__ = ["page_saved_runs"]
 
 
 def _availability(project: Project, run: pb.SavedRun) -> None:
-    """Read one bounded head or refusal; conversion and publication have their own owner."""
-    wire = import_module("vs_proto.api")
-    pb = wire.host_payloads
-    path = project.run_log_path_for(project.root, run.run_id)
-    head = path.with_name("run.head")
-    refusal = path.with_name("run.conversion.pb")
-    try:
-        if head.is_file():
-            value = wire.RunHead.from_binary(head.read_bytes())
-            wire.validate(value)
-            if path.is_file():
-                run.imported = pb.SavedRunImport.AVAILABLE
-                return
-        run.imported = pb.SavedRunImport.UNAVAILABLE
-        if refusal.is_file():
-            value = wire.RunConversionRefusal.from_binary(refusal.read_bytes())
-            wire.validate(value)
-            run.detail = value.reason
-        else:
-            run.detail = (
-                "History conversion pending"
-                if path.with_name("core-events.jsonl").is_file()
-                else "journal is missing"
-            )
-    except (OSError, ValueError) as error:
-        run.imported = pb.SavedRunImport.UNAVAILABLE
-        run.detail = str(error)
+    """Say whether history is readable now; conversion and publication have their own owner."""
+    pb = import_module("vs_proto.api").host_payloads
+    observed = import_module("vibesys.api.transport").observe_conversion(project, run.run_id)
+    run.imported = (
+        pb.SavedRunImport.AVAILABLE if observed.available else pb.SavedRunImport.UNAVAILABLE
+    )
+    if not observed.available:
+        run.detail = observed.detail
 
 
 def page_saved_runs(

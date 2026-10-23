@@ -112,6 +112,9 @@ def message_examples() -> dict[str, Message]:
     examples["RunConversionRefusal"] = p.RunConversionRefusal(
         journal_size=1, journal_modified_ns=1, reason="cannot convert: historical attrs"
     )
+    examples["RunConversionReceipt"] = p.RunConversionReceipt(
+        journal_size=1, journal_modified_ns=1, projection_version=1
+    )
     examples["Failure"] = p.Failure(kind=p.SpanFailureKind.OUTCOME, message="Gate failed")
     return examples
 
