@@ -4,6 +4,7 @@ export type {SkeletonCache} from './cache-role.js';
 export {DescriptorCache, type DescriptorLease, DescriptorsUnknown} from './descriptors.js';
 export {type RecordsFanout, recordsFanout} from './fanout.js';
 export {
+  FAILURE_PAGES,
   type RecordsListener,
   type RunTransport,
   skeletonLoaderMachineFor,

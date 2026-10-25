@@ -20,7 +20,7 @@ import {
   TailRequestSchema,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
-import {MAX_ATTEMPTS, RECORD_WINDOW, RETRY_CAP_MS} from '@vibesys/run-skeleton';
+import {FAILURE_PAGES, MAX_ATTEMPTS, RECORD_WINDOW, RETRY_CAP_MS} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {
@@ -388,10 +388,14 @@ async function bannerOf(records: SimRun['records'], run: Partial<SimRun>) {
   await until(clock, () => false, MINUTE);
   const {load, ui} = actor.getSnapshot().context;
   if (!load) throw new Error('loaded history required');
-  const whole = projectSkeleton(load.skeleton, load.skeleton.throughSeq ?? 0n);
+  const whole = projectSkeleton(load.skeleton, load.skeleton.throughSeq ?? 0n, '', {
+    diagnosticsIncomplete: load.diagnosticsIncomplete,
+  });
+  const screen = skeletonScreenState(SEED, load.skeleton, whole, ui);
   actor.stop();
   return {
-    message: skeletonScreenState(SEED, load.skeleton, whole, ui).recordDiagnostic?.message,
+    message: screen.recordDiagnostic?.message,
+    diagnosticsIncomplete: screen.diagnosticsIncomplete,
     tails: gateway.callsTo('Tail').length,
   };
 }
@@ -430,38 +434,66 @@ test('a finished run’s failure diagnostic does not depend on how many records 
     const through = at === 'final' ? records.length : Math.floor(records.length / 2);
     const mode = legacy ? 'legacy' : untrackedFailures ? 'untracked failures' : 'tracked';
     const label = `${count} records after the notice, ${at} checkpoint, ${mode}`;
-    const {message, tails} = await bannerOf(records, {
+    const {message, diagnosticsIncomplete, tails} = await bannerOf(records, {
       keyframes: at === 'none' ? [] : [through],
       legacyKeyframes: legacy,
       untrackedFailures,
     });
-    expect(message, label).toBe('Measurement unavailable');
-    // Tracked keyframes need no recovery. Legacy keyframes have a bounded best-effort read.
-    if (!untrackedFailures)
-      expect(tails, label).toBeLessThanOrEqual(
-        1 + Math.ceil(records.length / Number(RECORD_WINDOW)),
-      );
+    const outsideBudget = untrackedFailures && count > Number(RECORD_WINDOW) * FAILURE_PAGES;
+    expectDiagnosticSearch(
+      {message, diagnosticsIncomplete},
+      {label, outsideBudget, untrackedFailures, records, tails},
+    );
   }
 });
 
-test('an old keyframe with no failure ever recorded costs a bounded read, not a replay', async () => {
-  const records = withEarlyFailure(2400, false);
-  const {clock, gateway, actor} = open(
-    {records, keyframes: [records.length], untrackedFailures: true},
-    {rttMs: 20, bytesPerMs: 1400},
-  );
-  await until(clock, () => false, MINUTE);
-  expect(gateway.callsTo('Tail').length).toBeLessThanOrEqual(
-    1 + Math.ceil(records.length / Number(RECORD_WINDOW)),
-  );
-  const read = new Set(
-    gateway
-      .callsTo('Tail')
-      .map(call => Number(fromBinary(TailRequestSchema, call.request).fromSeq)),
-  );
-  // Exhausting the epoch shows that the absence is complete rather than silently assuming it.
-  expect(Math.min(...read)).toBe(Number(records[0]?.seq ?? 0n));
-  actor.stop();
+function expectDiagnosticSearch(
+  outcome: {message: string | undefined; diagnosticsIncomplete: boolean | undefined},
+  expected: {
+    label: string;
+    outsideBudget: boolean;
+    untrackedFailures: boolean;
+    records: SimRun['records'];
+    tails: number;
+  },
+) {
+  const {label, outsideBudget, untrackedFailures, records, tails} = expected;
+  expect(outcome.message, label).toBe(outsideBudget ? undefined : 'Measurement unavailable');
+  expect(outcome.diagnosticsIncomplete, label).toBe(outsideBudget);
+  // Every recovery is bounded, irrespective of how many records follow the notice.
+  const budget = untrackedFailures
+    ? 1 + FAILURE_PAGES
+    : 1 + Math.ceil(records.length / Number(RECORD_WINDOW));
+  expect(tails, label).toBeLessThanOrEqual(budget);
+}
+
+test('failure recovery has a fixed request budget and reports an incomplete search', async () => {
+  for (const trailing of [10_000]) {
+    const records = withEarlyFailure(trailing, false);
+    const {clock, gateway, actor} = open(
+      {records, keyframes: [records.length], untrackedFailures: true},
+      {rttMs: 20, bytesPerMs: 1400},
+    );
+    await until(
+      clock,
+      () => actor.getSnapshot().context.load?.diagnosticsIncomplete === true,
+      MINUTE,
+    );
+    expect(gateway.callsTo('Tail').length, `${trailing} records`).toBeLessThanOrEqual(
+      1 + FAILURE_PAGES,
+    );
+    expect(actor.getSnapshot().context.load?.diagnosticsIncomplete, `${trailing} records`).toBe(
+      true,
+    );
+    const read = new Set(
+      gateway
+        .callsTo('Tail')
+        .map(call => Number(fromBinary(TailRequestSchema, call.request).fromSeq)),
+    );
+    // The read stops above the epoch start; reaching it would prove that no failure was recorded.
+    expect(Math.min(...read), `${trailing} records`).toBeGreaterThan(Number(records[0]?.seq ?? 0n));
+    actor.stop();
+  }
 });
 
 test('a checkpoint stored over the read limit is skipped though its reply would fit', async () => {
